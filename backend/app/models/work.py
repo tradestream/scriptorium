@@ -61,6 +61,7 @@ class Work(Base):
     characters: Mapped[Optional[str]] = mapped_column(Text, nullable=True)   # ["Hamlet", "Ophelia", ...]
     places: Mapped[Optional[str]] = mapped_column(Text, nullable=True)        # ["Elsinore", "Denmark", ...]
     awards: Mapped[Optional[str]] = mapped_column(Text, nullable=True)        # [{"name": "Hugo", "year": 1966, "category": "Best Novel"}, ...]
+    content_warnings: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # {"graphic": [...], "moderate": [...], "minor": [...]}
     doi: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     # JSON array of field names locked from enrichment edits
     locked_fields: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default=None)

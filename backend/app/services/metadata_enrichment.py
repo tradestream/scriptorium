@@ -7,7 +7,8 @@ Providers (in priority order):
   4. Open Library — open, no key required, good fallback
   5. ISBNDB       — ISBN-focused, large database (requires key)
   6. ComicVine    — comics/graphic novels only (requires key)
-  7. Calibre      — wraps fetch-ebook-metadata (Amazon plugin + others, no key needed)
+  7. CrossRef     — academic/DOI data, open
+  8. StoryGraph   — content warnings + genre tags, no key required
 
 The `enrich()` method tries providers in order and returns the first
 sufficient result. Providers without a configured API key are skipped
@@ -891,6 +892,65 @@ class CrossRefProvider(Provider):
         return result if result.get("title") else None
 
 
+# ── StoryGraph provider ─────────────────────────────────────────────────────────
+
+class StoryGraphProvider(Provider):
+    """Fetches content warnings, genre tags, and ratings from The StoryGraph.
+
+    Uses the unofficial `storygraph-api` library. No API key required.
+    Returns content_warnings (dict with graphic/moderate/minor lists), tags,
+    description, and average_rating.
+    """
+
+    name = "storygraph"
+
+    def is_available(self) -> bool:
+        try:
+            import storygraph_api  # noqa: F401
+            return True
+        except ImportError:
+            return False
+
+    async def search(self, title: str, authors: list[str], isbn: Optional[str], is_comic: bool = False) -> Optional[dict]:
+        if not self.is_available() or is_comic:
+            return None
+        try:
+            import asyncio
+            import json as _j
+            from storygraph_api import Book as SGBook
+            sg = SGBook()
+            query = f"{title} {authors[0]}" if authors else title
+
+            loop = asyncio.get_event_loop()
+            raw_results = await loop.run_in_executor(None, sg.search, query)
+            results = _j.loads(raw_results) if isinstance(raw_results, str) else raw_results
+            if not results:
+                return None
+
+            sg_id = results[0].get("book_id")
+            if not sg_id:
+                return None
+
+            raw_info = await loop.run_in_executor(None, sg.book_info, sg_id)
+            info = _j.loads(raw_info) if isinstance(raw_info, str) else raw_info
+            if not info:
+                return None
+
+            result: dict = {"title": info.get("title", title)}
+            if desc := info.get("description"):
+                result["description"] = desc
+            if rating := info.get("average_rating"):
+                result["average_rating"] = rating
+            if tags := info.get("tags"):
+                result["tags"] = tags if isinstance(tags, list) else list(tags)
+            if warnings := info.get("warnings"):
+                result["content_warnings"] = warnings
+            return result if (result.get("content_warnings") or result.get("tags")) else None
+        except Exception as exc:
+            logger.debug("StoryGraph fetch failed: %s", exc)
+            return None
+
+
 # ── Enrichment service ─────────────────────────────────────────────────────────
 
 COMIC_EXTENSIONS = {".cbr", ".cbz", ".cb7", ".cbt", ".pdf"}
@@ -899,7 +959,7 @@ COMIC_EXTENSIONS = {".cbr", ".cbz", ".cb7", ".cbt", ".pdf"}
 class MetadataEnrichmentService:
     """Tries multiple metadata providers in priority order.
 
-    Priority for books:   Hardcover → Amazon → Google Books → Open Library → ISBNDB → LibraryThing → CrossRef
+    Priority for books:   Hardcover → Amazon → Google Books → Open Library → ISBNDB → LibraryThing → CrossRef → StoryGraph
     Priority for comics:  ComicVine → Open Library
     """
 
@@ -912,6 +972,7 @@ class MetadataEnrichmentService:
             ISBNDBProvider(),
             LibraryThingProvider(),
             CrossRefProvider(),
+            StoryGraphProvider(),
         ]
         self._comic_providers: list[Provider] = [
             ComicVineProvider(),

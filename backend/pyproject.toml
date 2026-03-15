@@ -35,6 +35,7 @@ dependencies = [
     "mobi>=0.3.0",
     "lxml>=4.9.0",
     "slowapi>=0.1.9",
+    "storygraph-api>=0.1.0",
 ]
 
 [project.optional-dependencies]

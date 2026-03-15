@@ -931,6 +931,12 @@ async def _apply_enrichment(
         work.tags = await _get_or_create(db, Tag, "name", enriched["tags"])
         changed = True
 
+    # ── StoryGraph fields ─────────────────────────────────────────────────────
+    if enriched.get("content_warnings") and _want("content_warnings", work.content_warnings):
+        cw = enriched["content_warnings"]
+        work.content_warnings = _json.dumps(cw) if isinstance(cw, dict) else cw
+        changed = True
+
     # ── LibraryThing CK fields (work-level JSON columns) ─────────────────────
     if enriched.get("characters") and _want("characters", work.characters):
         work.characters = _json.dumps(enriched["characters"])

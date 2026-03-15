@@ -676,6 +676,24 @@
             </div>
           {/if}
 
+          <!-- Content Warnings -->
+          {#if book.content_warnings && (book.content_warnings.graphic?.length || book.content_warnings.moderate?.length || book.content_warnings.minor?.length)}
+            <div class="mt-6">
+              <p class="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wide">Content Warnings</p>
+              <div class="flex flex-wrap gap-1.5">
+                {#each book.content_warnings.graphic ?? [] as w}
+                  <Badge variant="destructive" class="text-xs">{w}</Badge>
+                {/each}
+                {#each book.content_warnings.moderate ?? [] as w}
+                  <Badge variant="outline" class="text-xs border-orange-400 text-orange-700 dark:text-orange-400">{w}</Badge>
+                {/each}
+                {#each book.content_warnings.minor ?? [] as w}
+                  <Badge variant="outline" class="text-xs text-muted-foreground">{w}</Badge>
+                {/each}
+              </div>
+            </div>
+          {/if}
+
           <!-- Contributors -->
           {#each [
             { label: 'Translated by', names: book.translators },

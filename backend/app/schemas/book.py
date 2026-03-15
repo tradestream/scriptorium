@@ -135,6 +135,17 @@ class BookRead(BookBase):
     physical_copy: bool = False
     abs_item_id: Optional[str] = None
     doi: Optional[str] = None
+    content_warnings: Optional[dict] = None
+
+    @field_validator('content_warnings', mode='before')
+    @classmethod
+    def parse_content_warnings(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            import json
+            return json.loads(v)
+        return v
 
     @field_validator('locked_fields', mode='before')
     @classmethod

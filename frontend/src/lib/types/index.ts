@@ -211,6 +211,7 @@ export interface Book {
   editors: string[];
   illustrators: string[];
   colorists: string[];
+  content_warnings?: { graphic: string[]; moderate: string[]; minor: string[] } | null;
 }
 
 export interface BookListResponse {
