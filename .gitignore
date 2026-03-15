@@ -27,3 +27,8 @@ data/
 # OS
 .DS_Store
 Thumbs.db
+
+# Playwright test artifacts
+frontend/tests/.auth/
+frontend/test-results/
+
