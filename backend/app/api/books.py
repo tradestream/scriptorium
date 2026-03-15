@@ -710,7 +710,7 @@ async def convert_book_file(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Convert a book file to another format using Calibre."""
+    """Convert a book file to another format (pure Python, no external tools)."""
     if not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
     stmt = select(EditionFile).where(EditionFile.id == file_id, EditionFile.edition_id == book_id)

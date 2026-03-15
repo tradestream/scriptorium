@@ -32,6 +32,8 @@ dependencies = [
     "markdownify>=0.11.0",
     "pypdf>=3.17.0",
     "pdfplumber>=0.10.0",
+    "mobi>=0.3.0",
+    "lxml>=4.9.0",
     "slowapi>=0.1.9",
 ]
 
