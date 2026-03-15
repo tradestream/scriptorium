@@ -1,0 +1,20 @@
+version: "3.8"
+
+services:
+  scriptorium:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.prod
+    ports:
+      - "6060:6060"
+    volumes:
+      - ./data/config:/data/config
+      - ./data/library:/data/library
+      - ./data/ingest:/data/ingest
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:///data/config/scriptorium.db
+      - LIBRARY_PATH=/data/library
+      - INGEST_PATH=/data/ingest
+      - CONFIG_PATH=/data/config
+      - SECRET_KEY=${SECRET_KEY:-please-change-me}
+    restart: unless-stopped

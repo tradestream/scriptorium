@@ -1,0 +1,154 @@
+from datetime import datetime
+from typing import Optional
+
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.models import Base
+
+
+class Device(Base):
+    """Device model for syncing reading progress (Kobo, KOReader, etc.)."""
+
+    __tablename__ = "devices"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    name: Mapped[str] = mapped_column(String(255))
+    device_type: Mapped[str] = mapped_column(String(50))  # kobo, koreader, calibre, etc.
+    device_model: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    device_id_string: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    last_synced: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
+
+
+class KoboSyncToken(Base):
+    """Authentication token for Kobo device sync.
+
+    The Kobo protocol uses URL-path-based auth tokens. Each token maps to
+    a user and optionally a specific device. The sync_token tracks the
+    device's last-known sync state for incremental updates.
+    """
+
+    __tablename__ = "kobo_sync_tokens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    device_id: Mapped[Optional[int]] = mapped_column(ForeignKey("devices.id"), nullable=True)
+    token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    is_active: Mapped[bool] = mapped_column(default=True)
+
+    # Sync state — tracks what the device has already received
+    books_last_modified: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    books_last_created: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    reading_state_last_modified: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    last_used: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    shelves: Mapped[list["KoboTokenShelf"]] = relationship(
+        "KoboTokenShelf", cascade="all, delete-orphan"
+    )
+
+
+class KoboTokenShelf(Base):
+    """Junction table: which shelves feed into a Kobo sync token.
+
+    If a token has no entries here, all books from visible libraries sync.
+    If it has entries, only books on those shelves sync.
+    """
+
+    __tablename__ = "kobo_token_shelves"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    token_id: Mapped[int] = mapped_column(ForeignKey("kobo_sync_tokens.id"), index=True)
+    shelf_id: Mapped[int] = mapped_column(ForeignKey("shelves.id"), index=True)
+
+
+class KoboBookState(Base):
+    """Per-edition reading state synced with a Kobo device.
+
+    Stores the Kobo-specific reading state fields (StatusInfo, Statistics,
+    CurrentBookmark) so we can round-trip them back to the device accurately.
+    """
+
+    __tablename__ = "kobo_book_states"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    edition_id: Mapped[int] = mapped_column(ForeignKey("editions.id"), index=True)
+
+    # Kobo StatusInfo
+    status: Mapped[str] = mapped_column(
+        String(50), default="ReadyToRead"
+    )  # ReadyToRead, Reading, Finished
+    times_started_reading: Mapped[int] = mapped_column(default=0)
+
+    # Kobo Statistics
+    total_pages: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    current_page: Mapped[int] = mapped_column(default=0)
+    time_spent_reading: Mapped[int] = mapped_column(default=0)  # seconds
+
+    # Kobo CurrentBookmark
+    content_source_progress: Mapped[float] = mapped_column(Float, default=0.0)  # 0.0-1.0
+    spine_index: Mapped[int] = mapped_column(default=0)
+    content_id: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
+
+
+class KOReaderProgress(Base):
+    """Reading progress synced from KOReader devices.
+
+    KOReader's Progress Sync plugin sends a document hash + progress string.
+    The document key is typically MD5(filename). We store it verbatim so we
+    can round-trip it back to the device without requiring book matching.
+    """
+
+    __tablename__ = "koreader_progress"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    document: Mapped[str] = mapped_column(String(255), index=True)
+    progress: Mapped[str] = mapped_column(String(1024), default="0")
+    percentage: Mapped[float] = mapped_column(Float, default=0.0)
+    device: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    device_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
+
+
+class ReadProgress(Base):
+    """Reading progress tracking (cross-device, unified)."""
+
+    __tablename__ = "read_progress"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    edition_id: Mapped[int] = mapped_column(ForeignKey("editions.id"))
+    current_page: Mapped[int] = mapped_column(default=0)
+    total_pages: Mapped[Optional[int]] = mapped_column(nullable=True)
+    percentage: Mapped[float] = mapped_column(default=0.0)
+    status: Mapped[str] = mapped_column(
+        String(50), default="reading"
+    )  # want_to_read, reading, completed, abandoned
+    rating: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # 1-5
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_opened: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
+
+
+class ReadingGoal(Base):
+    """Per-user, per-year reading goal (target number of books)."""
+
+    __tablename__ = "reading_goals"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    year: Mapped[int] = mapped_column()
+    target_books: Mapped[int] = mapped_column(default=12)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())

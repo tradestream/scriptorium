@@ -1,0 +1,193 @@
+import logging
+import logging.config
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.util import get_remote_address
+
+from app.api import kobo_device_router, koreader_router, opds_router, router
+from app.config import get_settings
+from app.database import close_db, init_db
+from app.middleware import AccessLogMiddleware, SecurityHeadersMiddleware
+from app.services.events import broadcaster
+from app.services.ingest import ingest_service
+
+settings = get_settings()
+limiter = Limiter(key_func=get_remote_address, default_limits=["300/minute"])
+
+# Structured logging configuration
+logging.config.dictConfig(
+    {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "default": {
+                "format": "%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+                "datefmt": "%Y-%m-%d %H:%M:%S",
+            },
+        },
+        "handlers": {
+            "console": {
+                "class": "logging.StreamHandler",
+                "formatter": "default",
+            },
+        },
+        "root": {"handlers": ["console"], "level": "INFO"},
+        "loggers": {
+            "scriptorium": {"level": "INFO", "propagate": True},
+            "uvicorn.access": {"level": "WARNING", "propagate": False},  # suppress uvicorn's own access log
+        },
+    }
+)
+logger = logging.getLogger("scriptorium")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup and shutdown events."""
+    # Startup
+    logger.info("Starting Scriptorium backend...")
+
+    # Create required directories
+    Path(settings.LIBRARY_PATH).mkdir(parents=True, exist_ok=True)
+    Path(settings.INGEST_PATH).mkdir(parents=True, exist_ok=True)
+    Path(settings.CONFIG_PATH).mkdir(parents=True, exist_ok=True)
+    Path(settings.COVERS_PATH).mkdir(parents=True, exist_ok=True)
+
+    # Initialize database
+    await init_db()
+    logger.info("Database initialized")
+
+    # Load DB-backed enrichment key overrides into memory
+    try:
+        from app.database import get_session_factory
+        from app.models.system import SystemSettings
+        from app.services.metadata_enrichment import apply_enrichment_key_overrides
+        from sqlalchemy import select as _sel
+        _factory = get_session_factory()
+        async with _factory() as _db:
+            _ss = await _db.scalar(_sel(SystemSettings).where(SystemSettings.id == 1))
+            if _ss:
+                apply_enrichment_key_overrides({
+                    "HARDCOVER_API_KEY": _ss.hardcover_api_key,
+                    "COMICVINE_API_KEY": _ss.comicvine_api_key,
+                    "GOOGLE_BOOKS_API_KEY": _ss.google_books_api_key,
+                    "ISBNDB_API_KEY": _ss.isbndb_api_key,
+                    "AMAZON_COOKIE": _ss.amazon_cookie,
+                    "LIBRARYTHING_API_KEY": _ss.librarything_api_key,
+                })
+        logger.info("Enrichment key overrides loaded from DB")
+    except Exception as _e:
+        logger.warning("Could not load enrichment key overrides: %s", _e)
+
+    # Start file watcher
+    await ingest_service.start_watcher()
+    logger.info("Ingest service started")
+
+    yield
+
+    # Shutdown
+    logger.info("Shutting down Scriptorium backend...")
+    await ingest_service.stop_watcher()
+    await close_db()
+    logger.info("Shutdown complete")
+
+
+def create_app() -> FastAPI:
+    """Create and configure FastAPI application."""
+    app = FastAPI(
+        title="Scriptorium",
+        description="Self-hosted book and comics library server",
+        version="0.1.0",
+        lifespan=lifespan,
+    )
+
+    # Rate limiting
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_middleware(SlowAPIMiddleware)
+
+    # Security headers (outermost so they're on every response)
+    app.add_middleware(SecurityHeadersMiddleware)
+
+    # Structured access logging
+    app.add_middleware(AccessLogMiddleware)
+
+    # CORS middleware for SvelteKit dev server
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.CORS_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # Include API routers
+    app.include_router(router)
+
+    # Kobo device sync router (mounted at root, not under /api/v1)
+    # Kobo devices expect: /kobo/{auth_token}/v1/...
+    app.include_router(kobo_device_router)
+
+    # OPDS catalog (mounted at root: /opds/...)
+    # E-readers expect /opds/catalog, /opds/search, etc.
+    app.include_router(opds_router)
+
+    # KOReader kosync (mounted at root: /api/ko/...)
+    # KOReader Progress Sync plugin expects /api/ko/users/auth etc.
+    app.include_router(koreader_router)
+
+    # Static file serving for covers
+    covers_path = Path(settings.COVERS_PATH)
+    covers_path.mkdir(parents=True, exist_ok=True)
+    app.mount(
+        "/covers",
+        StaticFiles(directory=str(covers_path)),
+        name="covers",
+    )
+
+    # Health check endpoint
+    @app.get("/health")
+    async def health():
+        """Health check endpoint."""
+        return {"status": "ok", "service": "Scriptorium"}
+
+    # WebSocket endpoint — real-time library events
+    @app.websocket("/ws/events")
+    async def websocket_events(websocket: WebSocket):
+        """WebSocket endpoint for real-time library events.
+
+        Clients receive JSON messages:
+          {"type": "book_added",       "data": {"id": 1, "title": "...", "library_id": 1}}
+          {"type": "ingest_progress",  "data": {"filename": "...", "status": "imported", "book_id": 1}}
+          {"type": "library_scan_done","data": {"library_id": 1, "added": 5, "updated": 2}}
+        """
+        await broadcaster.connect(websocket)
+        try:
+            while True:
+                # Keep the connection alive; clients don't send messages
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            await broadcaster.disconnect(websocket)
+
+    return app
+
+
+# Create application instance
+app = create_app()
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        "app.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+    )

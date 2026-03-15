@@ -1,0 +1,54 @@
+version: "3.8"
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../docker/Dockerfile.frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/static:/app/static
+    environment:
+      - PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    command: npm run dev -- --host 0.0.0.0
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: ../docker/Dockerfile.backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/alembic:/app/alembic
+      - scriptorium-data:/data
+      # Booklore library mounts (read-only)
+      - /Volumes/docker/booklore/books:/data/library/booklore/books:ro
+      - /Volumes/docker/booklore/academic:/data/library/booklore/academic:ro
+      - /Volumes/docker/booklore/comics:/data/library/booklore/comics:ro
+      - /Volumes/docker/booklore/comics-mature:/data/library/booklore/comics-mature:ro
+      - /Volumes/docker/booklore/books-mature:/data/library/booklore/books-mature:ro
+      - /Volumes/docker/booklore/art-photography:/data/library/booklore/art-photography:ro
+      - /Volumes/docker/booklore/art-photography-mature:/data/library/booklore/art-photography-mature:ro
+      - /Volumes/docker/booklore/cookbooks:/data/library/booklore/cookbooks:ro
+      - /Volumes/docker/booklore/playboy-mature:/data/library/booklore/playboy-mature:ro
+      - /Volumes/docker/booklore/magazines-periodicals:/data/library/booklore/magazines-periodicals:ro
+      - /Volumes/docker/booklore/data/images:/data/library/booklore/_images:ro
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:////data/config/scriptorium.db
+      - LIBRARY_PATH=/data/library
+      - INGEST_PATH=/data/ingest
+      - CONFIG_PATH=/data/config
+      - COVERS_PATH=/data/covers
+      - SECRET_KEY=change-me-in-production
+      - CORS_ORIGINS=["http://localhost:5173","http://localhost:3000","capacitor://localhost","ionic://localhost"]
+      - ABS_URL=https://audiobookshelf.heisui.house
+      - ABS_API_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJrZXlJZCI6Ijc0Nzc4OWYyLWE0NzgtNGQ0My1iYmMyLWU4NmUzZDNhMjE3OSIsIm5hbWUiOiJTY3JpcHRvcml1bSIsInR5cGUiOiJhcGkiLCJpYXQiOjE3NzM1MTI0ODd9.oq6-mOka_Ymsf8Dx8sFAxvRLuta4bplPfQMcRASw_Bw
+    command: sh -c "cd /app && PYTHONPATH=/app alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+
+volumes:
+  scriptorium-data:

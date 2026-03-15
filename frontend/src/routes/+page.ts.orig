@@ -1,0 +1,21 @@
+// This is a backup of the original +page.ts file
+import * as api from '$lib/api/client';
+import type { PageLoad } from './$types';
+
+export const load: PageLoad = async () => {
+  try {
+    const recent = await api.getRecentlyAdded();
+    const continueReading = await api.getContinueReading();
+
+    return {
+      recent,
+      continueReading
+    };
+  } catch (error) {
+    console.error('Failed to load dashboard:', error);
+    return {
+      recent: [],
+      continueReading: []
+    };
+  }
+};

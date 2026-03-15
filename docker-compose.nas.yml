@@ -1,0 +1,41 @@
+services:
+  scriptorium:
+    image: ghcr.io/tradestream/scriptorium:latest
+    container_name: scriptorium
+    ports:
+      - "6060:6060"
+    volumes:
+      # Persistent data (database, covers, config)
+      - /volume1/docker/scriptorium/data/config:/data/config
+      - /volume1/docker/scriptorium/data/covers:/data/covers
+      - /volume1/docker/scriptorium/data/ingest:/data/ingest
+
+      # Book libraries (read-only) — same folder names as Booklore so paths match
+      - /volume1/docker/booklore/books:/data/library/booklore/books:ro
+      - /volume1/docker/booklore/books-mature:/data/library/booklore/books-mature:ro
+      - /volume1/docker/booklore/comics:/data/library/booklore/comics:ro
+      - /volume1/docker/booklore/comics-mature:/data/library/booklore/comics-mature:ro
+      - /volume1/docker/booklore/cookbooks:/data/library/booklore/cookbooks:ro
+      - /volume1/docker/booklore/art-photography:/data/library/booklore/art-photography:ro
+      - /volume1/docker/booklore/art-photography-mature:/data/library/booklore/art-photography-mature:ro
+      - /volume1/docker/booklore/playboy-mature:/data/library/booklore/playboy-mature:ro
+      - /volume1/docker/booklore/volo-mature:/data/library/booklore/volo-mature:ro
+      - /volume1/docker/booklore/academic:/data/library/booklore/academic:ro
+      - /volume1/docker/booklore/magazines-periodicals:/data/library/booklore/magazines-periodicals:ro
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:////data/config/scriptorium.db
+      - LIBRARY_PATH=/data/library
+      - INGEST_PATH=/data/ingest
+      - CONFIG_PATH=/data/config
+      - COVERS_PATH=/data/covers
+      - SECRET_KEY=change-me-to-a-random-string
+      - CORS_ORIGINS=["http://192.168.0.68:6060","http://localhost:6060","capacitor://localhost","ionic://localhost"]
+      - ABS_URL=https://audiobookshelf.heisui.house
+      - ABS_API_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJrZXlJZCI6Ijc0Nzc4OWYyLWE0NzgtNGQ0My1iYmMyLWU4NmUzZDNhMjE3OSIsIm5hbWUiOiJTY3JpcHRvcml1bSIsInR5cGUiOiJhcGkiLCJpYXQiOjE3NzM1MTI0ODd9.oq6-mOka_Ymsf8Dx8sFAxvRLuta4bplPfQMcRASw_Bw
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6060/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

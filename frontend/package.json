@@ -1,0 +1,51 @@
+{
+  "name": "scriptorium-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "format": "prettier --write .",
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "build:cap": "BUILD_TARGET=capacitor vite build",
+    "cap:sync": "npm run build:cap && npx cap sync ios",
+    "cap:open": "npx cap open ios"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.2.0",
+    "@capacitor/ios": "^8.2.0",
+    "@playwright/test": "^1.58.2",
+    "@sveltejs/adapter-node": "^5.0.0",
+    "@sveltejs/adapter-static": "^3.0.10",
+    "@sveltejs/kit": "^2.15.0",
+    "@sveltejs/vite-plugin-svelte": "^4.0.0",
+    "@tailwindcss/typography": "^0.5.15",
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/node": "^22.0.0",
+    "prettier": "^3.4.0",
+    "prettier-plugin-svelte": "^3.3.0",
+    "prettier-plugin-tailwindcss": "^0.6.0",
+    "svelte": "^5.0.0",
+    "svelte-check": "^4.0.0",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0"
+  },
+  "dependencies": {
+    "@capacitor/core": "^8.2.0",
+    "@dnd-kit-svelte/svelte": "^0.1.6",
+    "@dnd-kit/helpers": "^0.3.2",
+    "bits-ui": "^1.0.0",
+    "clsx": "^2.1.0",
+    "epubjs": "^0.3.93",
+    "lucide-svelte": "^0.469.0",
+    "mode-watcher": "^1.1.0",
+    "pdfjs-dist": "^4.9.155",
+    "tailwind-merge": "^2.6.0",
+    "tailwind-variants": "^0.3.0"
+  }
+}
