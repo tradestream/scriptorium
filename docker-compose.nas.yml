@@ -10,18 +10,18 @@ services:
       - /volume1/docker/scriptorium/data/covers:/data/covers
       - /volume1/docker/scriptorium/data/ingest:/data/ingest
 
-      # Book libraries (read-only) — same folder names as Booklore so paths match
-      - /volume1/docker/booklore/books:/data/library/booklore/books:ro
-      - /volume1/docker/booklore/books-mature:/data/library/booklore/books-mature:ro
-      - /volume1/docker/booklore/comics:/data/library/booklore/comics:ro
-      - /volume1/docker/booklore/comics-mature:/data/library/booklore/comics-mature:ro
-      - /volume1/docker/booklore/cookbooks:/data/library/booklore/cookbooks:ro
-      - /volume1/docker/booklore/art-photography:/data/library/booklore/art-photography:ro
-      - /volume1/docker/booklore/art-photography-mature:/data/library/booklore/art-photography-mature:ro
-      - /volume1/docker/booklore/playboy-mature:/data/library/booklore/playboy-mature:ro
-      - /volume1/docker/booklore/volo-mature:/data/library/booklore/volo-mature:ro
-      - /volume1/docker/booklore/academic:/data/library/booklore/academic:ro
-      - /volume1/docker/booklore/magazines-periodicals:/data/library/booklore/magazines-periodicals:ro
+      # Book libraries
+      - /volume1/docker/scriptorium/library/books:/data/library/books
+      - /volume1/docker/scriptorium/library/books-mature:/data/library/books-mature
+      - /volume1/docker/scriptorium/library/comics:/data/library/comics
+      - /volume1/docker/scriptorium/library/comics-mature:/data/library/comics-mature
+      - /volume1/docker/scriptorium/library/cookbooks:/data/library/cookbooks
+      - /volume1/docker/scriptorium/library/art-photography:/data/library/art-photography
+      - /volume1/docker/scriptorium/library/art-photography-mature:/data/library/art-photography-mature
+      - /volume1/docker/scriptorium/library/playboy-mature:/data/library/playboy-mature
+      - /volume1/docker/scriptorium/library/volo-mature:/data/library/volo-mature
+      - /volume1/docker/scriptorium/library/academic:/data/library/academic
+      - /volume1/docker/scriptorium/library/magazines-periodicals:/data/library/magazines-periodicals
     environment:
       - DATABASE_URL=sqlite+aiosqlite:////data/config/scriptorium.db
       - LIBRARY_PATH=/data/library
