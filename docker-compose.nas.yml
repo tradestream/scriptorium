@@ -1,7 +1,6 @@
 services:
   scriptorium:
     image: ghcr.io/tradestream/scriptorium:latest
-    pull_policy: never
     container_name: scriptorium
     ports:
       - "6060:6060"
