@@ -19,9 +19,6 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours
 
-    # Calibre
-    CALIBRE_PATH: str = "/usr/bin"
-
     # CORS
     CORS_ORIGINS: list[str] = [
         "http://localhost:5173",

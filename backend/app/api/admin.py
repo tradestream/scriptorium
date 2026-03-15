@@ -83,7 +83,6 @@ async def get_config(
             settings.ANTHROPIC_API_KEY or settings.OPENAI_API_KEY
             or settings.LLM_PROVIDER == "ollama"
         ),
-        "calibre_path": settings.CALIBRE_PATH,
         "library_path": settings.LIBRARY_PATH,
         "ingest_path": settings.INGEST_PATH,
         "loose_leaves_path": settings.LOOSE_LEAVES_PATH,

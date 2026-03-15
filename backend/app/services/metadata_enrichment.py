@@ -458,96 +458,6 @@ class ComicVineProvider(Provider):
         return result
 
 
-# ── Calibre (Amazon + others) ──────────────────────────────────────────────────
-
-class CalibreMetadataProvider(Provider):
-    """Uses Calibre's fetch-ebook-metadata CLI, which includes plugins for
-    Amazon, Barnes & Noble, and other sources. No API key needed — Calibre
-    handles authentication internally via its plugin system."""
-
-    name = "calibre"
-
-    def is_available(self) -> bool:
-        from pathlib import Path
-        return (Path(settings.CALIBRE_PATH) / "fetch-ebook-metadata").exists()
-
-    async def search(self, title: str, authors: list[str], isbn: Optional[str], is_comic: bool = False) -> Optional[dict]:
-        if not self.is_available():
-            return None
-        args = ["-t", title]
-        if authors:
-            args += ["-a", authors[0]]
-        if isbn:
-            args += ["-i", isbn]
-        args += ["--opf"]
-        try:
-            from app.utils.calibre import run_calibre_command
-            rc, stdout, stderr = await run_calibre_command("fetch-ebook-metadata", args, timeout=30)
-            if rc != 0 or not stdout.strip():
-                logger.debug("fetch-ebook-metadata returned rc=%s stderr=%s", rc, stderr)
-                return None
-            return self._parse_opf(stdout)
-        except Exception as exc:
-            logger.warning("Calibre metadata provider error: %s", exc)
-            return None
-
-    def _parse_opf(self, opf_xml: str) -> Optional[dict]:
-        import xml.etree.ElementTree as ET
-        NS = {
-            "dc": "http://purl.org/dc/elements/1.1/",
-            "opf": "http://www.idpf.org/2007/opf",
-        }
-        try:
-            root = ET.fromstring(opf_xml)
-        except ET.ParseError as exc:
-            logger.warning("OPF parse error: %s", exc)
-            return None
-
-        result: dict = {}
-
-        def find_text(tag: str, ns_prefix: str = "dc") -> Optional[str]:
-            el = root.find(f".//{{{NS[ns_prefix]}}}{tag}")
-            return el.text.strip() if el is not None and el.text else None
-
-        if t := find_text("title"):
-            result["title"] = t
-        if d := find_text("description"):
-            import re
-            result["description"] = re.sub(r"<[^>]+>", "", d).strip()
-        if lang := find_text("language"):
-            result["language"] = lang
-        if date := find_text("date"):
-            result["published_date"] = _date_str(date)
-
-        # Authors: multiple <dc:creator> elements
-        authors_found = [
-            el.text.strip()
-            for el in root.findall(f".//{{{NS['dc']}}}creator")
-            if el.text
-        ]
-        if authors_found:
-            result["authors"] = authors_found
-
-        # ISBN from <dc:identifier>
-        for el in root.findall(f".//{{{NS['dc']}}}identifier"):
-            scheme = el.get(f"{{{NS['opf']}}}scheme", "") or el.get("scheme", "")
-            if scheme.upper() in ("ISBN", "ISBN13") and el.text:
-                result.setdefault("isbn", el.text.strip())
-
-        # Subjects → tags
-        subjects = [
-            el.text.strip()
-            for el in root.findall(f".//{{{NS['dc']}}}subject")
-            if el.text
-        ]
-        if subjects:
-            result["tags"] = subjects[:10]
-
-        # Cover: OPF may reference a cover image via <guide> or <manifest>
-        # fetch-ebook-metadata --opf doesn't embed the image, so skip cover_url
-
-        return result if result else None
-
 
 # ── Amazon (cookie-based) ──────────────────────────────────────────────────────
 
@@ -989,8 +899,8 @@ COMIC_EXTENSIONS = {".cbr", ".cbz", ".cb7", ".cbt", ".pdf"}
 class MetadataEnrichmentService:
     """Tries multiple metadata providers in priority order.
 
-    Priority for books:   Hardcover → Google Books → Open Library → ISBNDB → Calibre
-    Priority for comics:  ComicVine → Open Library → Calibre
+    Priority for books:   Hardcover → Amazon → Google Books → Open Library → ISBNDB → LibraryThing → CrossRef
+    Priority for comics:  ComicVine → Open Library
     """
 
     def __init__(self):
@@ -1002,12 +912,10 @@ class MetadataEnrichmentService:
             ISBNDBProvider(),
             LibraryThingProvider(),
             CrossRefProvider(),
-            CalibreMetadataProvider(),
         ]
         self._comic_providers: list[Provider] = [
             ComicVineProvider(),
             OpenLibraryProvider(),
-            CalibreMetadataProvider(),
         ]
 
     async def enrich(
