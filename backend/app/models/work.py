@@ -63,6 +63,27 @@ class Work(Base):
     awards: Mapped[Optional[str]] = mapped_column(Text, nullable=True)        # [{"name": "Hugo", "year": 1966, "category": "Best Novel"}, ...]
     content_warnings: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # {"graphic": [...], "moderate": [...], "minor": [...]}
     doi: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+
+    # ── External provider IDs ──────────────────────────────────────────────────
+    goodreads_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
+    google_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
+    hardcover_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, index=True)
+
+    # ── Community ratings (from external providers) ────────────────────────────
+    goodreads_rating: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    goodreads_rating_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    amazon_rating: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    amazon_rating_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # ── Reading levels ─────────────────────────────────────────────────────────
+    lexile: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)            # e.g. 780 (for 780L)
+    lexile_code: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)     # AD, NC, HL, IG, GN, BR, NP
+    ar_level: Mapped[Optional[float]] = mapped_column(Float, nullable=True)          # Accelerated Reader level e.g. 5.3
+    ar_points: Mapped[Optional[float]] = mapped_column(Float, nullable=True)         # AR quiz points
+    flesch_kincaid_grade: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # computed from text
+    age_range: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)      # e.g. "8-12", "Young Adult"
+    interest_level: Mapped[Optional[str]] = mapped_column(String(20), nullable=True) # LG, MG, MG+, UG (Lower/Middle/Upper Grades)
+
     # JSON array of field names locked from enrichment edits
     locked_fields: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default=None)
     esoteric_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")

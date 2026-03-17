@@ -93,8 +93,16 @@ class SearchService:
         # Collect ISBNs from editions for searchability
         from sqlalchemy import select as _sel
         from app.models import Edition
-        isbn_rows = await db.execute(_sel(Edition.isbn).where(Edition.work_id == work.id, Edition.isbn.isnot(None)))
-        isbn_str = " ".join(r[0] for r in isbn_rows if r[0])
+        isbn_rows = await db.execute(
+            _sel(Edition.isbn, Edition.isbn_10).where(Edition.work_id == work.id, Edition.isbn.isnot(None))
+        )
+        isbn_parts = []
+        for r in isbn_rows:
+            if r[0]:
+                isbn_parts.append(r[0])
+            if r[1]:
+                isbn_parts.append(r[1])
+        isbn_str = " ".join(isbn_parts)
 
         await db.execute(
             text(

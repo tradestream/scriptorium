@@ -136,6 +136,22 @@ class IngestService:
                 except Exception:
                     pass  # events are non-critical
 
+                # Extract identifiers (ISBN/DOI) from file content
+                if book:
+                    try:
+                        from app.services.identifier_extraction import extract_identifiers_for_edition
+                        await extract_identifiers_for_edition(book.id)
+                    except Exception:
+                        pass  # identifier extraction is non-critical
+
+                # Generate cached markdown (non-blocking, non-critical)
+                if book:
+                    try:
+                        from app.services.markdown import generate_markdown
+                        await generate_markdown(book.id)
+                    except Exception:
+                        pass  # markdown generation is non-critical
+
                 # Move file to the library directory, applying naming pattern if enabled
                 if naming_enabled and book:
                     from app.services.naming import build_relative_path

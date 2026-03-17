@@ -116,10 +116,15 @@ class GoogleBooksProvider(Provider):
             async with httpx.AsyncClient(timeout=10.0) as client:
                 r = await client.get(self.BASE, params=params)
                 r.raise_for_status()
-                items = r.json().get("items", [])
+                data = r.json()
+                items = data.get("items", [])
                 if not items:
                     return None
-                return self._normalize(items[0].get("volumeInfo", {}))
+                item = items[0]
+                result = self._normalize(item.get("volumeInfo", {}))
+                if result and item.get("id"):
+                    result["google_id"] = item["id"]
+                return result
         except Exception as exc:
             logger.warning("Google Books error: %s", exc)
             return None
@@ -611,6 +616,9 @@ class AmazonProvider(Provider):
         # Pattern discovered by calibre-amazon-hires-covers; works for any ASIN.
         result["cover_url"] = f"https://ec2.images-amazon.com/images/P/{asin}.01.MAIN._SCRM_.jpg"
 
+        # Store ASIN for future lookups
+        result["asin"] = asin
+
         return result if result.get("title") else None
 
 
@@ -951,6 +959,150 @@ class StoryGraphProvider(Provider):
             return None
 
 
+# ── Goodreads scraper ──────────────────────────────────────────────────────────
+
+class GoodreadsProvider(Provider):
+    """Scrapes Goodreads for ratings, awards, descriptions, and metadata.
+
+    No API key needed — uses HTML scraping like Booklore's GoodReadsParser.
+    """
+
+    name = "goodreads"
+    BASE_SEARCH = "https://www.goodreads.com/search?q="
+    BASE_BOOK = "https://www.goodreads.com/book/show/"
+
+    def is_available(self) -> bool:
+        return True  # No key required
+
+    async def search(self, title: str, authors: list[str], isbn: Optional[str], is_comic: bool = False) -> Optional[dict]:
+        if is_comic:
+            return None
+        try:
+            # Search by ISBN first, then title+author
+            query = isbn if isbn else f"{title} {authors[0]}" if authors else title
+            search_url = self.BASE_SEARCH + urllib.parse.quote_plus(query)
+
+            async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+                r = await client.get(search_url, headers={
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+                })
+                if r.status_code != 200:
+                    return None
+
+                # Extract first result's book ID
+                gr_id = self._extract_book_id(r.text)
+                if not gr_id:
+                    return None
+
+                # Fetch the book page
+                book_r = await client.get(f"{self.BASE_BOOK}{gr_id}", headers={
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+                })
+                if book_r.status_code != 200:
+                    return None
+
+                return self._parse_book_page(book_r.text, gr_id)
+
+        except Exception as exc:
+            logger.debug("Goodreads fetch failed: %s", exc)
+            return None
+
+    def _extract_book_id(self, html: str) -> Optional[str]:
+        """Extract the first book ID from search results."""
+        # Search results have links like /book/show/12345
+        m = re.search(r'/book/show/(\d+)', html)
+        return m.group(1) if m else None
+
+    def _parse_book_page(self, html: str, gr_id: str) -> Optional[dict]:
+        """Parse a Goodreads book page for metadata."""
+        result: dict = {"goodreads_id": gr_id}
+
+        # Try JSON-LD first
+        ld_match = re.search(
+            r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+            html, re.DOTALL | re.IGNORECASE,
+        )
+        if ld_match:
+            try:
+                ld = _json.loads(ld_match.group(1))
+                if isinstance(ld, list):
+                    ld = next((x for x in ld if x.get("@type") == "Book"), ld[0] if ld else {})
+                if ld.get("name"):
+                    result["title"] = ld["name"]
+                if ld.get("author"):
+                    authors = ld["author"]
+                    if isinstance(authors, dict):
+                        authors = [authors]
+                    if isinstance(authors, list):
+                        result["authors"] = [a.get("name") for a in authors if a.get("name")]
+                if ld.get("isbn"):
+                    result["isbn"] = ld["isbn"]
+                if ld.get("numberOfPages"):
+                    try:
+                        result["page_count"] = int(ld["numberOfPages"])
+                    except (ValueError, TypeError):
+                        pass
+                if ld.get("inLanguage"):
+                    result["language"] = ld["inLanguage"]
+                if ld.get("aggregateRating"):
+                    ar = ld["aggregateRating"]
+                    try:
+                        result["goodreads_rating"] = float(ar.get("ratingValue", 0))
+                        result["goodreads_rating_count"] = int(ar.get("ratingCount", 0))
+                    except (ValueError, TypeError):
+                        pass
+            except Exception:
+                pass
+
+        # Fallback: scrape rating from HTML
+        if "goodreads_rating" not in result:
+            m = re.search(r'class="RatingStatistics__rating">(\d+\.\d+)</span>', html)
+            if m:
+                try:
+                    result["goodreads_rating"] = float(m.group(1))
+                except ValueError:
+                    pass
+
+        # Extract description
+        if "description" not in result:
+            m = re.search(
+                r'<div[^>]*class="[^"]*DetailsLayoutRightParagraph[^"]*"[^>]*>\s*<span[^>]*>(.*?)</span>',
+                html, re.DOTALL,
+            )
+            if m:
+                desc = re.sub(r'<[^>]+>', '', m.group(1)).strip()
+                if desc:
+                    result["description"] = desc
+
+        # Extract genres/categories
+        genre_matches = re.findall(r'class="BookPageMetadataSection__genreButton"[^>]*><span[^>]*>([^<]+)</span>', html)
+        if genre_matches:
+            result["tags"] = [g.strip() for g in genre_matches[:10]]
+
+        # Extract awards
+        award_matches = re.findall(r'class="AwardCard[^"]*"[^>]*>.*?<span[^>]*>([^<]+)</span>.*?<span[^>]*>(\d{4})?</span>', html, re.DOTALL)
+        if award_matches:
+            awards = []
+            for name, year in award_matches[:10]:
+                award = {"name": name.strip()}
+                if year:
+                    award["year"] = int(year)
+                awards.append(award)
+            result["awards"] = awards
+
+        # Cover URL
+        cover_match = re.search(r'class="BookCover__image"[^>]*>.*?<img[^>]+src="([^"]+)"', html, re.DOTALL)
+        if not cover_match:
+            cover_match = re.search(r'id="coverImage"[^>]+src="([^"]+)"', html)
+        if cover_match:
+            cover_url = cover_match.group(1)
+            # Upgrade to large size
+            cover_url = re.sub(r'\._S[XY]\d+_', '._SX600_', cover_url)
+            result["cover_url"] = cover_url
+
+        return result if result.get("title") or result.get("goodreads_rating") else None
+
+
 # ── Enrichment service ─────────────────────────────────────────────────────────
 
 COMIC_EXTENSIONS = {".cbr", ".cbz", ".cb7", ".cbt", ".pdf"}
@@ -966,6 +1118,7 @@ class MetadataEnrichmentService:
     def __init__(self):
         self._book_providers: list[Provider] = [
             HardcoverProvider(),
+            GoodreadsProvider(),
             AmazonProvider(),
             GoogleBooksProvider(),
             OpenLibraryProvider(),

@@ -59,6 +59,7 @@ async def lifespan(app: FastAPI):
     Path(settings.INGEST_PATH).mkdir(parents=True, exist_ok=True)
     Path(settings.CONFIG_PATH).mkdir(parents=True, exist_ok=True)
     Path(settings.COVERS_PATH).mkdir(parents=True, exist_ok=True)
+    Path(settings.MARKDOWN_PATH).mkdir(parents=True, exist_ok=True)
 
     # Initialize database
     await init_db()

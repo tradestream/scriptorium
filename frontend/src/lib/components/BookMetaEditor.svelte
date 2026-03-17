@@ -2,6 +2,7 @@
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import { Separator } from "$lib/components/ui/separator";
+  import LocationSelector from "$lib/components/LocationSelector.svelte";
   import { X, Plus, Save, Lock, Unlock } from "lucide-svelte";
   import * as api from "$lib/api/client";
   import type { Book, BookSeriesEntry } from "$lib/types/index";
@@ -39,6 +40,13 @@
       } catch { /* non-critical — fall back to names only */ }
     }
   });
+  let location = $state(book.location ?? '');
+  let locationId = $state<number | null>(book.location_id ?? null);
+  let binding = $state(book.binding ?? '');
+  let condition = $state(book.condition ?? '');
+  let purchasePrice = $state(book.purchase_price?.toString() ?? '');
+  let purchaseDate = $state(book.purchase_date?.slice(0, 10) ?? '');
+  let purchaseFrom = $state(book.purchase_from ?? '');
   let translatorNames = $state(untrack(() => [...(book.translators ?? [])]));
   let editorNames = $state(untrack(() => [...(book.editors ?? [])]));
   let illustratorNames = $state(untrack(() => [...(book.illustrators ?? [])]));
@@ -130,6 +138,13 @@
         language: language.trim() || null,
         published_date: published_date.trim() || null,
         publisher: publisher.trim() || null,
+        location: location.trim() || null,
+        location_id: locationId ?? 0,
+        binding: binding || null,
+        condition: condition || null,
+        purchase_price: purchasePrice ? parseFloat(purchasePrice) : null,
+        purchase_date: purchaseDate || null,
+        purchase_from: purchaseFrom.trim() || null,
         author_names: authorNames,
         tag_names: tagNames,
         series_names: seriesEntries.map(e => e.name),
@@ -238,6 +253,51 @@
         </button>
       </div>
       <Input id="edit-publisher" bind:value={publisher} placeholder="Publisher name" disabled={isLocked('publisher')} />
+    </div>
+    <div class="space-y-1.5">
+      <label class="text-sm font-medium">Location</label>
+      <LocationSelector value={locationId} onSelect={(id) => locationId = id} />
+    </div>
+  </div>
+
+  <!-- Physical book details -->
+  <div class="grid grid-cols-2 gap-4">
+    <div class="space-y-1.5">
+      <label class="text-sm font-medium" for="edit-binding">Binding</label>
+      <select id="edit-binding" bind:value={binding}
+        class="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring">
+        <option value="">—</option>
+        <option value="hardcover">Hardcover</option>
+        <option value="paperback">Paperback</option>
+        <option value="mass_market">Mass Market</option>
+        <option value="leather">Leather Bound</option>
+        <option value="spiral">Spiral</option>
+        <option value="board">Board Book</option>
+      </select>
+    </div>
+    <div class="space-y-1.5">
+      <label class="text-sm font-medium" for="edit-condition">Condition</label>
+      <select id="edit-condition" bind:value={condition}
+        class="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring">
+        <option value="">—</option>
+        <option value="new">New</option>
+        <option value="like_new">Like New</option>
+        <option value="good">Good</option>
+        <option value="fair">Fair</option>
+        <option value="poor">Poor</option>
+      </select>
+    </div>
+    <div class="space-y-1.5">
+      <label class="text-sm font-medium" for="edit-purchase-price">Purchase Price</label>
+      <Input id="edit-purchase-price" bind:value={purchasePrice} type="number" step="0.01" placeholder="0.00" />
+    </div>
+    <div class="space-y-1.5">
+      <label class="text-sm font-medium" for="edit-purchase-date">Purchase Date</label>
+      <Input id="edit-purchase-date" bind:value={purchaseDate} type="date" />
+    </div>
+    <div class="col-span-2 space-y-1.5">
+      <label class="text-sm font-medium" for="edit-purchase-from">Purchased From</label>
+      <Input id="edit-purchase-from" bind:value={purchaseFrom} placeholder="e.g. Amazon, local bookshop, gift" />
     </div>
   </div>
 

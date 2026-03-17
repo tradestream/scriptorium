@@ -35,6 +35,15 @@ class EditionBase(BaseModel):
     page_count: Optional[int] = None
     physical_copy: bool = False
 
+    @field_validator('isbn', mode='before')
+    @classmethod
+    def normalize_isbn(cls, v):
+        if not v or not isinstance(v, str):
+            return v
+        from app.utils.isbn import normalize
+        isbn13, _ = normalize(v)
+        return isbn13
+
 
 class EditionCreate(EditionBase):
     work_id: int
@@ -50,8 +59,18 @@ class EditionUpdate(BaseModel):
     format: Optional[str] = None
     page_count: Optional[int] = None
     physical_copy: Optional[bool] = None
+    location: Optional[str] = None
     translator_names: Optional[list[str]] = None
     locked_fields: Optional[list[str]] = None
+
+    @field_validator('isbn', mode='before')
+    @classmethod
+    def normalize_isbn(cls, v):
+        if not v or not isinstance(v, str):
+            return v
+        from app.utils.isbn import normalize
+        isbn13, _ = normalize(v)
+        return isbn13
 
 
 class EditionRead(EditionBase):
@@ -59,6 +78,9 @@ class EditionRead(EditionBase):
     uuid: str
     work_id: int
     library_id: int
+    isbn_10: Optional[str] = None
+    asin: Optional[str] = None
+    location: Optional[str] = None
     cover_hash: Optional[str] = None
     cover_format: Optional[str] = None
     abs_item_id: Optional[str] = None

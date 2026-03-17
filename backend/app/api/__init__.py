@@ -1,9 +1,10 @@
 from fastapi import APIRouter
 
 from app.api import (
-    admin, analysis, annotations, api_keys, audiobookshelf, auth, books, loose_leaves, browse,
-    collections, devices, duplicates, editions, export, goals, ingest, kobo, libraries, marginalia,
-    metadata, notebooks, opds, progress, read_sessions, search, shelves, stats, sync, users, works,
+    admin, analysis, annotations, api_keys, articles, audiobookshelf, auth, books, loose_leaves,
+    browse, collections, devices, duplicates, editions, export, goals, ingest, kobo, libraries,
+    locations, marginalia, metadata, notebooks, opds, progress, read_sessions, search, shelves,
+    stats, sync, users, works,
 )
 
 router = APIRouter(prefix="/api/v1")
@@ -35,6 +36,8 @@ router.include_router(stats.router, tags=["stats"])
 router.include_router(notebooks.router, tags=["notebooks"])
 router.include_router(loose_leaves.router, tags=["loose-leaves"])
 router.include_router(goals.router, tags=["goals"])
+router.include_router(locations.router, tags=["locations"])
+router.include_router(articles.router, tags=["articles"])
 router.include_router(audiobookshelf.router, tags=["audiobookshelf"])
 router.include_router(kobo.kobo_management_router)
 

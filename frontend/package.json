@@ -39,13 +39,16 @@
     "@capacitor/core": "^8.2.0",
     "@dnd-kit-svelte/svelte": "^0.1.6",
     "@dnd-kit/helpers": "^0.3.2",
+    "@number-flow/svelte": "^0.4.0",
     "bits-ui": "^1.0.0",
     "clsx": "^2.1.0",
     "epubjs": "^0.3.93",
     "lucide-svelte": "^0.469.0",
     "mode-watcher": "^1.1.0",
+    "motion-sv": "^0.1.10",
     "pdfjs-dist": "^4.9.155",
     "tailwind-merge": "^2.6.0",
-    "tailwind-variants": "^0.3.0"
+    "tailwind-variants": "^0.3.0",
+    "web-wasm-barcode-reader": "^1.5.0"
   }
 }

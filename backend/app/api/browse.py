@@ -1,5 +1,7 @@
 """Browse endpoints for authors, tags, and series."""
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import func, select, update
@@ -35,6 +37,7 @@ class AuthorDetail(BaseModel):
     id: int
     name: str
     description: str | None = None
+    photo_url: str | None = None
     book_count: int
 
     class Config:
@@ -90,7 +93,7 @@ async def list_authors(
 
     rows = await db.execute(stmt)
     return [
-        AuthorDetail(id=author.id, name=author.name, description=author.description, book_count=count)
+        AuthorDetail(id=author.id, name=author.name, description=author.description, photo_url=author.photo_url, book_count=count)
         for author, count in rows
     ]
 
@@ -238,10 +241,17 @@ async def get_tag(
 async def list_series(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
+    library_id: Optional[int] = None,
+    format: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List all series with their work counts, alphabetically."""
+    """List all series with their work counts, alphabetically.
+
+    Optional filters:
+    - library_id: only series with books in this library
+    - format: only series with books having files in this format (e.g. cbz, epub)
+    """
     accessible_ids = await get_accessible_library_ids(db, current_user)
     visible_lib_ids = select(Library.id).where(Library.is_hidden == False)
 
@@ -255,7 +265,16 @@ async def list_series(
         .limit(limit)
         .offset(skip)
     )
-    stmt = stmt.where((Edition.library_id.in_(visible_lib_ids)) | (Edition.id.is_(None)))
+
+    if library_id:
+        stmt = stmt.where(Edition.library_id == library_id)
+    else:
+        stmt = stmt.where((Edition.library_id.in_(visible_lib_ids)) | (Edition.id.is_(None)))
+
+    if format:
+        from app.models.edition import EditionFile
+        stmt = stmt.where(Edition.files.any(EditionFile.format.ilike(format)))
+
     if accessible_ids is not None:
         stmt = stmt.where((Edition.library_id.in_(accessible_ids)) | (Edition.id.is_(None)))
 

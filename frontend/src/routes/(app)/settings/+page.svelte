@@ -4,7 +4,7 @@
   import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "$lib/components/ui/card";
   import { Badge } from "$lib/components/ui/badge";
   import { Separator } from "$lib/components/ui/separator";
-  import { Plus, RefreshCw, Trash2, Play, CheckCircle, AlertCircle, Copy, Clock, Download, Server, Key, Eye, EyeOff, Users, UserPlus, UserMinus, Lock, Unlock, Headphones, Link2, FileCode, Sparkles, X } from "lucide-svelte";
+  import { Plus, RefreshCw, Trash2, Play, CheckCircle, AlertCircle, Copy, Clock, Download, Server, Key, Eye, EyeOff, Users, UserPlus, UserMinus, Lock, Unlock, Headphones, Link2, FileCode, Sparkles, X, ImageUp, FileText } from "lucide-svelte";
   import * as api from "$lib/api/client";
   import type { AdminConfig } from "$lib/api/client";
   import type { Library, LibraryAccess, User as UserType, IngestLog, ApiKey, ApiKeyCreated } from "$lib/types/index";
@@ -12,6 +12,22 @@
 
   let { data }: { data: PageData } = $props();
   let user = $derived(data.user);
+
+  // Profile editing
+  let profileDisplayName = $state(data.user?.display_name ?? '');
+  let savingProfile = $state(false);
+  let profileMsg = $state('');
+
+  async function saveProfile() {
+    savingProfile = true;
+    profileMsg = '';
+    try {
+      await api.updateProfile({ display_name: profileDisplayName.trim() });
+      profileMsg = 'Saved';
+      setTimeout(() => profileMsg = '', 2000);
+    } catch { /* ignore */ }
+    savingProfile = false;
+  }
 
   let libraries = $state<Library[]>([]);
   let showCreateLibrary = $state(false);
@@ -384,6 +400,151 @@
     bulkMsgOk = true;
   }
 
+  // ── Bulk Identifier Extraction ──────────────────────────────────────────────
+  let idJob = $state<{ job_id: string; status: string; total: number; done: number; found_isbn: number; found_doi: number; failed: number } | null>(null);
+  let idStarting = $state(false);
+  let idMsg = $state('');
+  let idMsgOk = $state(true);
+  let _idPollTimer: ReturnType<typeof setInterval> | null = null;
+
+  function _stopIdPoll() {
+    if (_idPollTimer) { clearInterval(_idPollTimer); _idPollTimer = null; }
+  }
+
+  async function _pollIdJob(jobId: string) {
+    try {
+      idJob = await api.getBulkIdentifiersJob(jobId);
+      if (idJob.status === 'done' || idJob.status === 'cancelled') {
+        _stopIdPoll();
+        idMsg = `Done — ${idJob.found_isbn} ISBNs, ${idJob.found_doi} DOIs found · ${idJob.failed} failed`;
+        idMsgOk = true;
+      }
+    } catch { _stopIdPoll(); }
+  }
+
+  async function startBulkIdentifiers() {
+    idStarting = true;
+    idMsg = '';
+    idJob = null;
+    _stopIdPoll();
+    try {
+      const r = await api.startBulkIdentifiers();
+      idMsg = `Job started — ${r.total} books to scan`;
+      idMsgOk = true;
+      idJob = { job_id: r.job_id, status: 'queued', total: r.total, done: 0, found_isbn: 0, found_doi: 0, failed: 0 };
+      _idPollTimer = setInterval(() => _pollIdJob(r.job_id), 2000);
+    } catch (e) {
+      idMsg = e instanceof Error ? e.message : 'Failed to start';
+      idMsgOk = false;
+    } finally {
+      idStarting = false;
+    }
+  }
+
+  // ── Bulk Markdown Generation ────────────────────────────────────────────────
+  let mdJob = $state<{ job_id: string; status: string; total: number; done: number; failed: number; skipped: number; current: string } | null>(null);
+  let mdStarting = $state(false);
+  let mdMsg = $state('');
+  let mdMsgOk = $state(true);
+  let _mdPollTimer: ReturnType<typeof setInterval> | null = null;
+
+  function _stopMdPoll() {
+    if (_mdPollTimer) { clearInterval(_mdPollTimer); _mdPollTimer = null; }
+  }
+
+  async function _pollMdJob(jobId: string) {
+    try {
+      mdJob = await api.getBulkMarkdownJob(jobId);
+      if (mdJob.status === 'done' || mdJob.status === 'cancelled') {
+        _stopMdPoll();
+        const converted = mdJob.done - mdJob.failed - mdJob.skipped;
+        mdMsg = `Done — ${converted} converted, ${mdJob.skipped} skipped, ${mdJob.failed} failed`;
+        mdMsgOk = true;
+      }
+    } catch { _stopMdPoll(); }
+  }
+
+  async function startBulkMarkdown() {
+    mdStarting = true;
+    mdMsg = '';
+    mdJob = null;
+    _stopMdPoll();
+    try {
+      const r = await api.startBulkMarkdown();
+      mdMsg = `Job started — ${r.total} books to process`;
+      mdMsgOk = true;
+      mdJob = { job_id: r.job_id, status: 'queued', total: r.total, done: 0, failed: 0, skipped: 0, current: '' };
+      _mdPollTimer = setInterval(() => _pollMdJob(r.job_id), 2000);
+    } catch (e) {
+      mdMsg = e instanceof Error ? e.message : 'Failed to start';
+      mdMsgOk = false;
+    } finally {
+      mdStarting = false;
+    }
+  }
+
+  // ── Cover Upgrade ──────────────────────────────────────────────────────────
+  let coverUpJob = $state<any>(null);
+  let coverUpStarting = $state(false);
+  let coverUpMsg = $state('');
+  let _coverUpPoll: ReturnType<typeof setInterval> | null = null;
+
+  async function startCoverUpgrade() {
+    coverUpStarting = true;
+    coverUpMsg = '';
+    coverUpJob = null;
+    try {
+      const r = await api.startCoverUpgrade();
+      coverUpMsg = `Scanning ${r.total} low-quality covers…`;
+      coverUpJob = { ...r, status: 'queued', done: 0, upgraded: 0, no_match: 0, failed: 0, current: '' };
+      _coverUpPoll = setInterval(async () => {
+        try {
+          coverUpJob = await api.getCoverUpgradeJob(r.job_id);
+          coverUpMsg = `Upgrading… ${coverUpJob.done}/${coverUpJob.total} (${coverUpJob.upgraded} upgraded)`;
+          if (coverUpJob.status === 'done' || coverUpJob.status === 'cancelled') {
+            clearInterval(_coverUpPoll!);
+            coverUpMsg = `Done — ${coverUpJob.upgraded} upgraded, ${coverUpJob.no_match} no match, ${coverUpJob.failed} failed`;
+            coverUpStarting = false;
+          }
+        } catch { clearInterval(_coverUpPoll!); coverUpStarting = false; }
+      }, 5000);
+    } catch (e) {
+      coverUpMsg = e instanceof Error ? e.message : 'Failed';
+      coverUpStarting = false;
+    }
+  }
+
+  // ── Filename Metadata Extraction ──────────────────────────────────────────
+  let fnJob = $state<any>(null);
+  let fnStarting = $state(false);
+  let fnMsg = $state('');
+  let _fnPoll: ReturnType<typeof setInterval> | null = null;
+
+  async function startFilenameExtract() {
+    fnStarting = true;
+    fnMsg = '';
+    fnJob = null;
+    try {
+      const r = await api.startFilenameExtract();
+      fnMsg = `Processing ${r.total} books…`;
+      fnJob = { ...r, status: 'queued', done: 0, applied: 0, skipped: 0, failed: 0 };
+      _fnPoll = setInterval(async () => {
+        try {
+          fnJob = await api.getFilenameExtractJob(r.job_id);
+          fnMsg = `Extracting… ${fnJob.done}/${fnJob.total} (${fnJob.applied} applied)`;
+          if (fnJob.status === 'done' || fnJob.status === 'cancelled') {
+            clearInterval(_fnPoll!);
+            fnMsg = `Done — ${fnJob.applied} updated, ${fnJob.skipped} skipped, ${fnJob.failed} failed`;
+            fnStarting = false;
+          }
+        } catch { clearInterval(_fnPoll!); fnStarting = false; }
+      }, 2000);
+    } catch (e) {
+      fnMsg = e instanceof Error ? e.message : 'Failed';
+      fnStarting = false;
+    }
+  }
+
   // ── AudiobookShelf ──────────────────────────────────────────────────────────
   let absStatus = $state<import('$lib/api/client').AbsStatus | null>(null);
   let absLibraries = $state<import('$lib/api/client').AbsLibrary[]>([]);
@@ -438,13 +599,27 @@
     absSyncingCovers = true;
     absMsg = '';
     try {
-      const r = await api.syncAbsCovers();
-      absMsg = `Covers synced: ${r.updated} updated, ${r.failed} failed`;
+      const { job_id, total } = await api.syncAbsCovers();
+      absMsg = `Syncing covers… 0/${total}`;
       absMsgOk = true;
+      // Poll until done
+      const poll = setInterval(async () => {
+        try {
+          const job = await api.getAbsCoverSyncJob(job_id);
+          absMsg = `Syncing covers… ${job.done}/${job.total}`;
+          if (job.status === 'completed' || job.status === 'cancelled' || job.status === 'failed') {
+            clearInterval(poll);
+            absMsg = `Covers synced: ${job.done - job.failed} updated, ${job.failed} failed`;
+            absSyncingCovers = false;
+          }
+        } catch {
+          clearInterval(poll);
+          absSyncingCovers = false;
+        }
+      }, 2000);
     } catch (e) {
       absMsg = e instanceof Error ? e.message : 'Cover sync failed';
       absMsgOk = false;
-    } finally {
       absSyncingCovers = false;
     }
   }
@@ -482,6 +657,24 @@
       <div class="space-y-2">
         <label for="username" class="text-sm font-medium">Username</label>
         <Input id="username" value={user?.username ?? ''} disabled />
+      </div>
+      <div class="space-y-2">
+        <label for="display-name" class="text-sm font-medium">Display Name</label>
+        <div class="flex gap-2">
+          <Input id="display-name" bind:value={profileDisplayName} placeholder="Your full name" />
+          <Button
+            variant="outline"
+            size="sm"
+            onclick={saveProfile}
+            disabled={savingProfile}
+            class="shrink-0"
+          >
+            {savingProfile ? 'Saving…' : 'Save'}
+          </Button>
+        </div>
+        {#if profileMsg}
+          <p class="text-xs text-green-600 dark:text-green-400">{profileMsg}</p>
+        {/if}
       </div>
       <div class="space-y-2">
         <label for="email" class="text-sm font-medium">Email</label>
@@ -687,7 +880,7 @@
                   <div class="space-y-1">
                     {#each allUsers.filter(u => u.id !== data.user?.id) as u}
                       <div class="flex items-center justify-between rounded px-1 py-0.5">
-                        <span class="text-sm">{u.username.charAt(0).toUpperCase() + u.username.slice(1)}</span>
+                        <span class="text-sm">{u.display_name || u.username.charAt(0).toUpperCase() + u.username.slice(1)}</span>
                         {#if grantedUserIds.has(u.id)}
                           <Button size="sm" variant="ghost" class="h-6 px-2 text-xs text-destructive hover:text-destructive" onclick={() => revokeAccess(lib, u.id)}>
                             <UserMinus class="mr-1 h-3 w-3" />Remove
@@ -996,6 +1189,202 @@
     </Card>
   {/if}
 
+  <!-- Bulk Markdown Generation -->
+  {#if user?.is_admin}
+    <Card>
+      <CardHeader>
+        <CardTitle>Markdown Conversion</CardTitle>
+        <CardDescription>Pre-convert all book files to LLM-optimized markdown for faster analysis</CardDescription>
+      </CardHeader>
+      <CardContent class="space-y-4">
+        <p class="text-sm text-muted-foreground">
+          Generates cached markdown for every book with a text-extractable file (EPUB, PDF, TXT).
+          Audiobooks and comics are automatically skipped.
+        </p>
+
+        {#if mdJob && (mdJob.status === 'running' || mdJob.status === 'queued')}
+          <div class="space-y-2 rounded-md border bg-muted/30 p-3">
+            <div class="flex items-center justify-between text-sm">
+              <span class="font-medium">
+                {mdJob.status === 'queued' ? 'Queued…' : `Converting… ${mdJob.done}/${mdJob.total}`}
+              </span>
+            </div>
+            {#if mdJob.total > 0}
+              <div class="h-2 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  class="h-full rounded-full bg-primary transition-all"
+                  style="width: {Math.round((mdJob.done / mdJob.total) * 100)}%"
+                ></div>
+              </div>
+            {/if}
+            {#if mdJob.current}
+              <p class="truncate text-xs text-muted-foreground" title={mdJob.current}>
+                {mdJob.current}
+              </p>
+            {/if}
+          </div>
+        {:else if mdJob && mdJob.status === 'done'}
+          <div class="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm dark:border-green-800 dark:bg-green-950/30">
+            <CheckCircle class="h-4 w-4 shrink-0 text-green-500" />
+            <span>{mdJob.done - mdJob.failed - mdJob.skipped} converted · {mdJob.skipped} skipped · {mdJob.failed} failed</span>
+          </div>
+        {/if}
+
+        {#if mdMsg}
+          <p class="text-sm {mdMsgOk ? 'text-green-600 dark:text-green-400' : 'text-destructive'}">{mdMsg}</p>
+        {/if}
+
+        <Button
+          onclick={startBulkMarkdown}
+          disabled={mdStarting || mdJob?.status === 'running' || mdJob?.status === 'queued'}
+          class="w-full"
+        >
+          <FileCode class="mr-2 h-4 w-4" />
+          {mdStarting ? 'Starting…' : 'Generate Markdown for All Books'}
+        </Button>
+      </CardContent>
+    </Card>
+  {/if}
+
+  <!-- Identifier Extraction (ISBN / DOI) -->
+  {#if user?.is_admin}
+    <Card>
+      <CardHeader>
+        <CardTitle>Identifier Extraction</CardTitle>
+        <CardDescription>Scan book file content for ISBNs and DOIs not found in metadata</CardDescription>
+      </CardHeader>
+      <CardContent class="space-y-4">
+        <p class="text-sm text-muted-foreground">
+          Scans EPUB content pages and PDF front/back matter for ISBN-10, ISBN-13, and DOI patterns.
+          Only processes books missing an ISBN or DOI. Validates checksums before storing.
+        </p>
+
+        {#if idJob && (idJob.status === 'running' || idJob.status === 'queued')}
+          <div class="space-y-2 rounded-md border bg-muted/30 p-3">
+            <div class="flex items-center justify-between text-sm">
+              <span class="font-medium">
+                {idJob.status === 'queued' ? 'Queued…' : `Scanning… ${idJob.done}/${idJob.total}`}
+              </span>
+            </div>
+            {#if idJob.total > 0}
+              <div class="h-2 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  class="h-full rounded-full bg-primary transition-all"
+                  style="width: {Math.round((idJob.done / idJob.total) * 100)}%"
+                ></div>
+              </div>
+            {/if}
+            <p class="text-xs text-muted-foreground">
+              {idJob.found_isbn} ISBNs · {idJob.found_doi} DOIs found so far
+            </p>
+          </div>
+        {:else if idJob && idJob.status === 'done'}
+          <div class="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm dark:border-green-800 dark:bg-green-950/30">
+            <CheckCircle class="h-4 w-4 shrink-0 text-green-500" />
+            <span>{idJob.found_isbn} ISBNs · {idJob.found_doi} DOIs found · {idJob.failed} failed</span>
+          </div>
+        {/if}
+
+        {#if idMsg}
+          <p class="text-sm {idMsgOk ? 'text-green-600 dark:text-green-400' : 'text-destructive'}">{idMsg}</p>
+        {/if}
+
+        <Button
+          onclick={startBulkIdentifiers}
+          disabled={idStarting || idJob?.status === 'running' || idJob?.status === 'queued'}
+          class="w-full"
+        >
+          <Key class="mr-2 h-4 w-4" />
+          {idStarting ? 'Starting…' : 'Extract ISBNs & DOIs from All Books'}
+        </Button>
+      </CardContent>
+    </Card>
+  {/if}
+
+  <!-- Cover Quality Upgrade -->
+  {#if user?.is_admin}
+    <Card>
+      <CardHeader>
+        <CardTitle>Cover Quality Upgrade</CardTitle>
+        <CardDescription>Find low-resolution covers and replace them with high-res versions from Apple Books</CardDescription>
+      </CardHeader>
+      <CardContent class="space-y-4">
+        <p class="text-sm text-muted-foreground">
+          Scans all covers for quality issues (under 400x600 or 20KB), then searches iTunes for high-resolution replacements using ISBN and title matching.
+        </p>
+
+        {#if coverUpJob && (coverUpJob.status === 'running' || coverUpJob.status === 'queued')}
+          <div class="space-y-2 rounded-md border bg-muted/30 p-3">
+            <span class="text-sm font-medium">{coverUpMsg}</span>
+            {#if coverUpJob.total > 0}
+              <div class="h-2 w-full overflow-hidden rounded-full bg-muted">
+                <div class="h-full rounded-full bg-primary transition-all" style="width: {Math.round((coverUpJob.done / coverUpJob.total) * 100)}%"></div>
+              </div>
+            {/if}
+            {#if coverUpJob.current}
+              <p class="truncate text-xs text-muted-foreground">{coverUpJob.current}</p>
+            {/if}
+          </div>
+        {:else if coverUpJob && coverUpJob.status === 'done'}
+          <div class="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm dark:border-green-800 dark:bg-green-950/30">
+            <CheckCircle class="h-4 w-4 shrink-0 text-green-500" />
+            <span>{coverUpMsg}</span>
+          </div>
+        {/if}
+
+        {#if coverUpMsg && !coverUpJob}
+          <p class="text-sm text-muted-foreground">{coverUpMsg}</p>
+        {/if}
+
+        <Button onclick={startCoverUpgrade} disabled={coverUpStarting || coverUpJob?.status === 'running'} class="w-full">
+          <ImageUp class="mr-2 h-4 w-4" />
+          {coverUpStarting ? 'Starting…' : 'Upgrade Low-Quality Covers'}
+        </Button>
+      </CardContent>
+    </Card>
+  {/if}
+
+  <!-- Filename Metadata Extraction -->
+  {#if user?.is_admin}
+    <Card>
+      <CardHeader>
+        <CardTitle>Filename Metadata Extraction</CardTitle>
+        <CardDescription>Parse title and author from filenames for books with missing metadata</CardDescription>
+      </CardHeader>
+      <CardContent class="space-y-4">
+        <p class="text-sm text-muted-foreground">
+          Detects patterns like "Title - Author.epub" and "Author/Title.epub".
+          Only updates books currently missing a title or author.
+        </p>
+
+        {#if fnJob && (fnJob.status === 'running' || fnJob.status === 'queued')}
+          <div class="space-y-2 rounded-md border bg-muted/30 p-3">
+            <span class="text-sm font-medium">{fnMsg}</span>
+            {#if fnJob.total > 0}
+              <div class="h-2 w-full overflow-hidden rounded-full bg-muted">
+                <div class="h-full rounded-full bg-primary transition-all" style="width: {Math.round((fnJob.done / fnJob.total) * 100)}%"></div>
+              </div>
+            {/if}
+          </div>
+        {:else if fnJob && fnJob.status === 'done'}
+          <div class="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm dark:border-green-800 dark:bg-green-950/30">
+            <CheckCircle class="h-4 w-4 shrink-0 text-green-500" />
+            <span>{fnMsg}</span>
+          </div>
+        {/if}
+
+        {#if fnMsg && !fnJob}
+          <p class="text-sm text-muted-foreground">{fnMsg}</p>
+        {/if}
+
+        <Button onclick={startFilenameExtract} disabled={fnStarting || fnJob?.status === 'running'} class="w-full">
+          <FileText class="mr-2 h-4 w-4" />
+          {fnStarting ? 'Starting…' : 'Extract Metadata from Filenames'}
+        </Button>
+      </CardContent>
+    </Card>
+  {/if}
+
   <!-- File Naming Pattern -->
   {#if user?.is_admin && adminConfig}
     <Card>
@@ -1035,7 +1424,7 @@
           {#if namingPreview}
             <div class="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-xs">
               <span class="text-muted-foreground shrink-0">Example:</span>
-              <code class="break-all text-foreground">{namingPreview}.epub</code>
+              <code class="break-all text-foreground">{namingPreview}</code>
               {#if namingPreviewLoading}<span class="text-muted-foreground/50">…</span>{/if}
             </div>
           {/if}

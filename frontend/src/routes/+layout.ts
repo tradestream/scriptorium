@@ -28,15 +28,17 @@ export const load: LayoutLoad = async ({ url }) => {
   let user = null;
   let libraries = [];
   let shelves = [];
+  let pinnedCollections = [];
 
   let absUrl: string | null = null;
 
   if (token) {
     try {
-      [user, libraries, shelves] = await Promise.all([
+      [user, libraries, shelves, pinnedCollections] = await Promise.all([
         api.getCurrentUser(),
         api.getLibraries(),
         api.getShelves(),
+        api.getCollections().then(cols => cols.filter(c => c.is_pinned)).catch(() => []),
       ]);
     } catch (error) {
       console.error('Failed to load initial data:', error);
@@ -57,6 +59,7 @@ export const load: LayoutLoad = async ({ url }) => {
     user,
     libraries,
     shelves,
+    pinnedCollections,
     absUrl,
   };
 };

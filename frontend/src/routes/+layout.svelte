@@ -18,6 +18,7 @@
   let user = $derived(data?.user ?? null);
   let libraries = $derived(data?.libraries ?? []);
   let shelves = $derived(data?.shelves ?? []);
+  let pinnedCollections = $derived(data?.pinnedCollections ?? []);
 
   onMount(() => {
     if (user) {
@@ -42,7 +43,7 @@
   <div class="flex h-screen overflow-hidden">
     <!-- Desktop sidebar -->
     <div class="hidden md:flex">
-      <Sidebar {libraries} {shelves} bind:collapsed={sidebarCollapsed} />
+      <Sidebar {libraries} {shelves} {pinnedCollections} bind:collapsed={sidebarCollapsed} />
     </div>
 
     <!-- Mobile sidebar overlay -->
@@ -51,7 +52,7 @@
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div class="absolute inset-0 bg-background/80 backdrop-blur-sm" onclick={() => (mobileOpen = false)}></div>
         <div class="relative z-50 h-full w-64">
-          <Sidebar {libraries} {shelves} />
+          <Sidebar {libraries} {shelves} {pinnedCollections} />
         </div>
       </div>
     {/if}

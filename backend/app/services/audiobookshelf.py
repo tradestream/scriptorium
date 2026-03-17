@@ -231,7 +231,7 @@ async def sync_covers(overwrite: bool = False) -> dict:
             if not cover_bytes:
                 failed += 1
                 continue
-            h, fmt = await cover_service.save_cover(cover_bytes, edition.uuid)
+            h, fmt, *_ = await cover_service.save_cover(cover_bytes, edition.uuid)
             if h:
                 edition.cover_hash = h
                 edition.cover_format = fmt
@@ -248,7 +248,7 @@ async def sync_covers(overwrite: bool = False) -> dict:
             if not cover_bytes:
                 failed += 1
                 continue
-            h, fmt = await cover_service.save_cover(cover_bytes, book.uuid)
+            h, fmt, *_ = await cover_service.save_cover(cover_bytes, book.uuid)
             if h:
                 book.cover_hash = h
                 book.cover_format = fmt
@@ -493,7 +493,7 @@ async def import_library_items(
                 # Link abs_item_id to existing Edition
                 edition.abs_item_id = abs_id
                 if cover_bytes and not edition.cover_hash:
-                    h, fmt = await cover_service.save_cover(cover_bytes, edition.uuid)
+                    h, fmt, *_ = await cover_service.save_cover(cover_bytes, edition.uuid)
                     if h:
                         edition.cover_hash = h
                         edition.cover_format = fmt
@@ -503,7 +503,7 @@ async def import_library_items(
                 # Link abs_item_id to existing Book; also set on its Edition if one exists
                 book.abs_item_id = abs_id
                 if cover_bytes and not book.cover_hash:
-                    h, fmt = await cover_service.save_cover(cover_bytes, book.uuid)
+                    h, fmt, *_ = await cover_service.save_cover(cover_bytes, book.uuid)
                     if h:
                         book.cover_hash = h
                         book.cover_format = fmt
@@ -522,7 +522,7 @@ async def import_library_items(
                 cover_hash: str | None = None
                 cover_fmt: str | None = None
                 if cover_bytes:
-                    cover_hash, cover_fmt = await cover_service.save_cover(cover_bytes, entity_uuid)
+                    cover_hash, cover_fmt, *_ = await cover_service.save_cover(cover_bytes, entity_uuid)
 
                 # Resolve or create authors
                 authors = []
@@ -577,6 +577,7 @@ async def import_library_items(
                     work_id=work.id,
                     library_id=scriptorium_library_id,
                     isbn=meta["isbn"],
+                    asin=meta.get("asin"),
                     publisher=meta["publisher"],
                     published_date=meta["published_date"],
                     language=meta["language"],

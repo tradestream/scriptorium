@@ -22,9 +22,13 @@ from .auth import get_current_user
 
 logger = logging.getLogger(__name__)
 
-# ── In-memory bulk-enrich job store ───────────────────────────────────────────
+# ── In-memory job stores ──────────────────────────────────────────────────────
 # { job_id: { status, total, done, failed, current, started_at, error } }
 _bulk_jobs: dict[str, dict] = {}
+_markdown_jobs: dict[str, dict] = {}
+_identifier_jobs: dict[str, dict] = {}
+_cover_upgrade_jobs: dict[str, dict] = {}
+_filename_extract_jobs: dict[str, dict] = {}
 
 router = APIRouter(prefix="/admin")
 
@@ -393,6 +397,409 @@ async def _run_bulk_enrich(
     job["status"] = "done" if job.get("status") != "cancelled" else "cancelled"
     job["current"] = ""
     await broadcaster.enrich_progress(job_id, job["done"], total, "", job["status"])
+
+
+# ── Bulk Markdown Generation ──────────────────────────────────────────────────
+
+@router.post("/markdown/bulk")
+async def start_bulk_markdown(
+    library_id: Optional[int] = None,
+    background_tasks: BackgroundTasks = None,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(_require_admin),
+):
+    """Generate cached markdown for all editions missing it.
+
+    Skips audiobooks (ABS-only with no files) and comics (image-based).
+    Returns a job_id for polling.
+    """
+    from sqlalchemy import select
+    from app.models.edition import Edition, EditionFile
+    from app.services.markdown import has_cached_markdown, _SKIP_FORMATS
+
+    stmt = select(Edition).where(Edition.files.any())
+    if library_id:
+        stmt = stmt.where(Edition.library_id == library_id)
+
+    result = await db.execute(stmt)
+    editions = result.unique().scalars().all()
+
+    # Filter to editions that need markdown
+    edition_ids = []
+    for ed in editions:
+        if has_cached_markdown(ed.uuid):
+            continue
+        edition_ids.append(ed.id)
+
+    job_id = str(_uuid.uuid4())
+    _markdown_jobs[job_id] = {
+        "status": "queued",
+        "total": len(edition_ids),
+        "done": 0,
+        "failed": 0,
+        "skipped": 0,
+        "current": "",
+        "started_at": datetime.utcnow().isoformat(),
+    }
+
+    background_tasks.add_task(_run_bulk_markdown, job_id, edition_ids)
+    return {"job_id": job_id, "total": len(edition_ids)}
+
+
+@router.get("/markdown/bulk/{job_id}")
+async def get_bulk_markdown_job(
+    job_id: str,
+    _admin: User = Depends(_require_admin),
+):
+    """Poll the status of a bulk markdown generation job."""
+    job = _markdown_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"job_id": job_id, **job}
+
+
+async def _run_bulk_markdown(job_id: str, edition_ids: list[int]) -> None:
+    """Background task: generate markdown for each edition."""
+    from app.services.markdown import generate_markdown
+    from app.services.events import broadcaster
+    from app.database import _session_factory
+    from app.models.edition import Edition
+    from sqlalchemy import select
+
+    job = _markdown_jobs[job_id]
+    job["status"] = "running"
+    total = len(edition_ids)
+
+    async with _session_factory() as db:
+        for edition_id in edition_ids:
+            if job.get("status") == "cancelled":
+                break
+
+            # Get title for progress display
+            result = await db.execute(select(Edition).where(Edition.id == edition_id))
+            edition = result.scalar_one_or_none()
+            if edition:
+                job["current"] = edition.title
+
+            try:
+                md = await generate_markdown(edition_id)
+                if md is None:
+                    job["skipped"] += 1
+                    job["done"] += 1
+                else:
+                    job["done"] += 1
+            except Exception as exc:
+                logger.warning("Markdown generation failed for edition %d: %s", edition_id, exc)
+                job["failed"] += 1
+                job["done"] += 1
+
+            if job["done"] % 10 == 0 or job["done"] == total:
+                try:
+                    await broadcaster.enrich_progress(
+                        job_id, job["done"], total, job["current"], "running"
+                    )
+                except Exception:
+                    pass
+
+            await asyncio.sleep(0.05)
+
+    job["status"] = "done" if job.get("status") != "cancelled" else "cancelled"
+    job["current"] = ""
+
+
+# ── Bulk Identifier Extraction ───────────────────────────────────────────────
+
+
+class IdentifierBatchRequest(BaseModel):
+    edition_ids: list[int]
+
+
+@router.post("/identifiers/batch")
+async def start_batch_identifier_extraction(
+    req: IdentifierBatchRequest,
+    background_tasks: BackgroundTasks,
+    _admin: User = Depends(_require_admin),
+):
+    """Scan a specific set of books for ISBN/DOI.
+
+    Accepts an array of edition IDs. Returns a job_id for polling.
+    """
+    job_id = str(_uuid.uuid4())
+    _identifier_jobs[job_id] = {
+        "status": "queued",
+        "total": len(req.edition_ids),
+        "done": 0,
+        "found_isbn": 0,
+        "found_doi": 0,
+        "failed": 0,
+        "current": "",
+        "started_at": datetime.utcnow().isoformat(),
+    }
+    background_tasks.add_task(_run_bulk_identifiers, job_id, req.edition_ids)
+    return {"job_id": job_id, "total": len(req.edition_ids)}
+
+
+@router.post("/identifiers/bulk")
+async def start_bulk_identifier_extraction(
+    library_id: Optional[int] = None,
+    background_tasks: BackgroundTasks = None,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(_require_admin),
+):
+    """Scan book files for ISBN/DOI and update editions missing them.
+
+    Returns a job_id for polling.
+    """
+    from sqlalchemy import select, or_
+    from sqlalchemy.orm import joinedload
+    from app.models.edition import Edition
+    from app.models.work import Work
+
+    # Find editions missing ISBN or whose work is missing DOI, that have files
+    stmt = (
+        select(Edition)
+        .join(Edition.work)
+        .where(Edition.files.any())
+        .where(or_(Edition.isbn.is_(None), Work.doi.is_(None)))
+    )
+    if library_id:
+        stmt = stmt.where(Edition.library_id == library_id)
+
+    result = await db.execute(stmt)
+    editions = result.unique().scalars().all()
+    edition_ids = [e.id for e in editions]
+
+    job_id = str(_uuid.uuid4())
+    _identifier_jobs[job_id] = {
+        "status": "queued",
+        "total": len(edition_ids),
+        "done": 0,
+        "found_isbn": 0,
+        "found_doi": 0,
+        "failed": 0,
+        "current": "",
+        "started_at": datetime.utcnow().isoformat(),
+    }
+
+    background_tasks.add_task(_run_bulk_identifiers, job_id, edition_ids)
+    return {"job_id": job_id, "total": len(edition_ids)}
+
+
+@router.get("/identifiers/bulk/{job_id}")
+async def get_bulk_identifier_job(
+    job_id: str,
+    _admin: User = Depends(_require_admin),
+):
+    """Poll the status of a bulk identifier extraction job."""
+    job = _identifier_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"job_id": job_id, **job}
+
+
+async def _run_bulk_identifiers(job_id: str, edition_ids: list[int]) -> None:
+    """Background task: extract identifiers for each edition."""
+    from app.services.identifier_extraction import extract_identifiers_for_edition
+
+    job = _identifier_jobs[job_id]
+    job["status"] = "running"
+    total = len(edition_ids)
+
+    for edition_id in edition_ids:
+        if job.get("status") == "cancelled":
+            break
+
+        try:
+            ids = await extract_identifiers_for_edition(edition_id)
+            if ids.get("isbn_13"):
+                job["found_isbn"] += 1
+            if ids.get("doi"):
+                job["found_doi"] += 1
+        except Exception as exc:
+            logger.warning("Identifier extraction failed for edition %d: %s", edition_id, exc)
+            job["failed"] += 1
+
+        job["done"] += 1
+
+        if job["done"] % 10 == 0 or job["done"] == total:
+            try:
+                from app.services.events import broadcaster
+                await broadcaster.enrich_progress(
+                    job_id, job["done"], total, "", "running"
+                )
+            except Exception:
+                pass
+
+        await asyncio.sleep(0.05)
+
+    job["status"] = "done" if job.get("status") != "cancelled" else "cancelled"
+    job["current"] = ""
+
+
+# ── Filename Metadata Extraction ──────────────────────────────────────────────
+
+@router.post("/filename-extract/bulk")
+async def start_bulk_filename_extract(
+    library_id: Optional[int] = None,
+    min_confidence: str = Query("medium", pattern="^(low|medium|high)$"),
+    background_tasks: BackgroundTasks = None,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(_require_admin),
+):
+    """Extract title/author from filenames for books with missing metadata."""
+    from sqlalchemy import select, or_
+    from sqlalchemy.orm import joinedload
+    from app.models.edition import Edition
+    from app.models.work import Work
+
+    # Find editions with missing title or no authors
+    stmt = (
+        select(Edition)
+        .join(Edition.work)
+        .where(Edition.files.any())
+        .where(
+            or_(
+                Work.title.is_(None),
+                Work.title == '',
+                ~Work.authors.any(),
+            )
+        )
+    )
+    if library_id:
+        stmt = stmt.where(Edition.library_id == library_id)
+
+    result = await db.execute(stmt)
+    edition_ids = [e.id for e in result.unique().scalars().all()]
+
+    job_id = str(_uuid.uuid4())
+    _filename_extract_jobs[job_id] = {
+        "status": "queued",
+        "total": len(edition_ids),
+        "done": 0,
+        "applied": 0,
+        "skipped": 0,
+        "failed": 0,
+        "current": "",
+        "started_at": datetime.utcnow().isoformat(),
+    }
+    background_tasks.add_task(_run_filename_extract, job_id, edition_ids, min_confidence)
+    return {"job_id": job_id, "total": len(edition_ids)}
+
+
+@router.get("/filename-extract/bulk/{job_id}")
+async def get_filename_extract_job(
+    job_id: str,
+    _admin: User = Depends(_require_admin),
+):
+    """Poll filename extraction job status."""
+    job = _filename_extract_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"job_id": job_id, **job}
+
+
+async def _run_filename_extract(job_id: str, edition_ids: list[int], min_confidence: str) -> None:
+    from app.services.filename_metadata import extract_and_apply
+
+    job = _filename_extract_jobs[job_id]
+    job["status"] = "running"
+
+    for edition_id in edition_ids:
+        if job.get("status") == "cancelled":
+            break
+        try:
+            result = await extract_and_apply(edition_id, min_confidence)
+            if result.get("status") == "applied":
+                job["applied"] += 1
+            else:
+                job["skipped"] += 1
+        except Exception:
+            job["failed"] += 1
+        job["done"] += 1
+        await asyncio.sleep(0.02)
+
+    job["status"] = "done" if job.get("status") != "cancelled" else "cancelled"
+    job["current"] = ""
+
+
+# ── Cover Quality & Upgrade ──────────────────────────────────────────────────
+
+@router.get("/covers/low-quality")
+async def list_low_quality_covers(
+    library_id: Optional[int] = None,
+    _admin: User = Depends(_require_admin),
+):
+    """Find editions with low-resolution or undersized covers."""
+    from app.services.cover_quality import find_low_quality_covers
+    return await find_low_quality_covers(library_id)
+
+
+@router.post("/covers/upgrade")
+async def start_cover_upgrade(
+    library_id: Optional[int] = None,
+    background_tasks: BackgroundTasks = None,
+    _admin: User = Depends(_require_admin),
+):
+    """Find low-quality covers and attempt iTunes upgrade. Background job."""
+    from app.services.cover_quality import find_low_quality_covers
+    low = await find_low_quality_covers(library_id)
+    edition_ids = [item["edition_id"] for item in low]
+
+    job_id = str(_uuid.uuid4())
+    _cover_upgrade_jobs[job_id] = {
+        "status": "queued",
+        "total": len(edition_ids),
+        "done": 0,
+        "upgraded": 0,
+        "no_match": 0,
+        "failed": 0,
+        "current": "",
+        "started_at": datetime.utcnow().isoformat(),
+    }
+    background_tasks.add_task(_run_cover_upgrade, job_id, edition_ids)
+    return {"job_id": job_id, "total": len(edition_ids)}
+
+
+@router.get("/covers/upgrade/{job_id}")
+async def get_cover_upgrade_job(
+    job_id: str,
+    _admin: User = Depends(_require_admin),
+):
+    """Poll cover upgrade job status."""
+    job = _cover_upgrade_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"job_id": job_id, **job}
+
+
+async def _run_cover_upgrade(job_id: str, edition_ids: list[int]) -> None:
+    """Background task: upgrade low-quality covers via iTunes."""
+    from app.services.cover_quality import upgrade_cover
+
+    job = _cover_upgrade_jobs[job_id]
+    job["status"] = "running"
+
+    for edition_id in edition_ids:
+        if job.get("status") == "cancelled":
+            break
+
+        result = await upgrade_cover(edition_id)
+        status = result.get("status", "failed")
+        if status == "upgraded":
+            job["upgraded"] += 1
+        elif status == "no_match":
+            job["no_match"] += 1
+        else:
+            job["failed"] += 1
+
+        job["done"] += 1
+        job["current"] = result.get("itunes_title") or result.get("title") or ""
+
+        # iTunes rate limiting (~20 req/min)
+        await asyncio.sleep(3)
+
+    job["status"] = "done" if job.get("status") != "cancelled" else "cancelled"
+    job["current"] = ""
 
 
 @router.get("/backup")

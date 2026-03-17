@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     INGEST_PATH: str = "data/ingest"
     CONFIG_PATH: str = "data/config"
     COVERS_PATH: str = "data/covers"
+    MARKDOWN_PATH: str = "data/markdown"
 
     # Security
     SECRET_KEY: str = "your-secret-key-change-me-in-production"
@@ -76,6 +77,10 @@ class Settings(BaseSettings):
     # AudiobookShelf integration
     ABS_URL: str | None = None              # e.g. http://192.168.1.10:13378
     ABS_API_KEY: str | None = None          # API key from ABS profile → API tab
+
+    # Instapaper integration (OAuth 1.0a consumer credentials)
+    INSTAPAPER_CONSUMER_KEY: str | None = None
+    INSTAPAPER_CONSUMER_SECRET: str | None = None
 
     # LLM Configuration
     LLM_PROVIDER: str = "anthropic"  # "anthropic", "ollama", "openai"

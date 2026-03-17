@@ -1,9 +1,44 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
-  import { BookPlus, Search, Loader2, X, BookOpen, Package } from 'lucide-svelte';
+  import { BookPlus, Search, Loader2, X, BookOpen, Package, ScanBarcode, Upload } from 'lucide-svelte';
+  import BarcodeScanner from '$lib/components/BarcodeScanner.svelte';
+  import LocationSelector from '$lib/components/LocationSelector.svelte';
   import * as api from '$lib/api/client';
 
   let libraries = $state<{ id: number; name: string }[]>([]);
+  let showScanner = $state(false);
+
+  // File upload
+  let uploading = $state(false);
+  let uploadMsg = $state('');
+  let dragOver = $state(false);
+
+  async function handleFileUpload(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    uploading = true;
+    uploadMsg = '';
+    let uploaded = 0;
+    let failed = 0;
+    for (const file of Array.from(files)) {
+      try {
+        await api.uploadBookFile(file);
+        uploaded++;
+      } catch (e) {
+        failed++;
+        uploadMsg = e instanceof Error ? e.message : 'Upload failed';
+      }
+    }
+    if (uploaded > 0) {
+      uploadMsg = `Uploaded ${uploaded} file${uploaded > 1 ? 's' : ''}${failed ? `, ${failed} failed` : ''} — processing via ingest`;
+    }
+    uploading = false;
+  }
+
+  function handleDrop(e: DragEvent) {
+    e.preventDefault();
+    dragOver = false;
+    handleFileUpload(e.dataTransfer?.files ?? null);
+  }
 
   // Step 1: lookup
   let lookupTitle = $state('');
@@ -23,6 +58,7 @@
   let language = $state('');
   let libraryId = $state<number | null>(null);
   let physicalCopy = $state(false);
+  let locationId = $state<number | null>(null);
   let lookedUp = $state(false);
   let coverPreview = $state<string | null>(null);
 
@@ -82,6 +118,13 @@
     }
   }
 
+  function handleBarcodeScan(scannedIsbn: string) {
+    showScanner = false;
+    lookupISBN = scannedIsbn;
+    physicalCopy = true; // scanned barcodes are physical books
+    lookup();
+  }
+
   function skipLookup() {
     title = lookupTitle;
     authorInput = lookupAuthor;
@@ -104,6 +147,7 @@
         published_date: publishedDate || null,
         library_id: libraryId,
         physical_copy: physicalCopy,
+        location_id: locationId,
         author_names: authorInput.split(',').map(s => s.trim()).filter(Boolean),
         tag_names: tagsInput.split(',').map(s => s.trim().toLowerCase()).filter(Boolean),
       });
@@ -125,6 +169,33 @@
       <h1 class="text-2xl font-semibold">Add Book</h1>
       <p class="text-sm text-muted-foreground">Add a physical book, one you've read, or any title you want to track</p>
     </div>
+  </div>
+
+  <!-- File upload drop zone -->
+  <div
+    class="rounded-lg border-2 border-dashed p-6 text-center transition-colors {dragOver ? 'border-primary bg-primary/5' : 'border-muted-foreground/20'}"
+    ondragover={(e) => { e.preventDefault(); dragOver = true; }}
+    ondragleave={() => dragOver = false}
+    ondrop={handleDrop}
+    role="region"
+  >
+    <Upload class="mx-auto h-8 w-8 text-muted-foreground/40 mb-2" />
+    <p class="text-sm text-muted-foreground">
+      {#if uploading}
+        Uploading…
+      {:else}
+        Drag & drop book files here, or
+        <label class="text-primary cursor-pointer hover:underline">
+          browse
+          <input type="file" accept=".epub,.pdf,.cbz,.cbr,.mobi,.azw,.azw3,.fb2,.djvu" multiple class="hidden"
+            onchange={(e) => handleFileUpload((e.target as HTMLInputElement).files)} />
+        </label>
+      {/if}
+    </p>
+    <p class="mt-1 text-xs text-muted-foreground/50">EPUB, PDF, CBZ, CBR, MOBI, AZW3, FB2, DJVU</p>
+    {#if uploadMsg}
+      <p class="mt-2 text-xs text-muted-foreground">{uploadMsg}</p>
+    {/if}
   </div>
 
   {#if !lookedUp}
@@ -166,6 +237,13 @@
             <Search class="h-3.5 w-3.5" />
           {/if}
           {lookingUp ? 'Looking up…' : 'Look up'}
+        </button>
+        <button
+          onclick={() => showScanner = true}
+          class="flex items-center gap-1.5 rounded-md border px-4 py-2 text-sm transition-colors hover:bg-accent"
+        >
+          <ScanBarcode class="h-3.5 w-3.5" />
+          Scan barcode
         </button>
         <button
           onclick={skipLookup}
@@ -293,7 +371,12 @@
             <p class="text-xs text-muted-foreground">I own a physical edition of this book</p>
           </div>
         </label>
-        {#if !physicalCopy}
+        {#if physicalCopy}
+          <div class="pl-6 pt-1 space-y-1">
+            <label class="text-xs text-muted-foreground">Location</label>
+            <LocationSelector value={locationId} onSelect={(id) => locationId = id} />
+          </div>
+        {:else}
           <p class="text-xs text-muted-foreground pl-6">
             No copy selected — use this to track books you've read or want to read without owning a digital or physical copy.
           </p>
@@ -320,3 +403,7 @@
     </div>
   {/if}
 </div>
+
+{#if showScanner}
+  <BarcodeScanner onScan={handleBarcodeScan} onClose={() => showScanner = false} />
+{/if}

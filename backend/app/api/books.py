@@ -36,6 +36,7 @@ def _edition_options():
         ),
         joinedload(Edition.files),
         joinedload(Edition.contributors),
+        joinedload(Edition.location_ref),
     ]
 
 
@@ -49,6 +50,7 @@ async def list_books(
     author_id: Optional[int] = None,
     tag_id: Optional[int] = None,
     abs_linked: bool = False,
+    format: Optional[str] = None,
     sort_by: str = Query("date_added", pattern="^(date_added|title)$"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -89,6 +91,10 @@ async def list_books(
 
     if abs_linked:
         stmt = stmt.where(Edition.abs_item_id.isnot(None))
+
+    if format:
+        from app.models.edition import EditionFile
+        stmt = stmt.where(Edition.files.any(EditionFile.format.ilike(format)))
 
     # Get total count (same filters as main query, without pagination)
     count_stmt = select(func.count()).select_from(stmt.subquery())
@@ -240,14 +246,26 @@ async def create_book(
     db.add(work)
     await db.flush()
 
-    # Create Edition
+    # Create Edition (isbn already normalized to ISBN-13 by schema validator)
+    from app.utils.isbn import normalize as _normalize_isbn
+    _isbn13 = book_data.isbn
+    _, _isbn10 = _normalize_isbn(book_data.isbn) if book_data.isbn else (None, None)
+
     edition = Edition(
         uuid=str(uuid.uuid4()),
         work_id=work.id,
-        isbn=book_data.isbn,
+        isbn=_isbn13,
+        isbn_10=_isbn10,
         publisher=book_data.publisher,
         published_date=book_data.published_date,
         physical_copy=book_data.physical_copy,
+        binding=book_data.binding,
+        condition=book_data.condition,
+        purchase_price=book_data.purchase_price,
+        purchase_date=book_data.purchase_date,
+        purchase_from=book_data.purchase_from,
+        location=book_data.location,
+        location_id=book_data.location_id,
         library_id=book_data.library_id,
     )
     db.add(edition)
@@ -300,7 +318,10 @@ async def update_book(
 
     # Update Edition fields
     if book_data.isbn is not None:
-        edition.isbn = book_data.isbn
+        edition.isbn = book_data.isbn  # already normalized to ISBN-13 by schema
+        from app.utils.isbn import normalize as _normalize_isbn
+        _, isbn10 = _normalize_isbn(book_data.isbn)
+        edition.isbn_10 = isbn10
     if book_data.language is not None:
         edition.language = book_data.language
     if book_data.published_date is not None:
@@ -309,6 +330,20 @@ async def update_book(
         edition.publisher = book_data.publisher
     if book_data.physical_copy is not None:
         edition.physical_copy = book_data.physical_copy
+    if book_data.binding is not None:
+        edition.binding = book_data.binding or None
+    if book_data.condition is not None:
+        edition.condition = book_data.condition or None
+    if book_data.purchase_price is not None:
+        edition.purchase_price = book_data.purchase_price
+    if book_data.purchase_date is not None:
+        edition.purchase_date = book_data.purchase_date
+    if book_data.purchase_from is not None:
+        edition.purchase_from = book_data.purchase_from or None
+    if book_data.location is not None:
+        edition.location = book_data.location
+    if book_data.location_id is not None:
+        edition.location_id = book_data.location_id if book_data.location_id != 0 else None
 
     # Update Work relationships — name-based takes priority over ID-based
     if book_data.author_names is not None:
@@ -373,6 +408,105 @@ async def update_book(
     await db.commit()
 
     return BookRead.model_validate(edition)
+
+
+class BulkEditRequest(BaseModel):
+    """Bulk-edit metadata across multiple books."""
+    edition_ids: list[int]
+    # Fields to set (None = don't change)
+    author_names: Optional[list[str]] = None
+    tag_names: Optional[list[str]] = None
+    series_names: Optional[list[str]] = None
+    publisher: Optional[str] = None
+    language: Optional[str] = None
+    # Merge mode: True = add to existing, False = replace
+    merge_authors: bool = True
+    merge_tags: bool = True
+    merge_series: bool = True
+
+
+@router.put("/bulk-edit", status_code=status.HTTP_200_OK)
+async def bulk_edit_books(
+    req: BulkEditRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update metadata for multiple books at once.
+
+    Supports setting authors, tags, series, publisher, language across
+    a batch of selected books. Merge mode adds to existing values;
+    replace mode overwrites them.
+    """
+    if not current_user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+
+    from app.services.search import search_service
+
+    updated = 0
+    failed = 0
+
+    for edition_id in req.edition_ids:
+        try:
+            stmt = select(Edition).where(Edition.id == edition_id).options(*_edition_options())
+            result = await db.execute(stmt)
+            edition = result.unique().scalar_one_or_none()
+            if not edition:
+                failed += 1
+                continue
+
+            work = edition.work
+
+            # Authors
+            if req.author_names is not None:
+                new_authors = await _get_or_create(db, Author, "name", req.author_names)
+                if req.merge_authors:
+                    existing_ids = {a.id for a in work.authors}
+                    for a in new_authors:
+                        if a.id not in existing_ids:
+                            work.authors.append(a)
+                else:
+                    work.authors = new_authors
+
+            # Tags
+            if req.tag_names is not None:
+                new_tags = await _get_or_create(db, Tag, "name", req.tag_names)
+                if req.merge_tags:
+                    existing_ids = {t.id for t in work.tags}
+                    for t in new_tags:
+                        if t.id not in existing_ids:
+                            work.tags.append(t)
+                else:
+                    work.tags = new_tags
+
+            # Series
+            if req.series_names is not None:
+                new_series = await _get_or_create(db, Series, "name", req.series_names)
+                if req.merge_series:
+                    existing_ids = {s.id for s in work.series}
+                    for s in new_series:
+                        if s.id not in existing_ids:
+                            work.series.append(s)
+                else:
+                    work.series = new_series
+
+            # Publisher
+            if req.publisher is not None:
+                edition.publisher = req.publisher
+
+            # Language
+            if req.language is not None:
+                edition.language = req.language
+
+            await db.flush()
+            await search_service.index_work(db, work, [a.name for a in work.authors])
+            updated += 1
+
+        except Exception as exc:
+            logger.warning("Bulk edit failed for edition %d: %s", edition_id, exc)
+            failed += 1
+
+    await db.commit()
+    return {"updated": updated, "failed": failed}
 
 
 class LockedFieldsUpdate(BaseModel):
@@ -477,12 +611,13 @@ async def upload_book_cover(
     if edition.cover_format:
         await cover_service.delete_cover(edition.uuid, edition.cover_format)
 
-    cover_hash, cover_format = await cover_service.save_cover(cover_bytes, edition.uuid)
+    cover_hash, cover_format, cover_color = await cover_service.save_cover(cover_bytes, edition.uuid)
     if not cover_hash:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Could not process image")
 
     edition.cover_hash = cover_hash
     edition.cover_format = cover_format
+    edition.cover_color = cover_color
     await db.commit()
     await db.refresh(edition)
     return BookRead.model_validate(edition)
@@ -526,12 +661,13 @@ async def set_cover_from_url(
     if edition.cover_format:
         await cover_service.delete_cover(edition.uuid, edition.cover_format)
 
-    cover_hash, cover_format = await cover_service.save_cover(cover_bytes, edition.uuid)
+    cover_hash, cover_format, cover_color = await cover_service.save_cover(cover_bytes, edition.uuid)
     if not cover_hash:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Could not process image")
 
     edition.cover_hash = cover_hash
     edition.cover_format = cover_format
+    edition.cover_color = cover_color
     await db.commit()
     await db.refresh(edition)
     return BookRead.model_validate(edition)
@@ -624,6 +760,153 @@ async def enrich_book_metadata(
     await db.commit()
 
     return BookRead.model_validate(edition)
+
+
+@router.post("/{book_id}/extract-identifiers")
+async def extract_book_identifiers(
+    book_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Scan a book's file content for ISBN and DOI.
+
+    Updates the edition's isbn/isbn_10 and the work's doi if found and currently empty.
+    """
+    if not current_user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+
+    from app.services.identifier_extraction import extract_identifiers_for_edition
+    ids = await extract_identifiers_for_edition(book_id)
+
+    return {
+        "isbn_13": ids.get("isbn_13"),
+        "isbn_10": ids.get("isbn_10"),
+        "doi": ids.get("doi"),
+        "isbn_source": ids.get("isbn_source"),
+        "doi_source": ids.get("doi_source"),
+    }
+
+
+@router.get("/{book_id}/series-neighbors")
+async def get_series_neighbors(
+    book_id: int,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Get previous/next books in the same series for navigation."""
+    from app.models.work import work_series
+
+    stmt = select(Edition).where(Edition.id == book_id).options(*_edition_options())
+    result = await db.execute(stmt)
+    edition = result.unique().scalar_one_or_none()
+    if not edition or not edition.work:
+        return {"series": []}
+
+    work = edition.work
+    if not work.series:
+        return {"series": []}
+
+    neighbors = []
+    for series in work.series:
+        # Get all works in this series with their positions
+        ws_stmt = (
+            select(
+                work_series.c.work_id,
+                work_series.c.position,
+                Work.title,
+            )
+            .join(Work, Work.id == work_series.c.work_id)
+            .where(work_series.c.series_id == series.id)
+            .order_by(work_series.c.position.asc().nulls_last(), Work.title.asc())
+        )
+        rows = (await db.execute(ws_stmt)).all()
+
+        # Find current work's index
+        current_idx = None
+        entries = []
+        for i, (wid, pos, title) in enumerate(rows):
+            # Get edition ID for this work
+            ed_result = await db.scalar(
+                select(Edition.id).where(Edition.work_id == wid).limit(1)
+            )
+            entries.append({"work_id": wid, "edition_id": ed_result, "position": pos, "title": title})
+            if wid == work.id:
+                current_idx = i
+
+        if current_idx is None:
+            continue
+
+        prev_book = entries[current_idx - 1] if current_idx > 0 else None
+        next_book = entries[current_idx + 1] if current_idx < len(entries) - 1 else None
+
+        neighbors.append({
+            "series_id": series.id,
+            "series_name": series.name,
+            "current_position": entries[current_idx]["position"],
+            "total": len(entries),
+            "previous": {"id": prev_book["edition_id"], "title": prev_book["title"], "position": prev_book["position"]} if prev_book and prev_book["edition_id"] else None,
+            "next": {"id": next_book["edition_id"], "title": next_book["title"], "position": next_book["position"]} if next_book and next_book["edition_id"] else None,
+        })
+
+    return {"series": neighbors}
+
+
+class ReadingLevelUpdate(BaseModel):
+    """Manual reading level update."""
+    lexile: Optional[int] = None
+    lexile_code: Optional[str] = None
+    ar_level: Optional[float] = None
+    ar_points: Optional[float] = None
+    age_range: Optional[str] = None
+    interest_level: Optional[str] = None
+
+
+@router.patch("/{book_id}/reading-level")
+async def update_reading_level(
+    book_id: int,
+    data: ReadingLevelUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Set reading level fields (Lexile, AR, age range, etc.) for a book."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+
+    stmt = select(Edition).where(Edition.id == book_id).options(*_edition_options())
+    result = await db.execute(stmt)
+    edition = result.unique().scalar_one_or_none()
+    if not edition:
+        raise HTTPException(status_code=404, detail="Book not found")
+
+    work = edition.work
+    for field in ["lexile", "lexile_code", "ar_level", "ar_points", "age_range", "interest_level"]:
+        val = getattr(data, field, None)
+        if val is not None:
+            setattr(work, field, val)
+
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/{book_id}/compute-reading-level")
+async def compute_book_reading_level(
+    book_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Compute Flesch-Kincaid grade level from book text content."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+
+    stmt = select(Edition).where(Edition.id == book_id).options(*_edition_options())
+    result = await db.execute(stmt)
+    edition = result.unique().scalar_one_or_none()
+    if not edition:
+        raise HTTPException(status_code=404, detail="Book not found")
+
+    from app.services.reading_level import compute_reading_level
+    result = await compute_reading_level(edition.work_id)
+    return result
 
 
 @router.get("/{book_id}/files/{file_id}/pages")
@@ -899,9 +1182,59 @@ async def _apply_enrichment(
         work.doi = enriched["doi"]
         changed = True
 
+    # ── Reading levels (Work-level) ──────────────────────────────────────────
+    if enriched.get("lexile") and _want("lexile", work.lexile):
+        work.lexile = enriched["lexile"]
+        changed = True
+    if enriched.get("lexile_code") and _want("lexile_code", work.lexile_code):
+        work.lexile_code = enriched["lexile_code"]
+        changed = True
+    if enriched.get("ar_level") and _want("ar_level", work.ar_level):
+        work.ar_level = enriched["ar_level"]
+        changed = True
+    if enriched.get("ar_points") and _want("ar_points", work.ar_points):
+        work.ar_points = enriched["ar_points"]
+        changed = True
+    if enriched.get("age_range") and _want("age_range", work.age_range):
+        work.age_range = enriched["age_range"]
+        changed = True
+    if enriched.get("interest_level") and _want("interest_level", work.interest_level):
+        work.interest_level = enriched["interest_level"]
+        changed = True
+
+    # ── External IDs & ratings ──────────────────────────────────────────────
+    if enriched.get("goodreads_id") and not work.goodreads_id:
+        work.goodreads_id = enriched["goodreads_id"]
+        changed = True
+    if enriched.get("google_id") and not work.google_id:
+        work.google_id = enriched["google_id"]
+        changed = True
+    if enriched.get("hardcover_id") and not work.hardcover_id:
+        work.hardcover_id = enriched["hardcover_id"]
+        changed = True
+    if enriched.get("goodreads_rating") and not work.goodreads_rating:
+        work.goodreads_rating = enriched["goodreads_rating"]
+        work.goodreads_rating_count = enriched.get("goodreads_rating_count")
+        changed = True
+    if enriched.get("amazon_rating") and not work.amazon_rating:
+        work.amazon_rating = enriched["amazon_rating"]
+        work.amazon_rating_count = enriched.get("amazon_rating_count")
+        changed = True
+    if enriched.get("awards") and not work.awards:
+        import json as _awards_json
+        work.awards = _awards_json.dumps(enriched["awards"])
+        changed = True
+
     # ── Edition fields ────────────────────────────────────────────────────────
     if enriched.get("isbn") and _want("isbn", edition.isbn):
-        edition.isbn = enriched["isbn"]
+        from app.utils.isbn import normalize as _normalize_isbn
+        isbn13, isbn10 = _normalize_isbn(enriched["isbn"])
+        edition.isbn = isbn13
+        if isbn10 and not edition.isbn_10:
+            edition.isbn_10 = isbn10
+        changed = True
+    if enriched.get("asin") and _want("asin", edition.asin):
+        edition.asin = enriched["asin"]
         changed = True
     if enriched.get("published_date") and _want("published_date", edition.published_date):
         from datetime import datetime as _dt
@@ -962,10 +1295,11 @@ async def _apply_enrichment(
             async with _httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
                 resp = await client.get(enriched["cover_url"])
                 if resp.status_code == 200 and resp.content:
-                    cover_hash, cover_format = await cover_service.save_cover(resp.content, edition.uuid)
+                    cover_hash, cover_format, cover_color = await cover_service.save_cover(resp.content, edition.uuid)
                     if cover_hash:
                         edition.cover_hash = cover_hash
                         edition.cover_format = cover_format
+                        edition.cover_color = cover_color
                         changed = True
         except Exception as exc:
             logger.warning("Failed to download cover from %s: %s", enriched.get("cover_url"), exc)

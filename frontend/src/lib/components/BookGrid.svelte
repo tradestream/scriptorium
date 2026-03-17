@@ -1,15 +1,19 @@
 <script lang="ts">
   import BookCard from "./BookCard.svelte";
-  import { BookOpen, Headphones } from "lucide-svelte";
+  import { BookOpen, Headphones, Check } from "lucide-svelte";
   import { bookCoverUrl } from "$lib/api/client";
+  import { cn } from "$lib/utils/cn";
   import type { Book } from "$lib/types/index";
 
   interface Props {
     books: Book[];
     mode?: 'grid' | 'list';
+    selectionMode?: boolean;
+    selectedIds?: Set<number>;
+    onToggleSelect?: (id: number) => void;
   }
 
-  let { books, mode = 'grid' }: Props = $props();
+  let { books, mode = 'grid', selectionMode = false, selectedIds = new Set(), onToggleSelect }: Props = $props();
 
   function formatDate(iso: string): string {
     return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
@@ -28,10 +32,23 @@
       {@const author = book.authors?.[0]?.name ?? null}
       {@const series = book.series?.[0]?.name ?? null}
       {@const fmt = book.files?.[0]?.format ?? null}
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
       <a
         href="/book/{book.id}"
-        class="group flex items-center gap-4 px-4 py-2.5 transition-colors hover:bg-muted/40"
+        class={cn("group flex items-center gap-4 px-4 py-2.5 transition-colors hover:bg-muted/40", selectionMode && selectedIds.has(book.id) && "bg-primary/10")}
+        onclick={(e) => { if (selectionMode) { e.preventDefault(); onToggleSelect?.(book.id); } }}
       >
+        {#if selectionMode}
+          <button
+            class={cn(
+              "flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition-colors",
+              selectedIds.has(book.id) ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/30"
+            )}
+            onclick={(e) => { e.stopPropagation(); onToggleSelect?.(book.id); }}
+          >
+            {#if selectedIds.has(book.id)}<Check class="h-3 w-3" />{/if}
+          </button>
+        {/if}
         <!-- Thumbnail -->
         <div class="h-12 w-8 shrink-0 overflow-hidden rounded bg-muted">
           {#if cover}
@@ -73,7 +90,7 @@
 {:else}
   <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
     {#each books as book (book.id)}
-      <BookCard {book} />
+      <BookCard {book} {selectionMode} selected={selectedIds.has(book.id)} {onToggleSelect} />
     {/each}
   </div>
 {/if}

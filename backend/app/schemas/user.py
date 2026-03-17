@@ -17,11 +17,18 @@ class UserCreate(UserBase):
     password: str = Field(min_length=8)
 
 
+class UserUpdate(BaseModel):
+    """User update schema (self-service profile edit)."""
+    display_name: Optional[str] = None
+    email: Optional[str] = None
+
+
 class UserRead(BaseModel):
     """User read schema."""
 
     id: int
     username: str
+    display_name: Optional[str] = None
     email: str  # plain str — EmailStr is too strict for internal/local addresses
     is_admin: bool
     is_active: bool

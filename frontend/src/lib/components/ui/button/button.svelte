@@ -2,20 +2,22 @@
   import { cn } from "$lib/utils/cn";
   import type { ButtonVariant, ButtonSize } from "./index";
   import type { Snippet } from "svelte";
-  import type { HTMLButtonAttributes } from "svelte/elements";
+  import type { HTMLButtonAttributes, HTMLAnchorAttributes } from "svelte/elements";
 
-  interface Props extends HTMLButtonAttributes {
+  type Props = {
     variant?: ButtonVariant;
     size?: ButtonSize;
     children?: Snippet;
     class?: string;
-  }
+    href?: string;
+  } & (HTMLButtonAttributes | HTMLAnchorAttributes);
 
   let {
     variant = "default",
     size = "default",
     children,
     class: className,
+    href,
     ...restProps
   }: Props = $props();
 
@@ -34,18 +36,21 @@
     lg: "h-10 rounded-md px-8",
     icon: "h-9 w-9",
   };
-</script>
 
-<button
-  class={cn(
+  const baseClass = cn(
     "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
     variants[variant],
     sizes[size],
     className
-  )}
-  {...restProps}
->
-  {#if children}
-    {@render children()}
-  {/if}
-</button>
+  );
+</script>
+
+{#if href}
+  <a {href} class={baseClass} {...(restProps as HTMLAnchorAttributes)}>
+    {#if children}{@render children()}{/if}
+  </a>
+{:else}
+  <button class={baseClass} {...(restProps as HTMLButtonAttributes)}>
+    {#if children}{@render children()}{/if}
+  </button>
+{/if}

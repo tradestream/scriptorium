@@ -8,9 +8,12 @@
     groupBy: 'series' | 'year' | 'publisher';
     mode?: 'grid' | 'list';
     search?: string;
+    selectionMode?: boolean;
+    selectedIds?: Set<number>;
+    onToggleSelect?: (id: number) => void;
   }
 
-  let { books, groupBy, mode = 'grid', search = '' }: Props = $props();
+  let { books, groupBy, mode = 'grid', search = '', selectionMode = false, selectedIds = new Set(), onToggleSelect }: Props = $props();
 
   // Client-side search filter
   const filtered = $derived.by(() => {
@@ -105,7 +108,7 @@
         <!-- Group content -->
         {#if open}
           <div class="mt-2 mb-6 pl-5">
-            <BookGrid books={group.items} {mode} />
+            <BookGrid books={group.items} {mode} {selectionMode} {selectedIds} {onToggleSelect} />
           </div>
         {/if}
       </section>

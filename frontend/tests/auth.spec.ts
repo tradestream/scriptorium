@@ -40,8 +40,8 @@ test.describe('Login flow', () => {
     await page.locator('input[type="password"]').fill('TestPass1234');
     await page.locator('button[type="submit"]').click();
 
-    // Should redirect away from login
-    await expect(page).not.toHaveURL(/\/auth\/login/, { timeout: 5000 });
+    // Should redirect away from login — give time for SvelteKit layout data loading
+    await expect(page).not.toHaveURL(/\/auth\/login/, { timeout: 10000 });
     await ctx.close();
   });
 });

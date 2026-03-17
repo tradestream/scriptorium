@@ -3,6 +3,8 @@
   import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
   import { Progress } from '$lib/components/ui/progress';
   import { BookOpen, CheckCircle, Clock, BookMarked, BarChart2, CalendarCheck, Flame, TrendingUp, Target, Pencil, X, Check } from 'lucide-svelte';
+  import BlurFade from '$lib/components/magic-ui/blur-fade.svelte';
+  import NumberFlow from '@number-flow/svelte';
   import * as api from '$lib/api/client';
   import type { ReadingStats, ReadingGoal } from '$lib/api/client';
 
@@ -117,10 +119,12 @@
 </script>
 
 <div class="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
-  <div class="mb-8">
-    <h1 class="text-3xl font-bold tracking-tight">Reading Stats</h1>
-    <p class="mt-1 text-muted-foreground">Your reading activity at a glance</p>
-  </div>
+  <BlurFade delay={0}>
+    <div class="mb-8">
+      <h1 class="text-3xl font-bold tracking-tight">Reading Stats</h1>
+      <p class="mt-1 text-muted-foreground">Your reading activity at a glance</p>
+    </div>
+  </BlurFade>
 
   {#if loading}
     <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -131,27 +135,30 @@
   {:else if stats}
     <!-- Summary cards -->
     <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
-      <Card>
-        <CardContent class="pt-6">
-          <div class="flex items-start justify-between">
-            <div>
-              <p class="text-sm text-muted-foreground">In Library</p>
-              <p class="text-3xl font-bold">{stats.total_books}</p>
+      <BlurFade delay={0.05}>
+        <Card>
+          <CardContent class="pt-6">
+            <div class="flex items-start justify-between">
+              <div>
+                <p class="text-sm text-muted-foreground">In Library</p>
+                <p class="text-3xl font-bold"><NumberFlow value={stats.total_books} /></p>
+              </div>
+              <BookMarked class="h-5 w-5 text-muted-foreground" />
             </div>
-            <BookMarked class="h-5 w-5 text-muted-foreground" />
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </BlurFade>
 
-      <Card>
-        <CardContent class="pt-6">
-          <div class="flex items-start justify-between">
-            <div>
-              <p class="text-sm text-muted-foreground">Completed</p>
-              <p class="text-3xl font-bold">{stats.books_completed}</p>
+      <BlurFade delay={0.1}>
+        <Card>
+          <CardContent class="pt-6">
+            <div class="flex items-start justify-between">
+              <div>
+                <p class="text-sm text-muted-foreground">Completed</p>
+                <p class="text-3xl font-bold"><NumberFlow value={stats.books_completed} /></p>
+              </div>
+              <CheckCircle class="h-5 w-5 text-green-500" />
             </div>
-            <CheckCircle class="h-5 w-5 text-green-500" />
-          </div>
         </CardContent>
       </Card>
 
@@ -160,7 +167,7 @@
           <div class="flex items-start justify-between">
             <div>
               <p class="text-sm text-muted-foreground">Reading</p>
-              <p class="text-3xl font-bold">{stats.books_reading}</p>
+              <p class="text-3xl font-bold"><NumberFlow value={stats.books_reading} /></p>
             </div>
             <BookOpen class="h-5 w-5 text-blue-500" />
           </div>
@@ -172,7 +179,7 @@
           <div class="flex items-start justify-between">
             <div>
               <p class="text-sm text-muted-foreground">{currentYear}</p>
-              <p class="text-3xl font-bold">{stats.sessions_this_year}</p>
+              <p class="text-3xl font-bold"><NumberFlow value={stats.sessions_this_year} /></p>
             </div>
             <CalendarCheck class="h-5 w-5 text-violet-500" />
           </div>
@@ -280,7 +287,7 @@
           <div class="flex items-start justify-between">
             <div>
               <p class="text-sm text-muted-foreground">Current streak</p>
-              <p class="text-3xl font-bold">{stats.current_streak ?? 0}</p>
+              <p class="text-3xl font-bold"><NumberFlow value={stats.current_streak ?? 0} /></p>
             </div>
             <Flame class="h-5 w-5 text-orange-500" />
           </div>
@@ -293,7 +300,7 @@
           <div class="flex items-start justify-between">
             <div>
               <p class="text-sm text-muted-foreground">Longest streak</p>
-              <p class="text-3xl font-bold">{stats.longest_streak ?? 0}</p>
+              <p class="text-3xl font-bold"><NumberFlow value={stats.longest_streak ?? 0} /></p>
             </div>
             <TrendingUp class="h-5 w-5 text-amber-500" />
           </div>

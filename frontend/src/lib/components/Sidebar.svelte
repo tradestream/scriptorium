@@ -25,8 +25,9 @@
     Inbox,
     BookPlus,
     Headphones,
+    Newspaper,
   } from "lucide-svelte";
-  import type { Library as LibraryType, Shelf } from "$lib/types/index";
+  import type { Library as LibraryType, Shelf, Collection } from "$lib/types/index";
   import { DragDropProvider } from "@dnd-kit-svelte/svelte";
   import { move } from "@dnd-kit/helpers";
   import * as api from "$lib/api/client";
@@ -35,10 +36,11 @@
   interface Props {
     libraries?: LibraryType[];
     shelves?: Shelf[];
+    pinnedCollections?: Collection[];
     collapsed?: boolean;
   }
 
-  let { libraries = [], shelves = [], collapsed = $bindable(false) }: Props = $props();
+  let { libraries = [], shelves = [], pinnedCollections = [], collapsed = $bindable(false) }: Props = $props();
 
   // Local sortable copy — updated optimistically on drag
   let sortedLibraries = $state<LibraryType[]>([]);
@@ -54,6 +56,7 @@
     { label: "Tags",           href: "/browse/tags",       icon: Tag },
     { label: "Series",         href: "/browse/series",     icon: Layers },
     { label: "Audiobooks",     href: "/browse/audiobooks", icon: Headphones },
+    { label: "Articles",       href: "/articles",          icon: Newspaper },
     { label: "Shelves",        href: "/shelves",           icon: BookMarked },
     { label: "Collections",    href: "/collections",       icon: Layers },
     { label: "Duplicates",     href: "/duplicates",        icon: Copy },
@@ -206,6 +209,34 @@
             <FolderOpen class="h-3.5 w-3.5 shrink-0" />
             {#if !collapsed}
               <span class="truncate">{shelf.name}</span>
+            {/if}
+          </a>
+        {/each}
+      </div>
+    {/if}
+
+    {#if pinnedCollections.length > 0}
+      <div class="pt-4">
+        {#if !collapsed}
+          <p class="mb-1 px-2.5 text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/35">
+            Collections
+          </p>
+        {:else}
+          <Separator class="my-2 bg-sidebar-foreground/10" />
+        {/if}
+        {#each pinnedCollections as col}
+          <a
+            href="/collections/{col.id}"
+            title={collapsed ? col.name : undefined}
+            class={cn(
+              "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-sidebar-foreground/55 transition-colors hover:bg-sidebar-foreground/6 hover:text-sidebar-foreground",
+              collapsed && "justify-center px-0 h-9 w-9 mx-auto",
+              col.is_smart && "italic"
+            )}
+          >
+            <Layers class="h-3.5 w-3.5 shrink-0" />
+            {#if !collapsed}
+              <span class="truncate">{col.name}</span>
             {/if}
           </a>
         {/each}

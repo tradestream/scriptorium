@@ -20,10 +20,13 @@ class CoverService:
 
     async def save_cover(
         self, cover_bytes: bytes, book_uuid: str
-    ) -> tuple[Optional[str], Optional[str]]:
-        """Save cover bytes, generate thumbnail, return (hash, format)."""
+    ) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        """Save cover bytes, generate thumbnail, extract dominant color.
+
+        Returns (hash, format, hex_color).
+        """
         if not cover_bytes:
-            return None, None
+            return None, None, None
         try:
             from PIL import Image
             import io
@@ -49,9 +52,41 @@ class CoverService:
             img_rgb.thumbnail(_THUMBNAIL_SIZE, Image.LANCZOS)
             img_rgb.save(str(thumb_path), format=img_format.upper().replace("JPEG", "JPEG"))
 
-            return cover_hash, img_format
+            # Extract dominant color
+            color = self._dominant_color(img_rgb)
+
+            return cover_hash, img_format, color
         except Exception:
-            return None, None
+            return None, None, None
+
+    @staticmethod
+    def _dominant_color(img) -> Optional[str]:
+        """Extract the dominant color from an image as a hex string."""
+        try:
+            # Resize to 1x1 for average, or use quantize for dominant
+            small = img.copy()
+            small.thumbnail((50, 50))
+            # Quantize to 5 colors, pick the most common non-white/non-black
+            quantized = small.quantize(colors=5, method=0)
+            palette = quantized.getpalette()
+            if not palette:
+                return None
+            # Get color counts
+            color_counts = sorted(quantized.getcolors(), key=lambda c: -c[0])
+            for count, idx in color_counts:
+                r, g, b = palette[idx * 3], palette[idx * 3 + 1], palette[idx * 3 + 2]
+                # Skip near-white and near-black
+                if r + g + b > 700 or r + g + b < 60:
+                    continue
+                return f"#{r:02x}{g:02x}{b:02x}"
+            # Fallback to most common
+            if color_counts:
+                idx = color_counts[0][1]
+                r, g, b = palette[idx * 3], palette[idx * 3 + 1], palette[idx * 3 + 2]
+                return f"#{r:02x}{g:02x}{b:02x}"
+        except Exception:
+            pass
+        return None
 
     async def delete_cover(self, book_uuid: str, cover_format: str) -> None:
         """Remove cover files for a book."""

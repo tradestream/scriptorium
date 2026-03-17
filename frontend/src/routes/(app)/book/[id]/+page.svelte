@@ -1,15 +1,18 @@
 <script lang="ts">
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
+  import ScrollProgress from "$lib/components/magic-ui/scroll-progress.svelte";
+  import BlurFade from "$lib/components/magic-ui/blur-fade.svelte";
   import { Card, CardContent, CardHeader, CardTitle } from "$lib/components/ui/card";
   import { Progress } from "$lib/components/ui/progress";
   import { Separator } from "$lib/components/ui/separator";
-  import { BookOpen, Download, Pencil, X, Sparkles, ChevronDown, Send, BookMarked, Check, Layers, Plus, Highlighter, MessageSquare, Bookmark, Trash2, CalendarCheck, Lightbulb, Package, Headphones } from "lucide-svelte";
+  import { BookOpen, Download, Pencil, X, Sparkles, ChevronDown, ChevronLeft, ChevronRight, Send, BookMarked, Check, Layers, Plus, Highlighter, MessageSquare, Bookmark, Trash2, CalendarCheck, Lightbulb, Package, Headphones, ScanSearch, MapPin, Quote } from "lucide-svelte";
   import BookAnalysis from "$lib/components/BookAnalysis.svelte";
   import Marginalia from "$lib/components/Marginalia.svelte";
   import EsotericAnalysis from "$lib/components/EsotericAnalysis.svelte";
   import BookMetaEditor from "$lib/components/BookMetaEditor.svelte";
-  import { bookCoverUrl, enrichBook, getEnrichmentProviders, convertBookFile, bookFileUrl, sendBookToDevice, setBookStatus, getShelves, getBookShelves, addBookToShelf, removeBookFromShelf, getCollections, addBookToCollection, removeBookFromCollection, getAnnotations, createAnnotation, deleteAnnotation, getReadSessions, createReadSession, deleteReadSession, setCoverFromUrl, setLockedFields, setEsotericEnabled, exportAnnotations, getBookRecommendations, updateBook } from "$lib/api/client";
+  import { bookCoverUrl, enrichBook, getEnrichmentProviders, convertBookFile, bookFileUrl, sendBookToDevice, setBookStatus, getShelves, getBookShelves, addBookToShelf, removeBookFromShelf, getCollections, addBookToCollection, removeBookFromCollection, getAnnotations, createAnnotation, deleteAnnotation, getReadSessions, createReadSession, deleteReadSession, setCoverFromUrl, setLockedFields, setEsotericEnabled, exportAnnotations, getBookRecommendations, updateBook, extractBookIdentifiers, citationUrl, computeReadingLevel, getBook, getSeriesNeighbors } from "$lib/api/client";
+  import type { SeriesNav } from "$lib/api/client";
   import type { EnrichmentProvider, BookRecommendation } from "$lib/api/client";
   import type { Book, Shelf, Collection, Annotation, ReadSession, User } from "$lib/types/index";
   import type { PageData } from './$types';
@@ -65,6 +68,21 @@
   let providers = $state<EnrichmentProvider[]>([]);
   let selectedProvider = $state('');
   let showProviders = $state(false);
+
+  let extractingIds = $state(false);
+  let extractIdsMsg = $state('');
+  let showCiteMenu = $state(false);
+  let computingFk = $state(false);
+  let seriesNav = $state<SeriesNav[]>([]);
+
+  // Load series navigation when book changes
+  $effect(() => {
+    if (book?.series?.length) {
+      getSeriesNeighbors(book.id).then(r => seriesNav = r.series).catch(() => {});
+    } else {
+      seriesNav = [];
+    }
+  });
 
   let coverUrl = $derived(book ? bookCoverUrl(book) : null);
   let showCoverUrlInput = $state(false);
@@ -163,6 +181,28 @@
       enrichError = err instanceof Error ? err.message : 'Enrichment failed';
     } finally {
       enriching = false;
+    }
+  }
+
+  async function handleExtractIdentifiers() {
+    if (!book) return;
+    extractingIds = true;
+    extractIdsMsg = '';
+    try {
+      const ids = await extractBookIdentifiers(book.id);
+      const parts: string[] = [];
+      if (ids.isbn_13) parts.push(`ISBN: ${ids.isbn_13}`);
+      if (ids.doi) parts.push(`DOI: ${ids.doi}`);
+      extractIdsMsg = parts.length ? `Found ${parts.join(', ')}` : 'No identifiers found in file content';
+      // Refresh book data to show updated ISBN/DOI
+      if (ids.isbn_13 || ids.doi) {
+        const { getBook } = await import('$lib/api/client');
+        book = await getBook(book.id);
+      }
+    } catch (err) {
+      extractIdsMsg = err instanceof Error ? err.message : 'Extraction failed';
+    } finally {
+      extractingIds = false;
     }
   }
 
@@ -314,8 +354,17 @@
   }
 </script>
 
+<ScrollProgress />
+
 {#if book}
-  <div class="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
+  <!-- ColorScape gradient accent from cover -->
+  {#if book.cover_color}
+    <div
+      class="h-32 -mb-24 opacity-20 dark:opacity-10"
+      style="background: linear-gradient(to bottom, {book.cover_color}, transparent)"
+    ></div>
+  {/if}
+  <div class="relative mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
     {#if editing}
       <Card>
         <CardHeader class="flex flex-row items-center justify-between">
@@ -472,6 +521,18 @@
                   <Package class="h-3 w-3" /> Physical copy
                 </span>
               {/if}
+              {#if book.binding}
+                <span class="rounded-full border px-2.5 py-1 text-xs text-muted-foreground capitalize">{book.binding.replace('_', ' ')}</span>
+              {/if}
+              {#if book.condition}
+                <span class="rounded-full border px-2.5 py-1 text-xs text-muted-foreground capitalize">{book.condition.replace('_', ' ')}</span>
+              {/if}
+              {#if book.location_name}
+                <span class="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs text-muted-foreground">
+                  <MapPin class="h-3 w-3" />
+                  {book.location_name}
+                </span>
+              {/if}
               {#if isAdmin}
                 <button
                   onclick={togglePhysicalCopy}
@@ -560,6 +621,35 @@
                   </div>
                 {/if}
               </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onclick={handleExtractIdentifiers}
+                disabled={extractingIds}
+                title="Scan file content for ISBN & DOI"
+              >
+                <ScanSearch class="mr-1.5 h-3.5 w-3.5" />
+                {extractingIds ? 'Scanning…' : 'Extract IDs'}
+              </Button>
+              <div class="relative">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onclick={() => showCiteMenu = !showCiteMenu}
+                  title="Export citation"
+                >
+                  <Quote class="mr-1.5 h-3.5 w-3.5" />
+                  Cite
+                </Button>
+                {#if showCiteMenu}
+                  <div class="fixed inset-0 z-40" onclick={() => showCiteMenu = false}></div>
+                  <div class="absolute right-0 top-full z-50 mt-1 w-36 rounded-md border bg-popover p-1 shadow-md">
+                    <a href={citationUrl(book.id, 'bibtex')} class="block w-full rounded-sm px-3 py-1.5 text-left text-sm hover:bg-accent" onclick={() => showCiteMenu = false}>BibTeX</a>
+                    <a href={citationUrl(book.id, 'mla')} class="block w-full rounded-sm px-3 py-1.5 text-left text-sm hover:bg-accent" onclick={() => showCiteMenu = false}>MLA</a>
+                    <a href={citationUrl(book.id, 'apa')} class="block w-full rounded-sm px-3 py-1.5 text-left text-sm hover:bg-accent" onclick={() => showCiteMenu = false}>APA</a>
+                  </div>
+                {/if}
+              </div>
               <Button variant="ghost" size="icon" onclick={() => editing = true} title="Edit metadata">
                 <Pencil class="h-4 w-4" />
               </Button>
@@ -572,6 +662,9 @@
           {#if enrichError}
             <p class="mt-2 text-sm text-destructive">{enrichError}</p>
           {/if}
+          {#if extractIdsMsg}
+            <p class="mt-2 text-sm text-muted-foreground">{extractIdsMsg}</p>
+          {/if}
 
           {#if book.series?.length}
             <div class="mt-3 flex flex-wrap gap-2">
@@ -582,6 +675,35 @@
               {/each}
             </div>
           {/if}
+
+          <!-- Series navigation -->
+          {#each seriesNav as nav}
+            <div class="mt-3 flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
+              {#if nav.previous}
+                <a href="/book/{nav.previous.id}" class="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors" title={nav.previous.title}>
+                  <ChevronLeft class="h-4 w-4" />
+                  <span class="hidden sm:inline truncate max-w-32">{nav.previous.title}</span>
+                </a>
+              {:else}
+                <span class="w-4"></span>
+              {/if}
+              <div class="flex-1 text-center text-xs text-muted-foreground">
+                <a href="/browse/series/{nav.series_id}" class="hover:text-foreground transition-colors">
+                  {nav.series_name}
+                </a>
+                {#if nav.current_position} · #{nav.current_position}{/if}
+                <span class="text-muted-foreground/50">of {nav.total}</span>
+              </div>
+              {#if nav.next}
+                <a href="/book/{nav.next.id}" class="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors" title={nav.next.title}>
+                  <span class="hidden sm:inline truncate max-w-32">{nav.next.title}</span>
+                  <ChevronRight class="h-4 w-4" />
+                </a>
+              {:else}
+                <span class="w-4"></span>
+              {/if}
+            </div>
+          {/each}
 
           {#if book.abs_item_id && absUrl}
             <div class="mt-3">
@@ -616,6 +738,16 @@
               <div>
                 <p class="text-sm text-muted-foreground">ISBN</p>
                 <p class="text-lg font-semibold">{book.isbn}</p>
+                {#if book.isbn_10}
+                  <p class="text-xs text-muted-foreground">ISBN-10: {book.isbn_10}</p>
+                {/if}
+              </div>
+            {/if}
+            {#if book.asin}
+              <div>
+                <p class="text-sm text-muted-foreground">ASIN</p>
+                <a href="https://www.amazon.com/dp/{book.asin}" target="_blank" rel="noopener noreferrer"
+                   class="text-lg font-semibold text-primary hover:underline">{book.asin}</a>
               </div>
             {/if}
             {#if book.doi}
@@ -664,6 +796,55 @@
               </div>
             {/if}
           </div>
+
+          <!-- Reading Levels -->
+          {#if book.lexile || book.ar_level || book.flesch_kincaid_grade || book.age_range || isAdmin}
+            <div class="mt-4 flex flex-wrap items-center gap-2">
+              {#if book.lexile}
+                <span class="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-400">
+                  Lexile {book.lexile}L{#if book.lexile_code} ({book.lexile_code}){/if}
+                </span>
+              {/if}
+              {#if book.ar_level}
+                <span class="rounded-full border border-purple-200 bg-purple-50 px-2.5 py-1 text-xs font-medium text-purple-700 dark:border-purple-800 dark:bg-purple-950/40 dark:text-purple-400">
+                  AR {book.ar_level}{#if book.ar_points} · {book.ar_points} pts{/if}
+                </span>
+              {/if}
+              {#if book.flesch_kincaid_grade}
+                <span class="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400">
+                  FK Grade {book.flesch_kincaid_grade}
+                </span>
+              {/if}
+              {#if book.age_range}
+                <span class="rounded-full border px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                  Ages {book.age_range}
+                </span>
+              {/if}
+              {#if book.interest_level}
+                <span class="rounded-full border px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                  {book.interest_level}
+                </span>
+              {/if}
+              {#if isAdmin && !book.flesch_kincaid_grade}
+                <button
+                  class="rounded-full border border-dashed px-2.5 py-1 text-xs text-muted-foreground/60 hover:text-muted-foreground hover:border-muted-foreground transition-colors disabled:opacity-40"
+                  disabled={computingFk}
+                  onclick={async () => {
+                    computingFk = true;
+                    try {
+                      const r = await computeReadingLevel(book.id);
+                      if (r.flesch_kincaid_grade) {
+                        book = await getBook(book.id);
+                      }
+                    } catch { /* ignore */ }
+                    computingFk = false;
+                  }}
+                >
+                  {computingFk ? 'Computing…' : '+ Compute FK Grade'}
+                </button>
+              {/if}
+            </div>
+          {/if}
 
           <!-- Tags -->
           {#if book.tags?.length}

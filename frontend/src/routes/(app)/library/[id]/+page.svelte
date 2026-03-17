@@ -3,7 +3,7 @@
   import GroupedBooks from "$lib/components/GroupedBooks.svelte";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
-  import { LayoutGrid, List, Search, RefreshCw, ArrowUpDown, Layers } from "lucide-svelte";
+  import { LayoutGrid, List, Search, RefreshCw, ArrowUpDown, Layers, CheckSquare, X, ScanSearch, Sparkles, FileType, BookMarked } from "lucide-svelte";
   import * as api from "$lib/api/client";
   import type { Book } from "$lib/types/index";
   import type { PageData } from './$types';
@@ -17,6 +17,7 @@
   let searchInput = $state('');
   let search = $state('');           // debounced version
   let groupBy = $state<'series' | 'year' | 'publisher' | null>(null);
+  let formatFilter = $state('');
 
   // ── Paginated book list (used when groupBy is null) ──────────────────────────
   const PAGE_SIZE = 60;
@@ -35,7 +36,7 @@
     if (!library) return;
     loadingAll = true;
     try {
-      const result = await api.getBooks({ library_id: library.id, limit: 5000, sort_by: 'title' });
+      const result = await api.getBooks({ library_id: library.id, limit: 5000, sort_by: 'title', format: formatFilter || undefined });
       allBooks = result.items;
     } catch (e) {
       console.error('Failed to load all books:', e);
@@ -76,6 +77,7 @@
           skip: reset ? 0 : skip,
           limit: PAGE_SIZE,
           sort_by: sortBy,
+          format: formatFilter || undefined,
         });
       }
 
@@ -108,11 +110,13 @@
     void library;
     void search;
     void sortBy;
+    void formatFilter;
     if (!groupBy) loadBooks(true);
   });
 
-  // Load all books when groupBy is activated
+  // Load all books when groupBy is activated or format filter changes
   $effect(() => {
+    void formatFilter;
     if (groupBy) loadAllBooks();
   });
 
@@ -121,6 +125,106 @@
     { value: 'year', label: 'Year' },
     { value: 'publisher', label: 'Publisher' },
   ];
+
+  // ── Selection mode ─────────────────────────────────────────────────────────
+  let selectionMode = $state(false);
+  let selectedIds = $state(new Set<number>());
+  let bulkActionRunning = $state(false);
+  let bulkMsg = $state('');
+
+  function toggleSelect(id: number) {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    selectedIds = next;
+  }
+
+  function selectAll() {
+    const source = groupBy ? allBooks : books;
+    selectedIds = new Set(source.map(b => b.id));
+  }
+
+  function deselectAll() {
+    selectedIds = new Set();
+  }
+
+  function exitSelection() {
+    selectionMode = false;
+    selectedIds = new Set();
+    bulkMsg = '';
+  }
+
+  async function bulkExtractIdentifiers() {
+    if (selectedIds.size === 0) return;
+    bulkActionRunning = true;
+    bulkMsg = '';
+    try {
+      const r = await api.startBatchIdentifiers([...selectedIds]);
+      bulkMsg = `Scanning ${r.total} books…`;
+      // Poll for completion
+      const poll = setInterval(async () => {
+        try {
+          const job = await api.getBulkIdentifiersJob(r.job_id);
+          bulkMsg = `Scanning… ${job.done}/${job.total} (${job.found_isbn} ISBNs, ${job.found_doi} DOIs)`;
+          if (job.status === 'done' || job.status === 'cancelled') {
+            clearInterval(poll);
+            bulkMsg = `Done — ${job.found_isbn} ISBNs, ${job.found_doi} DOIs found`;
+            bulkActionRunning = false;
+          }
+        } catch {
+          clearInterval(poll);
+          bulkActionRunning = false;
+        }
+      }, 2000);
+    } catch (e) {
+      bulkMsg = e instanceof Error ? e.message : 'Failed';
+      bulkActionRunning = false;
+    }
+  }
+
+  async function bulkEnrich() {
+    if (selectedIds.size === 0) return;
+    bulkActionRunning = true;
+    bulkMsg = `Enriching ${selectedIds.size} books…`;
+    let done = 0;
+    let failed = 0;
+    for (const id of selectedIds) {
+      try {
+        await api.enrichBook(id);
+        done++;
+      } catch {
+        failed++;
+      }
+      bulkMsg = `Enriching… ${done + failed}/${selectedIds.size}`;
+    }
+    bulkMsg = `Done — ${done} enriched, ${failed} failed`;
+    bulkActionRunning = false;
+  }
+
+  // Bulk shelf assignment
+  let showBulkShelfPicker = $state(false);
+  let bulkShelves = $state<{ id: number; name: string }[]>([]);
+
+  async function loadBulkShelves() {
+    try {
+      bulkShelves = await api.getShelves();
+    } catch { /* ignore */ }
+  }
+
+  async function bulkAddToShelf(shelfId: number) {
+    if (selectedIds.size === 0) return;
+    bulkActionRunning = true;
+    bulkMsg = 'Adding to shelf…';
+    try {
+      const r = await api.bulkShelfAssignment([...selectedIds], [shelfId]);
+      bulkMsg = `Added ${r.assigned} books to shelf`;
+    } catch (e) {
+      bulkMsg = e instanceof Error ? e.message : 'Failed';
+    } finally {
+      bulkActionRunning = false;
+      showBulkShelfPicker = false;
+    }
+  }
 </script>
 
 <div class="flex h-full flex-col">
@@ -169,6 +273,28 @@
           </div>
         {/if}
 
+        <!-- Format filter -->
+        <div class="flex items-center gap-1 rounded-md border bg-background px-2 h-8">
+          <FileType class="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
+          <select
+            bind:value={formatFilter}
+            class="h-full bg-transparent text-sm text-foreground focus:outline-none cursor-pointer pr-1"
+          >
+            <option value="">All formats</option>
+            <option value="epub">EPUB</option>
+            <option value="pdf">PDF</option>
+            <option value="cbz">CBZ</option>
+            <option value="cbr">CBR</option>
+            <option value="mobi">MOBI</option>
+            <option value="azw3">AZW3</option>
+            <option value="azw">AZW</option>
+            <option value="fb2">FB2</option>
+            <option value="djvu">DJVU</option>
+            <option value="mp3">MP3</option>
+            <option value="m4b">M4B</option>
+          </select>
+        </div>
+
         <!-- Group by -->
         <div class="flex items-center gap-1 rounded-md border bg-background px-1.5 h-8">
           <Layers class="h-3.5 w-3.5 text-muted-foreground/40 shrink-0 ml-0.5" />
@@ -201,8 +327,81 @@
             <List class="h-3.5 w-3.5" />
           </button>
         </div>
+
+        <!-- Select toggle -->
+        <button
+          onclick={() => selectionMode ? exitSelection() : (selectionMode = true)}
+          class="flex h-8 items-center gap-1.5 rounded-md border bg-background px-2.5 text-sm transition-colors {selectionMode ? 'border-primary text-primary' : 'text-muted-foreground hover:text-foreground'}"
+          title={selectionMode ? 'Exit selection mode' : 'Select books'}
+        >
+          <CheckSquare class="h-3.5 w-3.5" />
+          <span class="hidden sm:inline">{selectionMode ? 'Cancel' : 'Select'}</span>
+        </button>
       </div>
     </div>
+
+    <!-- Bulk action bar (shown in selection mode) -->
+    {#if selectionMode}
+      <div class="flex items-center gap-3 border-b bg-muted/30 px-6 py-2">
+        <span class="text-sm font-medium tabular-nums">
+          {selectedIds.size} selected
+        </span>
+        <button onclick={selectAll} class="text-xs text-primary hover:underline">Select all</button>
+        {#if selectedIds.size > 0}
+          <button onclick={deselectAll} class="text-xs text-muted-foreground hover:underline">Clear</button>
+        {/if}
+        <div class="flex-1"></div>
+        {#if bulkMsg}
+          <span class="text-xs text-muted-foreground">{bulkMsg}</span>
+        {/if}
+        <Button
+          variant="outline"
+          size="sm"
+          onclick={bulkExtractIdentifiers}
+          disabled={selectedIds.size === 0 || bulkActionRunning}
+        >
+          <ScanSearch class="mr-1.5 h-3.5 w-3.5" />
+          Extract IDs
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onclick={bulkEnrich}
+          disabled={selectedIds.size === 0 || bulkActionRunning}
+        >
+          <Sparkles class="mr-1.5 h-3.5 w-3.5" />
+          Enrich
+        </Button>
+        <div class="relative">
+          <Button
+            variant="outline"
+            size="sm"
+            onclick={() => { showBulkShelfPicker = !showBulkShelfPicker; if (showBulkShelfPicker) loadBulkShelves(); }}
+            disabled={selectedIds.size === 0 || bulkActionRunning}
+          >
+            <BookMarked class="mr-1.5 h-3.5 w-3.5" />
+            Shelf
+          </Button>
+          {#if showBulkShelfPicker}
+            <div class="fixed inset-0 z-40" onclick={() => showBulkShelfPicker = false}></div>
+            <div class="absolute right-0 top-full z-50 mt-1 w-48 rounded-md border bg-popover p-1 shadow-md">
+              {#each bulkShelves as shelf}
+                <button
+                  class="w-full rounded-sm px-3 py-1.5 text-left text-sm hover:bg-accent"
+                  onclick={() => bulkAddToShelf(shelf.id)}
+                >{shelf.name}</button>
+              {/each}
+              {#if bulkShelves.length === 0}
+                <p class="px-3 py-1.5 text-xs text-muted-foreground">No shelves</p>
+              {/if}
+            </div>
+          {/if}
+        </div>
+        <button onclick={exitSelection} class="ml-1 rounded p-1 text-muted-foreground hover:text-foreground">
+          <X class="h-4 w-4" />
+        </button>
+      </div>
+    {/if}
 
     <!-- Content -->
     <div class="flex-1 overflow-y-auto px-6 py-6">
@@ -215,7 +414,7 @@
             {/each}
           </div>
         {:else}
-          <GroupedBooks books={allBooks} {groupBy} mode={viewMode} search={searchInput} />
+          <GroupedBooks books={allBooks} {groupBy} mode={viewMode} search={searchInput} {selectionMode} {selectedIds} onToggleSelect={toggleSelect} />
         {/if}
       {:else}
         <!-- Paginated view -->
@@ -226,7 +425,7 @@
             {/each}
           </div>
         {:else}
-          <BookGrid {books} mode={viewMode} />
+          <BookGrid {books} mode={viewMode} {selectionMode} {selectedIds} onToggleSelect={toggleSelect} />
 
           <!-- Load more / status -->
           {#if books.length > 0}

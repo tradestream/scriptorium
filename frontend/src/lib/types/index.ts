@@ -22,6 +22,7 @@ export interface AuthResponse {
 export interface User {
   id: number;
   username: string;
+  display_name?: string | null;
   email: string;
   is_admin: boolean;
   is_active: boolean;
@@ -162,6 +163,7 @@ export interface Author {
   id: number;
   name: string;
   description?: string | null;
+  photo_url?: string | null;
 }
 
 export interface Tag {
@@ -190,16 +192,34 @@ export interface Book {
   subtitle?: string | null;
   description?: string | null;
   isbn?: string | null;
+  isbn_10?: string | null;
+  asin?: string | null;
   language?: string | null;
   published_date?: string | null;
   publisher?: string | null;
   cover_hash?: string | null;
   cover_format?: string | null;
+  cover_color?: string | null;
   locked_fields?: string[];
   esoteric_enabled?: boolean;
   physical_copy?: boolean;
+  binding?: string | null;
+  condition?: string | null;
+  purchase_price?: number | null;
+  purchase_date?: string | null;
+  purchase_from?: string | null;
+  location?: string | null;
+  location_id?: number | null;
+  location_name?: string | null;
   abs_item_id?: string | null;
   doi?: string | null;
+  lexile?: number | null;
+  lexile_code?: string | null;
+  ar_level?: number | null;
+  ar_points?: number | null;
+  flesch_kincaid_grade?: number | null;
+  age_range?: string | null;
+  interest_level?: string | null;
   library_id: number;
   created_at: string;
   updated_at: string;
@@ -335,6 +355,21 @@ export interface ApiKeyCreated extends ApiKey {
 
 // ── Collections ───────────────────────────────────────────────────────────────
 
+export interface SmartFilter {
+  library_id?: number | null;
+  author?: string | null;
+  tag?: string | null;
+  series?: string | null;
+  format?: string | null;
+  language?: string | null;
+  status?: string | null;
+  has_isbn?: boolean | null;
+  physical_copy?: boolean | null;
+  binding?: string | null;
+  condition?: string | null;
+  min_rating?: number | null;
+}
+
 export interface Collection {
   id: number;
   user_id: number;
@@ -342,6 +377,9 @@ export interface Collection {
   description?: string | null;
   cover_book_id?: number | null;
   cover_work_id?: number | null;
+  is_smart: boolean;
+  is_pinned: boolean;
+  smart_filter?: SmartFilter | null;
   created_at: string;
   updated_at: string;
   book_count: number;
@@ -368,6 +406,7 @@ export interface Annotation {
   related_refs?: string[] | null;
   commentator?: string | null;
   source?: string | null;
+  is_spoiler?: boolean;
   created_at: string;
   updated_at: string;
 }

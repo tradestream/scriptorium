@@ -17,6 +17,8 @@ from app.models.annotation import Annotation
 from app.models.read_session import ReadSession
 from app.models.marginalium import Marginalium
 from app.models.notebook import Notebook, NotebookEntry
+from app.models.location import Location
+from app.models.article import Article, ArticleTag, ArticleHighlight
 from app.models.system import SystemSettings
 
 __all__ = [
@@ -69,5 +71,9 @@ __all__ = [
     "Marginalium",
     "Notebook",
     "NotebookEntry",
+    "Location",
+    "Article",
+    "ArticleTag",
+    "ArticleHighlight",
     "SystemSettings",
 ]

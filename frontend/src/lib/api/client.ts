@@ -133,6 +133,10 @@ export async function getCurrentUser(): Promise<User> {
   return fetchAPI('/auth/me');
 }
 
+export async function updateProfile(data: { display_name?: string; email?: string }): Promise<User> {
+  return fetchAPI('/auth/me', { method: 'PATCH', body: JSON.stringify(data) });
+}
+
 export async function getOidcConfig(): Promise<{ enabled: boolean }> {
   return fetchAPI('/auth/oidc/config');
 }
@@ -168,6 +172,21 @@ export async function scanLibrary(id: number | string): Promise<{ message: strin
   return fetchAPI(`/libraries/${id}/scan`, { method: 'POST' });
 }
 
+export async function uploadBookFile(file: File): Promise<{ filename: string; size: number; status: string }> {
+  const form = new FormData();
+  form.append('file', file);
+  const url = `${getApiBase()}/ingest/upload`;
+  const token = getAuthToken();
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const response = await fetch(url, { method: 'POST', headers, body: form });
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Upload failed (${response.status}): ${err}`);
+  }
+  return response.json();
+}
+
 export async function getLibraryAccess(libraryId: number): Promise<LibraryAccess[]> {
   return fetchAPI(`/libraries/${libraryId}/access`);
 }
@@ -200,6 +219,7 @@ export interface BooksQuery {
   author_id?: number;
   tag_id?: number;
   abs_linked?: boolean;
+  format?: string;
   sort_by?: 'date_added' | 'title';
 }
 
@@ -213,6 +233,7 @@ export async function getBooks(query: BooksQuery = {}): Promise<BookListResponse
   if (query.author_id !== undefined) params.set('author_id', String(query.author_id));
   if (query.tag_id !== undefined) params.set('tag_id', String(query.tag_id));
   if (query.abs_linked) params.set('abs_linked', 'true');
+  if (query.format) params.set('format', query.format);
   if (query.sort_by) params.set('sort_by', query.sort_by);
   const qs = params.toString();
   return fetchAPI(`/books${qs ? '?' + qs : ''}`);
@@ -232,6 +253,8 @@ export interface BookCreateData {
   publisher?: string | null;
   library_id: number;
   physical_copy?: boolean;
+  location?: string | null;
+  location_id?: number | null;
   author_names?: string[];
   tag_names?: string[];
 }
@@ -425,6 +448,18 @@ export async function searchBooks(
   return fetchAPI(`/search?${params}`);
 }
 
+export interface UnifiedSearchResult {
+  books: { id: number; type: 'book'; title: string; author?: string | null; cover_hash?: string | null; cover_format?: string | null; isbn?: string | null }[];
+  articles: { id: number; type: 'article'; title: string; author?: string | null; domain?: string | null; url: string; progress: number }[];
+  annotations: { id: number; type: 'annotation'; content: string; book_id: number; book_title: string; annotation_type: string }[];
+  marginalia: { id: number; type: 'marginalium'; content: string; book_id: number; book_title: string; kind: string }[];
+  total: number;
+}
+
+export async function unifiedSearch(q: string, limit: number = 10): Promise<UnifiedSearchResult> {
+  return fetchAPI(`/search/all?q=${encodeURIComponent(q)}&limit=${limit}`);
+}
+
 // ── Browse ────────────────────────────────────────────────────────────────────
 
 export async function getAuthors(skip = 0, limit = 100): Promise<AuthorDetail[]> {
@@ -434,7 +469,7 @@ export async function getAuthors(skip = 0, limit = 100): Promise<AuthorDetail[]>
 export async function getAuthorBooks(
   authorId: number | string,
   opts: { skip?: number; limit?: number } = {}
-): Promise<{ id: number; name: string; description: string | null; book_count: number; books: Book[]; skip: number; limit: number }> {
+): Promise<{ id: number; name: string; description: string | null; photo_url: string | null; book_count: number; books: Book[]; skip: number; limit: number }> {
   const params = new URLSearchParams();
   if (opts.skip !== undefined) params.set('skip', String(opts.skip));
   if (opts.limit !== undefined) params.set('limit', String(opts.limit));
@@ -457,8 +492,11 @@ export async function getTagBooks(
   return fetchAPI(`/tags/${tagId}${qs ? '?' + qs : ''}`);
 }
 
-export async function getAllSeries(skip = 0, limit = 100): Promise<SeriesDetail[]> {
-  return fetchAPI(`/series?skip=${skip}&limit=${limit}`);
+export async function getAllSeries(skip = 0, limit = 100, opts?: { library_id?: number; format?: string }): Promise<SeriesDetail[]> {
+  const params = new URLSearchParams({ skip: String(skip), limit: String(limit) });
+  if (opts?.library_id) params.set('library_id', String(opts.library_id));
+  if (opts?.format) params.set('format', opts.format);
+  return fetchAPI(`/series?${params}`);
 }
 
 export async function getSeriesBooks(seriesId: number | string): Promise<SeriesPageData> {
@@ -629,6 +667,38 @@ export async function setEsotericReading(bookId: number | string, analysisId: nu
 
 export async function exportAnnotations(bookId: number | string, fmt: 'yaml' | 'json' = 'yaml'): Promise<string> {
   return fetchAPI(`/annotations/export?book_id=${bookId}&fmt=${fmt}`);
+}
+
+export async function computeReadingLevel(bookId: number | string): Promise<{ status: string; flesch_kincaid_grade?: number }> {
+  return fetchAPI(`/books/${bookId}/compute-reading-level`, { method: 'POST' });
+}
+
+export async function updateReadingLevel(bookId: number | string, data: { lexile?: number; lexile_code?: string; ar_level?: number; ar_points?: number; age_range?: string; interest_level?: string }): Promise<{ ok: boolean }> {
+  return fetchAPI(`/books/${bookId}/reading-level`, { method: 'PATCH', body: JSON.stringify(data) });
+}
+
+export interface SeriesNeighbor {
+  id: number;
+  title: string;
+  position: number | null;
+}
+
+export interface SeriesNav {
+  series_id: number;
+  series_name: string;
+  current_position: number | null;
+  total: number;
+  previous: SeriesNeighbor | null;
+  next: SeriesNeighbor | null;
+}
+
+export async function getSeriesNeighbors(bookId: number | string): Promise<{ series: SeriesNav[] }> {
+  return fetchAPI(`/books/${bookId}/series-neighbors`);
+}
+
+export function citationUrl(bookId: number | string, format: 'bibtex' | 'mla' | 'apa' = 'bibtex'): string {
+  const token = getAuthToken();
+  return `${getApiBase()}/export/books/${bookId}/citation?format=${format}${token ? `&token=${encodeURIComponent(token)}` : ''}`;
 }
 
 // ── Computational Analysis ────────────────────────────────────────────────────
@@ -1185,11 +1255,204 @@ export async function cancelBulkEnrichJob(jobId: string): Promise<void> {
   await fetchAPI(`/admin/enrich/bulk/${jobId}`, { method: 'DELETE' });
 }
 
+// ── Bulk Markdown Generation ──────────────────────────────────────────────────
+
+export async function startBulkMarkdown(libraryId?: number): Promise<{ job_id: string; total: number }> {
+  const qs = libraryId ? `?library_id=${libraryId}` : '';
+  return fetchAPI(`/admin/markdown/bulk${qs}`, { method: 'POST' });
+}
+
+export async function getBulkMarkdownJob(jobId: string): Promise<{ job_id: string; status: string; total: number; done: number; failed: number; skipped: number; current: string }> {
+  return fetchAPI(`/admin/markdown/bulk/${jobId}`);
+}
+
 export async function updateLibraryNaming(libraryId: number, namingPattern: string | null): Promise<Library> {
   return fetchAPI(`/libraries/${libraryId}`, {
     method: 'PUT',
     body: JSON.stringify({ naming_pattern: namingPattern }),
   });
+}
+
+// ── Bulk Identifier Extraction ────────────────────────────────────────────────
+
+export async function startBulkIdentifiers(libraryId?: number): Promise<{ job_id: string; total: number }> {
+  const qs = libraryId ? `?library_id=${libraryId}` : '';
+  return fetchAPI(`/admin/identifiers/bulk${qs}`, { method: 'POST' });
+}
+
+export async function getBulkIdentifiersJob(jobId: string): Promise<{ job_id: string; status: string; total: number; done: number; found_isbn: number; found_doi: number; failed: number }> {
+  return fetchAPI(`/admin/identifiers/bulk/${jobId}`);
+}
+
+export async function extractBookIdentifiers(bookId: number | string): Promise<{ isbn_13: string | null; isbn_10: string | null; doi: string | null; isbn_source: string | null; doi_source: string | null }> {
+  return fetchAPI(`/books/${bookId}/extract-identifiers`, { method: 'POST' });
+}
+
+export async function startBatchIdentifiers(editionIds: number[]): Promise<{ job_id: string; total: number }> {
+  return fetchAPI('/admin/identifiers/batch', { method: 'POST', body: JSON.stringify({ edition_ids: editionIds }) });
+}
+
+// ── Cover Quality & Upgrade ──────────────────────────────────────────────────
+
+export async function getLowQualityCovers(libraryId?: number): Promise<any[]> {
+  const qs = libraryId ? `?library_id=${libraryId}` : '';
+  return fetchAPI(`/admin/covers/low-quality${qs}`);
+}
+
+export async function startCoverUpgrade(libraryId?: number): Promise<{ job_id: string; total: number }> {
+  const qs = libraryId ? `?library_id=${libraryId}` : '';
+  return fetchAPI(`/admin/covers/upgrade${qs}`, { method: 'POST' });
+}
+
+export async function getCoverUpgradeJob(jobId: string): Promise<{ job_id: string; status: string; total: number; done: number; upgraded: number; no_match: number; failed: number; current: string }> {
+  return fetchAPI(`/admin/covers/upgrade/${jobId}`);
+}
+
+// ── Filename Metadata Extraction ─────────────────────────────────────────────
+
+export async function startFilenameExtract(libraryId?: number, minConfidence: string = 'medium'): Promise<{ job_id: string; total: number }> {
+  const params = new URLSearchParams();
+  if (libraryId) params.set('library_id', String(libraryId));
+  params.set('min_confidence', minConfidence);
+  return fetchAPI(`/admin/filename-extract/bulk?${params}`, { method: 'POST' });
+}
+
+export async function getFilenameExtractJob(jobId: string): Promise<{ job_id: string; status: string; total: number; done: number; applied: number; skipped: number; failed: number }> {
+  return fetchAPI(`/admin/filename-extract/bulk/${jobId}`);
+}
+
+// ── Bulk Metadata Editing ────────────────────────────────────────────────────
+
+export async function bulkEditBooks(editionIds: number[], updates: {
+  author_names?: string[];
+  tag_names?: string[];
+  series_names?: string[];
+  publisher?: string;
+  language?: string;
+  merge_authors?: boolean;
+  merge_tags?: boolean;
+  merge_series?: boolean;
+}): Promise<{ updated: number; failed: number }> {
+  return fetchAPI('/books/bulk-edit', {
+    method: 'PUT',
+    body: JSON.stringify({ edition_ids: editionIds, ...updates }),
+  });
+}
+
+// ── Bulk Shelf Assignment ────────────────────────────────────────────────────
+
+export async function bulkShelfAssignment(bookIds: number[], shelvesToAssign: number[], shelvesToUnassign: number[] = []): Promise<{ assigned: number; unassigned: number }> {
+  return fetchAPI('/shelves/bulk', {
+    method: 'POST',
+    body: JSON.stringify({ book_ids: bookIds, shelves_to_assign: shelvesToAssign, shelves_to_unassign: shelvesToUnassign }),
+  });
+}
+
+// ── Articles / Instapaper ─────────────────────────────────────────────────────
+
+export interface ArticleItem {
+  id: number;
+  user_id: number;
+  instapaper_id?: number | null;
+  url: string;
+  title: string;
+  author?: string | null;
+  description?: string | null;
+  domain?: string | null;
+  word_count?: number | null;
+  progress: number;
+  is_starred: boolean;
+  is_archived: boolean;
+  folder?: string | null;
+  saved_at: string;
+  highlight_count: number;
+}
+
+export interface ArticleDetail extends ArticleItem {
+  markdown_content?: string | null;
+  highlights: { id: number; text: string; note?: string | null; position?: number | null }[];
+}
+
+export async function getArticles(opts?: { archived?: boolean; starred?: boolean; skip?: number; limit?: number }): Promise<ArticleItem[]> {
+  const params = new URLSearchParams();
+  if (opts?.archived) params.set('archived', 'true');
+  if (opts?.starred) params.set('starred', 'true');
+  if (opts?.skip) params.set('skip', String(opts.skip));
+  if (opts?.limit) params.set('limit', String(opts.limit));
+  return fetchAPI(`/articles?${params}`);
+}
+
+export async function getArticle(id: number): Promise<ArticleDetail> {
+  return fetchAPI(`/articles/${id}`);
+}
+
+export async function saveArticle(url: string, title?: string, description?: string): Promise<ArticleItem> {
+  return fetchAPI('/articles', { method: 'POST', body: JSON.stringify({ url, title, description }) });
+}
+
+export async function deleteArticle(id: number): Promise<void> {
+  return fetchAPI(`/articles/${id}`, { method: 'DELETE' });
+}
+
+export async function starArticle(id: number): Promise<{ starred: boolean }> {
+  return fetchAPI(`/articles/${id}/star`, { method: 'POST' });
+}
+
+export async function archiveArticle(id: number): Promise<{ archived: boolean }> {
+  return fetchAPI(`/articles/${id}/archive`, { method: 'POST' });
+}
+
+export async function syncInstapaper(): Promise<{ created: number; updated: number; highlights: number }> {
+  return fetchAPI('/articles/sync', { method: 'POST' });
+}
+
+export async function getInstapaperStatus(): Promise<{ linked: boolean; instapaper_username?: string | null; has_full_api: boolean }> {
+  return fetchAPI('/articles/instapaper/status');
+}
+
+export async function linkInstapaper(username: string, password: string): Promise<{ linked: boolean }> {
+  return fetchAPI('/articles/instapaper/link', { method: 'POST', body: JSON.stringify({ username, password }) });
+}
+
+export async function unlinkInstapaper(): Promise<void> {
+  return fetchAPI('/articles/instapaper/link', { method: 'DELETE' });
+}
+
+// ── Locations ─────────────────────────────────────────────────────────────────
+
+export interface LocationItem {
+  id: number;
+  name: string;
+  description?: string | null;
+  parent_id?: number | null;
+  tree_path: string;
+}
+
+export interface LocationTreeNode {
+  id: number;
+  name: string;
+  description?: string | null;
+  children: LocationTreeNode[];
+}
+
+export async function getLocations(): Promise<LocationItem[]> {
+  return fetchAPI('/locations');
+}
+
+export async function getLocationTree(): Promise<LocationTreeNode[]> {
+  return fetchAPI('/locations/tree');
+}
+
+export async function createLocation(data: { name: string; description?: string; parent_id?: number }): Promise<LocationItem> {
+  return fetchAPI('/locations', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function updateLocation(id: number, data: { name?: string; description?: string; parent_id?: number | null }): Promise<LocationItem> {
+  return fetchAPI(`/locations/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+export async function deleteLocation(id: number): Promise<void> {
+  return fetchAPI(`/locations/${id}`, { method: 'DELETE' });
 }
 
 // ── AudiobookShelf ─────────────────────────────────────────────────────────────
@@ -1236,8 +1499,12 @@ export async function syncAbsProgress(): Promise<AbsSyncResult> {
   return fetchAPI('/audiobookshelf/sync-progress', { method: 'POST' });
 }
 
-export async function syncAbsCovers(overwrite = false): Promise<{ updated: number; skipped: number; failed: number }> {
+export async function syncAbsCovers(overwrite = false): Promise<{ job_id: string; total: number }> {
   return fetchAPI(`/audiobookshelf/sync-covers?overwrite=${overwrite}`, { method: 'POST' });
+}
+
+export async function getAbsCoverSyncJob(jobId: string): Promise<{ job_id: string; status: string; total: number; done: number; failed: number }> {
+  return fetchAPI(`/audiobookshelf/sync-covers/${jobId}`);
 }
 
 export async function importFromAbs(absLibraryId: string, scriptoriumLibraryId: number, limit = 0): Promise<AbsImportResult> {
@@ -1290,7 +1557,7 @@ export async function getCollections(): Promise<Collection[]> {
   return fetchAPI('/collections');
 }
 
-export async function createCollection(data: { name: string; description?: string | null; cover_book_id?: number | null }): Promise<Collection> {
+export async function createCollection(data: { name: string; description?: string | null; cover_book_id?: number | null; is_smart?: boolean; smart_filter?: import('$lib/types/index').SmartFilter | null }): Promise<Collection> {
   return fetchAPI('/collections', { method: 'POST', body: JSON.stringify(data) });
 }
 
@@ -1298,7 +1565,7 @@ export async function getCollection(id: number): Promise<CollectionDetail> {
   return fetchAPI(`/collections/${id}`);
 }
 
-export async function updateCollection(id: number, data: { name?: string; description?: string | null; cover_book_id?: number | null }): Promise<Collection> {
+export async function updateCollection(id: number, data: { name?: string; description?: string | null; cover_book_id?: number | null; is_smart?: boolean; smart_filter?: import('$lib/types/index').SmartFilter | null }): Promise<Collection> {
   return fetchAPI(`/collections/${id}`, { method: 'PUT', body: JSON.stringify(data) });
 }
 

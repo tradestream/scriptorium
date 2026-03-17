@@ -87,20 +87,30 @@ class MetadataService:
                 if language:
                     result["language"] = language[:10]
 
-                # ISBN from dc:identifier
+                # ISBN from dc:identifier (normalize to ISBN-13)
+                raw_isbn = None
                 for ident in metadata.findall("dc:identifier", ns_opf):
                     scheme = ident.get(
                         "{http://www.idpf.org/2007/opf}scheme", ""
                     ) or ident.get("scheme", "")
                     if scheme.lower() == "isbn" and ident.text:
-                        result["isbn"] = ident.text.strip()
+                        raw_isbn = ident.text.strip()
                         break
-                if not result["isbn"]:
+                if not raw_isbn:
                     for ident in metadata.findall(f"{{{_dc_ns}}}identifier"):
                         scheme = ident.get("{http://www.idpf.org/2007/opf}scheme", "")
                         if scheme.lower() == "isbn" and ident.text:
-                            result["isbn"] = ident.text.strip()
+                            raw_isbn = ident.text.strip()
                             break
+                if raw_isbn:
+                    try:
+                        from app.utils.isbn import normalize as _normalize_isbn
+                        isbn13, isbn10 = _normalize_isbn(raw_isbn)
+                        result["isbn"] = isbn13 or raw_isbn
+                        if isbn10:
+                            result["isbn_10"] = isbn10
+                    except Exception:
+                        result["isbn"] = raw_isbn
 
                 # Publication date
                 date_str = find_dc("date")

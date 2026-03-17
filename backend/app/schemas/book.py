@@ -15,6 +15,7 @@ class AuthorRead(AuthorBase):
     """Author read schema."""
 
     id: int
+    photo_url: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -67,12 +68,28 @@ class BookBase(BaseModel):
     published_date: Optional[datetime] = None
     publisher: Optional[str] = None
 
+    @field_validator('isbn', mode='before')
+    @classmethod
+    def normalize_isbn(cls, v):
+        if not v or not isinstance(v, str):
+            return v
+        from app.utils.isbn import normalize
+        isbn13, _ = normalize(v)
+        return isbn13
+
 
 class BookCreate(BookBase):
     """Book create schema."""
 
     library_id: int
     physical_copy: bool = False
+    binding: Optional[str] = None
+    condition: Optional[str] = None
+    purchase_price: Optional[float] = None
+    purchase_date: Optional[datetime] = None
+    purchase_from: Optional[str] = None
+    location: Optional[str] = None
+    location_id: Optional[int] = None
     author_ids: list[int] = Field(default_factory=list)
     tag_ids: list[int] = Field(default_factory=list)
     series_ids: list[int] = Field(default_factory=list)
@@ -96,6 +113,15 @@ class BookUpdate(BaseModel):
     language: Optional[str] = None
     published_date: Optional[datetime] = None
     publisher: Optional[str] = None
+
+    @field_validator('isbn', mode='before')
+    @classmethod
+    def normalize_isbn(cls, v):
+        if not v or not isinstance(v, str):
+            return v
+        from app.utils.isbn import normalize
+        isbn13, _ = normalize(v)
+        return isbn13
     # By ID (for clients that already know IDs)
     author_ids: Optional[list[int]] = None
     tag_ids: Optional[list[int]] = None
@@ -110,6 +136,13 @@ class BookUpdate(BaseModel):
     illustrator_names: Optional[list[str]] = None
     colorist_names: Optional[list[str]] = None
     physical_copy: Optional[bool] = None
+    binding: Optional[str] = None
+    condition: Optional[str] = None
+    purchase_price: Optional[float] = None
+    purchase_date: Optional[datetime] = None
+    purchase_from: Optional[str] = None
+    location: Optional[str] = None
+    location_id: Optional[int] = None
 
 
 class BookRead(BookBase):
@@ -118,8 +151,19 @@ class BookRead(BookBase):
     id: int
     uuid: str
     library_id: int
+    isbn_10: Optional[str] = None
+    asin: Optional[str] = None
+    binding: Optional[str] = None
+    condition: Optional[str] = None
+    purchase_price: Optional[float] = None
+    purchase_date: Optional[datetime] = None
+    purchase_from: Optional[str] = None
+    location: Optional[str] = None
+    location_id: Optional[int] = None
+    location_name: Optional[str] = None
     cover_hash: Optional[str] = None
     cover_format: Optional[str] = None
+    cover_color: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     authors: list[AuthorRead] = Field(default_factory=list)
@@ -135,6 +179,20 @@ class BookRead(BookBase):
     physical_copy: bool = False
     abs_item_id: Optional[str] = None
     doi: Optional[str] = None
+    goodreads_id: Optional[str] = None
+    google_id: Optional[str] = None
+    hardcover_id: Optional[str] = None
+    goodreads_rating: Optional[float] = None
+    goodreads_rating_count: Optional[int] = None
+    amazon_rating: Optional[float] = None
+    amazon_rating_count: Optional[int] = None
+    lexile: Optional[int] = None
+    lexile_code: Optional[str] = None
+    ar_level: Optional[float] = None
+    ar_points: Optional[float] = None
+    flesch_kincaid_grade: Optional[float] = None
+    age_range: Optional[str] = None
+    interest_level: Optional[str] = None
     content_warnings: Optional[dict] = None
 
     @field_validator('content_warnings', mode='before')

@@ -1,4 +1,7 @@
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
@@ -247,6 +250,63 @@ async def remove_book_from_shelf(
 
     await db.delete(shelf_book)
     await db.commit()
+
+
+class BulkShelfRequest(BaseModel):
+    """Bulk shelf assignment/unassignment."""
+    book_ids: list[int]
+    shelves_to_assign: list[int] = []
+    shelves_to_unassign: list[int] = []
+
+
+@router.post("/bulk", status_code=status.HTTP_200_OK)
+async def bulk_shelf_assignment(
+    req: BulkShelfRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Assign/unassign multiple books to/from shelves in a single request."""
+    # Verify all shelves belong to user
+    if req.shelves_to_assign or req.shelves_to_unassign:
+        all_shelf_ids = set(req.shelves_to_assign + req.shelves_to_unassign)
+        result = await db.execute(
+            select(Shelf).where(Shelf.id.in_(all_shelf_ids), Shelf.user_id == current_user.id)
+        )
+        found_ids = {s.id for s in result.scalars().all()}
+        missing = all_shelf_ids - found_ids
+        if missing:
+            raise HTTPException(status_code=404, detail=f"Shelves not found: {missing}")
+
+    assigned = 0
+    unassigned = 0
+
+    for book_id in req.book_ids:
+        # Assignments
+        for shelf_id in req.shelves_to_assign:
+            existing = await db.execute(
+                select(ShelfBook).where(
+                    ShelfBook.shelf_id == shelf_id, ShelfBook.book_id == book_id
+                )
+            )
+            if not existing.scalar_one_or_none():
+                position = await _shelf_book_count(db, shelf_id)
+                db.add(ShelfBook(shelf_id=shelf_id, book_id=book_id, position=position))
+                assigned += 1
+
+        # Unassignments
+        for shelf_id in req.shelves_to_unassign:
+            result = await db.execute(
+                select(ShelfBook).where(
+                    ShelfBook.shelf_id == shelf_id, ShelfBook.book_id == book_id
+                )
+            )
+            sb = result.scalar_one_or_none()
+            if sb:
+                await db.delete(sb)
+                unassigned += 1
+
+    await db.commit()
+    return {"assigned": assigned, "unassigned": unassigned}
 
 
 @router.get("/{shelf_id}/books", response_model=list)

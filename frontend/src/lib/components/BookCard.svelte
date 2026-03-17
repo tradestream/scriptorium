@@ -1,25 +1,39 @@
 <script lang="ts">
   import { cn } from "$lib/utils/cn";
   import { Badge } from "$lib/components/ui/badge";
-  import { BookOpen, Headphones } from "lucide-svelte";
+  import { BookOpen, Headphones, Check } from "lucide-svelte";
   import type { Book } from "$lib/types/index";
   import { bookCoverUrl } from "$lib/api/client";
 
   interface Props {
     book: Book;
     class?: string;
+    selectionMode?: boolean;
+    selected?: boolean;
+    onToggleSelect?: (id: number) => void;
   }
 
-  let { book, class: className }: Props = $props();
+  let { book, class: className, selectionMode = false, selected = false, onToggleSelect }: Props = $props();
 
   let coverUrl = $derived(bookCoverUrl(book));
   let primaryAuthor = $derived(book.authors?.[0]?.name ?? null);
   let primaryFormat = $derived(book.files?.[0]?.format ?? null);
   let primarySeries = $derived(book.series?.[0]?.name ?? null);
+
+  function handleClick(e: MouseEvent) {
+    if (selectionMode) {
+      e.preventDefault();
+      onToggleSelect?.(book.id);
+    }
+  }
 </script>
 
-<a href="/book/{book.id}" class={cn("group block", className)}>
-  <div class="overflow-hidden rounded-md border bg-card transition-all duration-150 hover:shadow-sm hover:border-border/80">
+<!-- svelte-ignore a11y_click_events_have_key_events -->
+<a href="/book/{book.id}" class={cn("group block", className)} onclick={handleClick}>
+  <div class={cn(
+    "overflow-hidden rounded-md border bg-card transition-all duration-150 hover:shadow-sm hover:border-border/80",
+    selected && "ring-2 ring-primary border-primary"
+  )}>
     <!-- Cover -->
     <div class="relative aspect-2/3 overflow-hidden bg-muted">
       {#if coverUrl}
@@ -38,7 +52,17 @@
         </div>
       {/if}
 
-      {#if primaryFormat}
+      {#if selectionMode}
+        <button
+          class={cn(
+            "absolute left-2 top-2 z-10 flex h-5 w-5 items-center justify-center rounded border-2 transition-colors",
+            selected ? "border-primary bg-primary text-primary-foreground" : "border-white/80 bg-black/30 text-transparent hover:border-white"
+          )}
+          onclick={(e) => { e.stopPropagation(); onToggleSelect?.(book.id); }}
+        >
+          <Check class="h-3 w-3" />
+        </button>
+      {:else if primaryFormat}
         <span class="absolute left-2 top-2 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider bg-background/85 text-foreground/70 backdrop-blur-sm">
           {primaryFormat}
         </span>

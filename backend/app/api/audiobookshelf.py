@@ -1,6 +1,9 @@
 """AudiobookShelf integration endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import uuid as _uuid
+from datetime import datetime
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from app.config import get_settings
@@ -9,6 +12,9 @@ from app.models.user import User
 from .auth import get_current_user
 
 router = APIRouter(prefix="/audiobookshelf")
+
+# In-memory job tracking for background cover sync
+_cover_sync_jobs: dict[str, dict] = {}
 
 
 class ImportRequest(BaseModel):
@@ -111,9 +117,13 @@ async def abs_import(
 @router.post("/sync-covers")
 async def abs_sync_covers(
     overwrite: bool = False,
+    background_tasks: BackgroundTasks = None,
     current_user: User = Depends(get_current_user),
 ):
-    """Fetch covers from ABS for linked books missing a cover (or all if overwrite=True). Admin only."""
+    """Fetch covers from ABS for linked books missing a cover (or all if overwrite=True).
+
+    Runs as a background task and returns a job_id for polling. Admin only.
+    """
     if not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
 
@@ -121,11 +131,85 @@ async def abs_sync_covers(
     if not s.ABS_URL or not s.ABS_API_KEY:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="AudiobookShelf not configured")
 
-    from app.services.audiobookshelf import sync_covers
-    result = await sync_covers(overwrite=overwrite)
-    if "error" in result:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result["error"])
-    return result
+    # Count how many editions will be processed
+    from sqlalchemy import select, func
+    from app.database import get_session_factory
+    from app.models.edition import Edition
+
+    factory = get_session_factory()
+    async with factory() as db:
+        eq = select(func.count(Edition.id)).where(Edition.abs_item_id.isnot(None))
+        if not overwrite:
+            eq = eq.where(Edition.cover_hash.is_(None))
+        total = (await db.execute(eq)).scalar() or 0
+
+    job_id = str(_uuid.uuid4())
+    _cover_sync_jobs[job_id] = {
+        "status": "queued",
+        "total": total,
+        "done": 0,
+        "failed": 0,
+        "started_at": datetime.utcnow().isoformat(),
+    }
+
+    background_tasks.add_task(_run_cover_sync, job_id, overwrite)
+    return {"job_id": job_id, "total": total}
+
+
+@router.get("/sync-covers/{job_id}")
+async def get_cover_sync_job(
+    job_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Poll the status of a cover-sync job."""
+    job = _cover_sync_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"job_id": job_id, **job}
+
+
+async def _run_cover_sync(job_id: str, overwrite: bool) -> None:
+    """Background task: fetch ABS covers one by one, updating job state."""
+    from sqlalchemy import select
+    from app.database import get_session_factory
+    from app.models.edition import Edition
+    from app.services.audiobookshelf import _get_client, _fetch_abs_cover
+    from app.services import covers as cover_service
+
+    job = _cover_sync_jobs[job_id]
+    job["status"] = "running"
+
+    client = _get_client()
+    if not client:
+        job["status"] = "failed"
+        return
+
+    factory = get_session_factory()
+    async with factory() as db:
+        eq = select(Edition).where(Edition.abs_item_id.isnot(None))
+        if not overwrite:
+            eq = eq.where(Edition.cover_hash.is_(None))
+        editions = (await db.execute(eq)).scalars().all()
+
+        for edition in editions:
+            if job["status"] == "cancelled":
+                break
+            cover_bytes = await _fetch_abs_cover(client, edition.abs_item_id)
+            if not cover_bytes:
+                job["failed"] += 1
+                job["done"] += 1
+                continue
+            h, fmt, *_ = await cover_service.save_cover(cover_bytes, edition.uuid)
+            if h:
+                edition.cover_hash = h
+                edition.cover_format = fmt
+            else:
+                job["failed"] += 1
+            job["done"] += 1
+
+        await db.commit()
+
+    job["status"] = "completed" if job["status"] == "running" else job["status"]
 
 
 @router.post("/link")

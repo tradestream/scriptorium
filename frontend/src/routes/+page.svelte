@@ -1,6 +1,8 @@
 <script lang="ts">
   import BookGrid from "$lib/components/BookGrid.svelte";
   import { BookOpen, BookMarked, CheckSquare, Library, Clock } from "lucide-svelte";
+  import BlurFade from "$lib/components/magic-ui/blur-fade.svelte";
+  import NumberFlow from "@number-flow/svelte";
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
@@ -32,50 +34,66 @@
 <div class="mx-auto max-w-6xl px-6 py-8 space-y-10">
 
   <!-- Page header -->
-  <div class="border-b pb-6">
-    <h1 class="font-serif text-3xl font-semibold tracking-tight text-foreground">Library</h1>
-    <p class="mt-1 text-sm text-muted-foreground">Your personal reading collection</p>
-  </div>
+  <BlurFade delay={0}>
+    <div class="border-b pb-6">
+      <h1 class="font-serif text-3xl font-semibold tracking-tight text-foreground">Library</h1>
+      <p class="mt-1 text-sm text-muted-foreground">Your personal reading collection</p>
+    </div>
+  </BlurFade>
 
   <!-- Stat cards -->
   <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-    <div class="rounded-lg border bg-card p-4">
-      <div class="flex items-start justify-between">
-        <p class="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Total</p>
-        <Library class="h-3.5 w-3.5 text-muted-foreground/40 mt-0.5" />
+    <BlurFade delay={0.05}>
+      <div class="rounded-lg border bg-card p-4">
+        <div class="flex items-start justify-between">
+          <p class="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Total</p>
+          <Library class="h-3.5 w-3.5 text-muted-foreground/40 mt-0.5" />
+        </div>
+        <p class="mt-3 font-serif text-3xl font-semibold tabular-nums text-foreground">
+          {#if stats?.total_books != null}<NumberFlow value={stats.total_books} />{:else}—{/if}
+        </p>
+        <p class="mt-1 text-xs text-muted-foreground">books in library</p>
       </div>
-      <p class="mt-3 font-serif text-3xl font-semibold tabular-nums text-foreground">{stats?.total_books ?? '—'}</p>
-      <p class="mt-1 text-xs text-muted-foreground">books in library</p>
-    </div>
+    </BlurFade>
 
-    <div class="rounded-lg border bg-card p-4">
-      <div class="flex items-start justify-between">
-        <p class="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Reading</p>
-        <BookOpen class="h-3.5 w-3.5 text-muted-foreground/40 mt-0.5" />
+    <BlurFade delay={0.1}>
+      <div class="rounded-lg border bg-card p-4">
+        <div class="flex items-start justify-between">
+          <p class="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Reading</p>
+          <BookOpen class="h-3.5 w-3.5 text-muted-foreground/40 mt-0.5" />
+        </div>
+        <p class="mt-3 font-serif text-3xl font-semibold tabular-nums text-foreground">
+          {#if stats?.books_reading != null}<NumberFlow value={stats.books_reading} />{:else}—{/if}
+        </p>
+        <p class="mt-1 text-xs text-muted-foreground">in progress</p>
       </div>
-      <p class="mt-3 font-serif text-3xl font-semibold tabular-nums text-foreground">{stats?.books_reading ?? '—'}</p>
-      <p class="mt-1 text-xs text-muted-foreground">in progress</p>
-    </div>
+    </BlurFade>
 
-    <div class="rounded-lg border bg-card p-4">
-      <div class="flex items-start justify-between">
-        <p class="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Finished</p>
-        <CheckSquare class="h-3.5 w-3.5 text-muted-foreground/40 mt-0.5" />
+    <BlurFade delay={0.15}>
+      <div class="rounded-lg border bg-card p-4">
+        <div class="flex items-start justify-between">
+          <p class="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Finished</p>
+          <CheckSquare class="h-3.5 w-3.5 text-muted-foreground/40 mt-0.5" />
+        </div>
+        <p class="mt-3 font-serif text-3xl font-semibold tabular-nums text-foreground">
+          {#if stats?.books_completed != null}<NumberFlow value={stats.books_completed} />{:else}—{/if}
+        </p>
+        <p class="mt-1 text-xs text-muted-foreground">completed</p>
       </div>
-      <p class="mt-3 font-serif text-3xl font-semibold tabular-nums text-foreground">{stats?.books_completed ?? '—'}</p>
-      <p class="mt-1 text-xs text-muted-foreground">completed</p>
-    </div>
+    </BlurFade>
 
-    <div class="rounded-lg border bg-card p-4">
-      <div class="flex items-start justify-between">
-        <p class="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Time Read</p>
-        <Clock class="h-3.5 w-3.5 text-muted-foreground/40 mt-0.5" />
+    <BlurFade delay={0.2}>
+      <div class="rounded-lg border bg-card p-4">
+        <div class="flex items-start justify-between">
+          <p class="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Time Read</p>
+          <Clock class="h-3.5 w-3.5 text-muted-foreground/40 mt-0.5" />
+        </div>
+        <p class="mt-3 font-serif text-3xl font-semibold tabular-nums text-foreground">
+          {stats ? formatTime(stats.time_reading_seconds) : '—'}
+        </p>
+        <p class="mt-1 text-xs text-muted-foreground">total reading time</p>
       </div>
-      <p class="mt-3 font-serif text-3xl font-semibold tabular-nums text-foreground">
-        {stats ? formatTime(stats.time_reading_seconds) : '—'}
-      </p>
-      <p class="mt-1 text-xs text-muted-foreground">total reading time</p>
-    </div>
+    </BlurFade>
   </div>
 
   <!-- Continue Reading -->

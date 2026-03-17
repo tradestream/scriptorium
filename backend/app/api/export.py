@@ -352,3 +352,145 @@ async def export_annotated_html(
         content=html,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ── Citation Export ──────────────────────────────────────────────────────────
+
+from app.api.books import _edition_options
+from app.models.edition import Edition
+from app.models.work import Work
+from fastapi.responses import PlainTextResponse
+
+
+def _bibtex_entry(edition: Edition) -> str:
+    """Generate a BibTeX @book entry."""
+    work = edition.work
+    authors = " and ".join(a.name for a in work.authors) if work.authors else "Unknown"
+    # BibTeX key: first author lastname + year
+    key_author = work.authors[0].name.split(",")[0].split()[-1].lower() if work.authors else "unknown"
+    year = str(edition.published_date.year) if edition.published_date else "n.d."
+    key = f"{key_author}{year}"
+
+    fields = [f"  author = {{{authors}}}"]
+    fields.append(f"  title = {{{work.title}}}")
+    if work.subtitle:
+        fields.append(f"  subtitle = {{{work.subtitle}}}")
+    fields.append(f"  year = {{{year}}}")
+    if edition.publisher:
+        fields.append(f"  publisher = {{{edition.publisher}}}")
+    if edition.isbn:
+        fields.append(f"  isbn = {{{edition.isbn}}}")
+    if edition.language:
+        fields.append(f"  language = {{{edition.language}}}")
+    if work.doi:
+        fields.append(f"  doi = {{{work.doi}}}")
+
+    return "@book{" + key + ",\n" + ",\n".join(fields) + "\n}"
+
+
+def _mla_citation(edition: Edition) -> str:
+    """Generate MLA 9th edition citation."""
+    work = edition.work
+    # MLA: Lastname, Firstname. Title. Publisher, Year.
+    if work.authors:
+        first = work.authors[0].name
+        if "," in first:
+            author_str = first
+        else:
+            parts = first.split()
+            author_str = f"{parts[-1]}, {' '.join(parts[:-1])}" if len(parts) > 1 else first
+        if len(work.authors) > 1:
+            author_str += ", et al"
+    else:
+        author_str = "Unknown"
+
+    title = f"*{work.title}*"
+    if work.subtitle:
+        title += f": {work.subtitle}"
+
+    parts = [f"{author_str}. {title}."]
+    if edition.publisher:
+        parts.append(f"{edition.publisher},")
+    if edition.published_date:
+        parts.append(f"{edition.published_date.year}.")
+    else:
+        parts.append("n.d.")
+
+    return " ".join(parts)
+
+
+def _apa_citation(edition: Edition) -> str:
+    """Generate APA 7th edition citation."""
+    work = edition.work
+    # APA: Author, A. A. (Year). Title. Publisher.
+    if work.authors:
+        apa_authors = []
+        for a in work.authors[:7]:  # APA lists up to 7
+            parts = a.name.split(",") if "," in a.name else a.name.split()
+            if len(parts) >= 2 and "," in a.name:
+                # Already "Lastname, Firstname"
+                lastname = parts[0].strip()
+                initials = " ".join(f"{n.strip()[0]}." for n in parts[1].split() if n.strip())
+                apa_authors.append(f"{lastname}, {initials}")
+            elif len(parts) >= 2:
+                # "Firstname Lastname"
+                lastname = parts[-1]
+                initials = " ".join(f"{p[0]}." for p in parts[:-1])
+                apa_authors.append(f"{lastname}, {initials}")
+            else:
+                apa_authors.append(parts[0])
+        author_str = ", & ".join(apa_authors) if len(apa_authors) <= 2 else ", ".join(apa_authors[:-1]) + ", & " + apa_authors[-1]
+    else:
+        author_str = "Unknown"
+
+    year = f"({edition.published_date.year})" if edition.published_date else "(n.d.)"
+    title = f"*{work.title}*"
+    if work.subtitle:
+        title += f": {work.subtitle}"
+
+    parts = [f"{author_str} {year}. {title}."]
+    if edition.publisher:
+        parts.append(f"{edition.publisher}.")
+    if work.doi:
+        parts.append(f"https://doi.org/{work.doi}")
+
+    return " ".join(parts)
+
+
+@router.get("/books/{book_id}/citation")
+async def export_citation(
+    book_id: int,
+    format: str = "bibtex",
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Export a book citation in BibTeX, MLA, or APA format."""
+    result = await db.execute(
+        select(Edition).where(Edition.id == book_id).options(*_edition_options())
+    )
+    edition = result.unique().scalar_one_or_none()
+    if not edition:
+        raise HTTPException(status_code=404, detail="Book not found")
+
+    fmt = format.lower()
+    if fmt == "bibtex":
+        text = _bibtex_entry(edition)
+        media = "application/x-bibtex"
+        ext = "bib"
+    elif fmt == "mla":
+        text = _mla_citation(edition)
+        media = "text/plain"
+        ext = "txt"
+    elif fmt == "apa":
+        text = _apa_citation(edition)
+        media = "text/plain"
+        ext = "txt"
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown format: {format}. Use bibtex, mla, or apa.")
+
+    safe_title = "".join(c for c in edition.title if c.isalnum() or c in " -_")[:50].strip()
+    return PlainTextResponse(
+        content=text,
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{safe_title}.{ext}"'},
+    )

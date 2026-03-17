@@ -104,8 +104,9 @@ async def _import_book(
     # ── Save cover ────────────────────────────────────────────────────────────
     cover_hash: Optional[str] = None
     cover_format: Optional[str] = None
+    cover_color: Optional[str] = None
     if meta.get("cover_image"):
-        cover_hash, cover_format = await cover_service.save_cover(meta["cover_image"], entity_uuid)
+        cover_hash, cover_format, cover_color = await cover_service.save_cover(meta["cover_image"], entity_uuid)
 
     # ── Resolve or create authors ─────────────────────────────────────────────
     authors = await _get_or_create_entities(db, Author, "name", meta.get("authors", []))
@@ -129,11 +130,13 @@ async def _import_book(
         work_id=work.id,
         library_id=library.id,
         isbn=meta.get("isbn"),
+        isbn_10=meta.get("isbn_10"),
         published_date=meta.get("published_date"),
         language=meta.get("language"),
         format=fmt,
         cover_hash=cover_hash,
         cover_format=cover_format,
+        cover_color=cover_color,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
     )
@@ -157,6 +160,7 @@ async def _import_book(
         title=meta["title"],
         description=meta.get("description"),
         isbn=meta.get("isbn"),
+        isbn_10=meta.get("isbn_10"),
         language=meta.get("language"),
         published_date=meta.get("published_date"),
         cover_hash=cover_hash,
