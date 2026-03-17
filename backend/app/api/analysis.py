@@ -38,7 +38,7 @@ async def list_book_analyses(
     """List all analyses for a book."""
     stmt = (
         select(BookAnalysis)
-        .where(BookAnalysis.book_id == book_id)
+        .where(BookAnalysis.work_id == book_id)
         .order_by(BookAnalysis.created_at.desc())
     )
     result = await db.execute(stmt)
@@ -56,7 +56,7 @@ async def get_book_analysis(
     """Get a specific analysis with full content."""
     stmt = (
         select(BookAnalysis)
-        .where(BookAnalysis.id == analysis_id, BookAnalysis.book_id == book_id)
+        .where(BookAnalysis.id == analysis_id, BookAnalysis.work_id == book_id)
         .options(joinedload(BookAnalysis.template))
     )
     result = await db.execute(stmt)
@@ -109,7 +109,7 @@ async def delete_book_analysis(
 ):
     """Delete a saved analysis."""
     stmt = select(BookAnalysis).where(
-        BookAnalysis.id == analysis_id, BookAnalysis.book_id == book_id
+        BookAnalysis.id == analysis_id, BookAnalysis.work_id == book_id
     )
     result = await db.execute(stmt)
     analysis = result.scalar_one_or_none()
@@ -138,7 +138,7 @@ async def set_esoteric_reading(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
     result = await db.execute(
         select(BookAnalysis).options(joinedload(BookAnalysis.template)).where(
-            BookAnalysis.id == analysis_id, BookAnalysis.book_id == book_id
+            BookAnalysis.id == analysis_id, BookAnalysis.work_id == book_id
         )
     )
     analysis = result.unique().scalar_one_or_none()
@@ -342,7 +342,7 @@ async def list_computational_analyses(
     """List all computational esoteric analyses for a book."""
     stmt = (
         select(ComputationalAnalysis)
-        .where(ComputationalAnalysis.book_id == book_id)
+        .where(ComputationalAnalysis.work_id == book_id)
         .order_by(ComputationalAnalysis.created_at.desc())
     )
     result = await db.execute(stmt)
@@ -351,7 +351,7 @@ async def list_computational_analyses(
     return [
         ComputationalAnalysisRead(
             id=a.id,
-            book_id=a.book_id,
+            work_id=a.work_id,
             analysis_type=a.analysis_type,
             results=json.loads(a.results_json),
             config=json.loads(a.config_json) if a.config_json else None,
@@ -372,7 +372,7 @@ async def get_computational_analysis(
     """Get a specific computational analysis with full results."""
     stmt = select(ComputationalAnalysis).where(
         ComputationalAnalysis.id == analysis_id,
-        ComputationalAnalysis.book_id == book_id,
+        ComputationalAnalysis.work_id == book_id,
     )
     result = await db.execute(stmt)
     analysis = result.scalar_one_or_none()
@@ -382,7 +382,7 @@ async def get_computational_analysis(
 
     return ComputationalAnalysisRead(
         id=analysis.id,
-        book_id=analysis.book_id,
+        work_id=analysis.work_id,
         analysis_type=analysis.analysis_type,
         results=json.loads(analysis.results_json),
         config=json.loads(analysis.config_json) if analysis.config_json else None,
@@ -473,7 +473,7 @@ async def run_computational_analysis(
 
     return ComputationalAnalysisRead(
         id=record.id,
-        book_id=record.book_id,
+        work_id=record.work_id,
         analysis_type=record.analysis_type,
         results=results,
         config=config_dict,
@@ -492,7 +492,7 @@ async def delete_computational_analysis(
     """Delete a saved computational analysis."""
     stmt = select(ComputationalAnalysis).where(
         ComputationalAnalysis.id == analysis_id,
-        ComputationalAnalysis.book_id == book_id,
+        ComputationalAnalysis.work_id == book_id,
     )
     result = await db.execute(stmt)
     analysis = result.scalar_one_or_none()
@@ -594,13 +594,13 @@ async def list_prompt_configs(
     result = await db.execute(
         select(BookPromptConfig)
         .options(_jl(BookPromptConfig.template))
-        .where(BookPromptConfig.book_id == book_id)
+        .where(BookPromptConfig.work_id == book_id)
         .order_by(BookPromptConfig.created_at)
     )
     configs = result.unique().scalars().all()
     return [
         PromptConfigRead(
-            id=c.id, book_id=c.book_id, template_id=c.template_id,
+            id=c.id, work_id=c.work_id, template_id=c.template_id,
             custom_system_prompt=c.custom_system_prompt,
             custom_user_prompt=c.custom_user_prompt,
             notes=c.notes, created_at=c.created_at, updated_at=c.updated_at,
@@ -623,7 +623,7 @@ async def upsert_prompt_config(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
 
     stmt = select(BookPromptConfig).where(
-        BookPromptConfig.book_id == book_id,
+        BookPromptConfig.work_id == book_id,
         BookPromptConfig.template_id == data.template_id,
     )
     result = await db.execute(stmt)
@@ -657,7 +657,7 @@ async def upsert_prompt_config(
         tname = cfg2.template.name if cfg2.template else None
 
     return PromptConfigRead(
-        id=config.id, book_id=config.book_id, template_id=config.template_id,
+        id=config.id, work_id=config.work_id, template_id=config.template_id,
         custom_system_prompt=config.custom_system_prompt,
         custom_user_prompt=config.custom_user_prompt,
         notes=config.notes, created_at=config.created_at, updated_at=config.updated_at,
@@ -674,7 +674,7 @@ async def delete_prompt_config(
 ):
     """Delete a per-book prompt override."""
     result = await db.execute(
-        select(BookPromptConfig).where(BookPromptConfig.id == config_id, BookPromptConfig.book_id == book_id)
+        select(BookPromptConfig).where(BookPromptConfig.id == config_id, BookPromptConfig.work_id == book_id)
     )
     config = result.scalar_one_or_none()
     if not config:

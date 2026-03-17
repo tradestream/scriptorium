@@ -57,7 +57,7 @@ async def get_book_progress(
     """Get reading progress for a specific book."""
     stmt = (
         select(ReadProgress)
-        .where(ReadProgress.book_id == book_id, ReadProgress.user_id == current_user.id)
+        .where(ReadProgress.edition_id == book_id, ReadProgress.user_id == current_user.id)
         .order_by(ReadProgress.updated_at.desc())
     )
     result = await db.execute(stmt)
@@ -92,7 +92,7 @@ async def update_book_progress(
     device = await _get_or_create_web_device(db, current_user.id)
 
     stmt = select(ReadProgress).where(
-        ReadProgress.book_id == book_id,
+        ReadProgress.edition_id == book_id,
         ReadProgress.user_id == current_user.id,
     )
     result = await db.execute(stmt)
@@ -102,7 +102,7 @@ async def update_book_progress(
     if not progress:
         progress = ReadProgress(
             user_id=current_user.id,
-            book_id=book_id,
+            edition_id=book_id,
             device_id=device.id,
             started_at=now,
         )
@@ -138,7 +138,7 @@ async def patch_book_status(
     device = await _get_or_create_web_device(db, current_user.id)
 
     stmt = select(ReadProgress).where(
-        ReadProgress.book_id == book_id,
+        ReadProgress.edition_id == book_id,
         ReadProgress.user_id == current_user.id,
     )
     result = await db.execute(stmt)
@@ -148,7 +148,7 @@ async def patch_book_status(
     if not progress:
         progress = ReadProgress(
             user_id=current_user.id,
-            book_id=book_id,
+            edition_id=book_id,
             device_id=device.id,
             started_at=now if data.status not in ("want_to_read", None) else None,
         )
@@ -180,7 +180,7 @@ async def get_reading_stats(
     async def count_status(s: str) -> int:
         r = await db.scalar(
             select(func.count(ReadProgress.id))
-            .join(Book, Book.id == ReadProgress.book_id)
+            .join(Book, Book.id == ReadProgress.edition_id)
             .join(Library, Library.id == Book.library_id)
             .where(
                 ReadProgress.user_id == uid,
@@ -197,7 +197,7 @@ async def get_reading_stats(
     # Pages read (exclude hidden libraries)
     pages_read = await db.scalar(
         select(func.sum(ReadProgress.current_page))
-        .join(Book, Book.id == ReadProgress.book_id)
+        .join(Book, Book.id == ReadProgress.edition_id)
         .join(Library, Library.id == Book.library_id)
         .where(ReadProgress.user_id == uid, Library.is_hidden == False)
     ) or 0
@@ -217,7 +217,7 @@ async def get_reading_stats(
     # Currently reading (most recently opened, up to 5, exclude hidden)
     rp_stmt = (
         select(ReadProgress)
-        .join(Book, Book.id == ReadProgress.book_id)
+        .join(Book, Book.id == ReadProgress.edition_id)
         .join(Library, Library.id == Book.library_id)
         .where(
             ReadProgress.user_id == uid,
@@ -233,7 +233,7 @@ async def get_reading_stats(
     currently_reading = []
     for rp in reading_rows:
         book_row = await db.execute(
-            select(Book).where(Book.id == rp.book_id).options(joinedload(Book.authors))
+            select(Book).where(Book.id == rp.edition_id).options(joinedload(Book.authors))
         )
         book = book_row.unique().scalar_one_or_none()
         if book:
@@ -250,7 +250,7 @@ async def get_reading_stats(
     # Recently completed (up to 5, exclude hidden)
     rc_stmt = (
         select(ReadProgress)
-        .join(Book, Book.id == ReadProgress.book_id)
+        .join(Book, Book.id == ReadProgress.edition_id)
         .join(Library, Library.id == Book.library_id)
         .where(
             ReadProgress.user_id == uid,
@@ -266,7 +266,7 @@ async def get_reading_stats(
     recently_completed = []
     for rp in completed_rows:
         book_row = await db.execute(
-            select(Book).where(Book.id == rp.book_id).options(joinedload(Book.authors))
+            select(Book).where(Book.id == rp.edition_id).options(joinedload(Book.authors))
         )
         book = book_row.unique().scalar_one_or_none()
         if book:
@@ -283,7 +283,7 @@ async def get_reading_stats(
     year_start = datetime(datetime.utcnow().year, 1, 1)
     sessions_this_year = await db.scalar(
         select(func.count(ReadSession.id))
-        .join(Book, Book.id == ReadSession.book_id)
+        .join(Book, Book.id == ReadSession.work_id)
         .join(Library, Library.id == Book.library_id)
         .where(
             ReadSession.user_id == uid,
@@ -295,7 +295,7 @@ async def get_reading_stats(
     # Recent sessions (reading log — last 20, exclude hidden libraries)
     rs_stmt = (
         select(ReadSession)
-        .join(Book, Book.id == ReadSession.book_id)
+        .join(Book, Book.id == ReadSession.work_id)
         .join(Library, Library.id == Book.library_id)
         .where(ReadSession.user_id == uid, Library.is_hidden == False)
         .order_by(ReadSession.started_at.desc())
@@ -305,7 +305,7 @@ async def get_reading_stats(
     session_rows = rs_result.scalars().all()
 
     # Bulk-load books for those sessions
-    session_book_ids = list({s.book_id for s in session_rows})
+    session_book_ids = list({s.work_id for s in session_rows})
     books_by_id: dict[int, Book] = {}
     if session_book_ids:
         bk_result = await db.execute(
@@ -316,12 +316,12 @@ async def get_reading_stats(
 
     recent_sessions = []
     for s in session_rows:
-        bk = books_by_id.get(s.book_id)
+        bk = books_by_id.get(s.work_id)
         if bk:
             recent_sessions.append(
                 {
                     "id": s.id,
-                    "book_id": s.book_id,
+                    "book_id": s.work_id,
                     "title": bk.title,
                     "author": bk.authors[0].name if bk.authors else None,
                     "started_at": s.started_at.isoformat(),

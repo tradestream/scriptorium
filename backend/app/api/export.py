@@ -230,7 +230,7 @@ async def export_annotated_html(
     mar_result = await db.execute(
         select(Marginalium).where(
             Marginalium.user_id == current_user.id,
-            Marginalium.book_id == book_id,
+            Marginalium.edition_id == book_id,
         ).order_by(Marginalium.chapter, Marginalium.created_at)
     )
     marginalia = mar_result.scalars().all()
@@ -239,7 +239,7 @@ async def export_annotated_html(
     ann_result = await db.execute(
         select(Annotation).where(
             Annotation.user_id == current_user.id,
-            Annotation.book_id == book_id,
+            Annotation.edition_id == book_id,
         ).order_by(Annotation.chapter, Annotation.created_at)
     )
     annotations = ann_result.scalars().all()

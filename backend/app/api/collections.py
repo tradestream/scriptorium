@@ -56,7 +56,7 @@ def _build_smart_query(filters: dict, user_id: int):
     if filters.get("status"):
         stmt = stmt.where(
             Edition.id.in_(
-                select(ReadProgress.book_id).where(
+                select(ReadProgress.edition_id).where(
                     ReadProgress.user_id == user_id,
                     ReadProgress.status == filters["status"],
                 )
@@ -65,7 +65,7 @@ def _build_smart_query(filters: dict, user_id: int):
     if filters.get("min_rating"):
         stmt = stmt.where(
             Edition.id.in_(
-                select(ReadProgress.book_id).where(
+                select(ReadProgress.edition_id).where(
                     ReadProgress.user_id == user_id,
                     ReadProgress.rating >= filters["min_rating"],
                 )
@@ -182,7 +182,7 @@ async def get_collection(
             .order_by(CollectionBook.position)
         )
         entries = entries_result.scalars().all()
-        book_ids = [e.book_id for e in entries]
+        book_ids = [e.work_id for e in entries]
         books_map: dict[int, Book] = {}
         if book_ids:
             from app.api.books import _edition_options
@@ -248,7 +248,7 @@ async def add_book_to_collection(
     await _get_collection_or_404(collection_id, current_user.id, db)
     exists = await db.execute(
         select(CollectionBook).where(
-            and_(CollectionBook.collection_id == collection_id, CollectionBook.book_id == data.book_id)
+            and_(CollectionBook.collection_id == collection_id, CollectionBook.work_id == data.book_id)
         )
     )
     if exists.scalar_one_or_none():
@@ -260,7 +260,7 @@ async def add_book_to_collection(
             select(func.max(CollectionBook.position)).where(CollectionBook.collection_id == collection_id)
         )
         position = (max_result.scalar() or -1) + 1
-    db.add(CollectionBook(collection_id=collection_id, book_id=data.book_id, position=position))
+    db.add(CollectionBook(collection_id=collection_id, work_id=data.book_id, position=position))
     await db.commit()
 
 
@@ -274,7 +274,7 @@ async def remove_book_from_collection(
     await _get_collection_or_404(collection_id, current_user.id, db)
     result = await db.execute(
         select(CollectionBook).where(
-            and_(CollectionBook.collection_id == collection_id, CollectionBook.book_id == book_id)
+            and_(CollectionBook.collection_id == collection_id, CollectionBook.work_id == book_id)
         )
     )
     entry = result.scalar_one_or_none()

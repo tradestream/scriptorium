@@ -397,14 +397,14 @@ async def update_series_entries(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Series not found")
 
     # Resolve edition IDs → work IDs
-    edition_ids = [e.book_id for e in entries]
+    edition_ids = [e.work_id for e in entries]
     ed_result = await db.execute(
         select(Edition.id, Edition.work_id).where(Edition.id.in_(edition_ids))
     )
     edition_to_work = {ed_id: work_id for ed_id, work_id in ed_result}
 
     for entry in entries:
-        work_id = edition_to_work.get(entry.book_id)
+        work_id = edition_to_work.get(entry.work_id)
         if not work_id:
             continue
         await db.execute(

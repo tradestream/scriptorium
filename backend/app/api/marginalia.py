@@ -37,7 +37,7 @@ async def list_marginalia(
 ):
     stmt = select(Marginalium).where(
         Marginalium.user_id == current_user.id,
-        Marginalium.book_id == book_id,
+        Marginalium.edition_id == book_id,
     )
     if kind:
         stmt = stmt.where(Marginalium.kind == kind)
@@ -201,7 +201,7 @@ async def get_marginalia_stats(
     stmt = (
         select(Marginalium)
         .where(Marginalium.user_id == current_user.id)
-        .order_by(Marginalium.book_id)
+        .order_by(Marginalium.edition_id)
     )
     result = await db.execute(stmt)
     items = result.scalars().all()
@@ -303,7 +303,7 @@ async def get_five_keys(
         select(Marginalium)
         .where(
             Marginalium.user_id == current_user.id,
-            Marginalium.book_id == book_id,
+            Marginalium.edition_id == book_id,
         )
         .order_by(Marginalium.chapter, Marginalium.location, Marginalium.created_at)
     )

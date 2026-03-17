@@ -206,7 +206,7 @@ async def list_entries(
             margins[m.id] = m
 
     # Load books
-    book_ids = list({m.book_id for m in margins.values()})
+    book_ids = list({m.edition_id for m in margins.values()})
     books_map: dict[int, Book] = {}
     if book_ids:
         bk_result = await db.execute(select(Book).where(Book.id.in_(book_ids)))
@@ -218,7 +218,7 @@ async def list_entries(
         m = margins.get(e.marginalium_id)
         if not m:
             continue
-        bk = books_map.get(m.book_id)
+        bk = books_map.get(m.edition_id)
         out.append(
             EntryRead(
                 id=e.id,
@@ -231,7 +231,7 @@ async def list_entries(
                 chapter=m.chapter,
                 location=m.location,
                 reading_level=m.reading_level,
-                book_id=m.book_id,
+                book_id=m.edition_id,
                 book_title=bk.title if bk else None,
             )
         )
@@ -290,7 +290,7 @@ async def add_entry(
     await db.commit()
     await db.refresh(entry)
 
-    bk = await db.get(Book, m.book_id)
+    bk = await db.get(Book, m.edition_id)
 
     return EntryRead(
         id=entry.id,
@@ -303,7 +303,7 @@ async def add_entry(
         chapter=m.chapter,
         location=m.location,
         reading_level=m.reading_level,
-        book_id=m.book_id,
+        book_id=m.edition_id,
         book_title=bk.title if bk else None,
     )
 

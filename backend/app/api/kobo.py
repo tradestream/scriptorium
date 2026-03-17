@@ -210,7 +210,7 @@ async def kobo_get_reading_state(
 
     state_stmt = select(KoboBookState).where(
         KoboBookState.user_id == sync_token.user_id,
-        KoboBookState.book_id == book.id,
+        KoboBookState.edition_id == book.id,
     )
     state_result = await db.execute(state_stmt)
     state = state_result.scalar_one_or_none()

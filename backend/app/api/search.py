@@ -85,7 +85,7 @@ async def unified_search(
     )
     ann_rows = (await db.execute(ann_stmt)).scalars().all()
     # Bulk-load book titles
-    ann_book_ids = list({a.book_id for a in ann_rows})
+    ann_book_ids = list({a.edition_id for a in ann_rows})
     ann_books = {}
     if ann_book_ids:
         from app.api.books import _edition_options
@@ -99,9 +99,9 @@ async def unified_search(
             "id": a.id,
             "type": "annotation",
             "content": a.content[:200],
-            "book_id": a.book_id,
-            "book_title": ann_books.get(a.book_id, ""),
-            "annotation_type": a.annotation_type,
+            "book_id": a.edition_id,
+            "book_title": ann_books.get(a.edition_id, ""),
+            "annotation_type": a.type,
         }
         for a in ann_rows
     ]
@@ -115,7 +115,7 @@ async def unified_search(
         .limit(limit)
     )
     mar_rows = (await db.execute(mar_stmt)).scalars().all()
-    mar_book_ids = list({m.book_id for m in mar_rows})
+    mar_book_ids = list({m.edition_id for m in mar_rows})
     mar_books = {}
     if mar_book_ids:
         bk_result = await db.execute(
@@ -128,8 +128,8 @@ async def unified_search(
             "id": m.id,
             "type": "marginalium",
             "content": m.content[:200],
-            "book_id": m.book_id,
-            "book_title": mar_books.get(m.book_id, ""),
+            "book_id": m.edition_id,
+            "book_title": mar_books.get(m.edition_id, ""),
             "kind": m.kind,
         }
         for m in mar_rows

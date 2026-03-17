@@ -355,7 +355,7 @@ async def run_analysis(
         # Check for per-book prompt override
         cfg_result = await db.execute(
             select(BookPromptConfig).where(
-                BookPromptConfig.book_id == book_id,
+                BookPromptConfig.work_id == book_id,
                 BookPromptConfig.template_id == template_id,
             )
         )

@@ -25,7 +25,7 @@ async def list_annotations(
     """List annotations for a book."""
     stmt = select(Annotation).where(
         Annotation.user_id == current_user.id,
-        Annotation.book_id == book_id,
+        Annotation.edition_id == book_id,
     )
     if annotation_type:
         stmt = stmt.where(Annotation.type == annotation_type)
@@ -177,7 +177,7 @@ async def export_annotations(
     ann_result = await db.execute(
         select(Annotation).where(
             Annotation.user_id == current_user.id,
-            Annotation.book_id == book_id,
+            Annotation.edition_id == book_id,
         ).order_by(Annotation.created_at)
     )
     annotations = ann_result.scalars().all()
@@ -185,7 +185,7 @@ async def export_annotations(
     mar_result = await db.execute(
         select(Marginalium).where(
             Marginalium.user_id == current_user.id,
-            Marginalium.book_id == book_id,
+            Marginalium.edition_id == book_id,
         ).order_by(Marginalium.created_at)
     )
     marginalia = mar_result.scalars().all()

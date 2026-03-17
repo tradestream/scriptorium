@@ -192,7 +192,7 @@ async def add_book_to_shelf(
 
     # Check if already on shelf
     stmt = select(ShelfBook).where(
-        and_(ShelfBook.shelf_id == shelf_id, ShelfBook.book_id == data.book_id)
+        and_(ShelfBook.shelf_id == shelf_id, ShelfBook.work_id == data.book_id)
     )
     result = await db.execute(stmt)
     if result.scalar_one_or_none():
@@ -237,7 +237,7 @@ async def remove_book_from_shelf(
 
     # Find and delete shelf_book
     stmt = select(ShelfBook).where(
-        and_(ShelfBook.shelf_id == shelf_id, ShelfBook.book_id == book_id)
+        and_(ShelfBook.shelf_id == shelf_id, ShelfBook.work_id == book_id)
     )
     result = await db.execute(stmt)
     shelf_book = result.scalar_one_or_none()
@@ -285,19 +285,19 @@ async def bulk_shelf_assignment(
         for shelf_id in req.shelves_to_assign:
             existing = await db.execute(
                 select(ShelfBook).where(
-                    ShelfBook.shelf_id == shelf_id, ShelfBook.book_id == book_id
+                    ShelfBook.shelf_id == shelf_id, ShelfBook.work_id == book_id
                 )
             )
             if not existing.scalar_one_or_none():
                 position = await _shelf_book_count(db, shelf_id)
-                db.add(ShelfBook(shelf_id=shelf_id, book_id=book_id, position=position))
+                db.add(ShelfBook(shelf_id=shelf_id, work_id=book_id, position=position))
                 assigned += 1
 
         # Unassignments
         for shelf_id in req.shelves_to_unassign:
             result = await db.execute(
                 select(ShelfBook).where(
-                    ShelfBook.shelf_id == shelf_id, ShelfBook.book_id == book_id
+                    ShelfBook.shelf_id == shelf_id, ShelfBook.work_id == book_id
                 )
             )
             sb = result.scalar_one_or_none()
@@ -343,7 +343,7 @@ async def get_shelf_books(
         if needs_progress:
             book_stmt = book_stmt.join(
                 ReadProgress,
-                and_(ReadProgress.book_id == Book.id, ReadProgress.user_id == current_user.id),
+                and_(ReadProgress.edition_id == Book.id, ReadProgress.user_id == current_user.id),
                 isouter=False,
             )
         for rule in rules:
@@ -381,7 +381,7 @@ async def get_shelf_books(
 
         book_stmt = (
             select(Book)
-            .join(ShelfBook, ShelfBook.book_id == Book.id)
+            .join(ShelfBook, ShelfBook.work_id == Book.id)
             .where(ShelfBook.shelf_id == shelf_id)
             .options(
                 joinedload(Book.authors),

@@ -532,7 +532,7 @@ async def update_reading_state(
     else:
         state_stmt = select(KoboBookState).where(
             KoboBookState.user_id == user_id,
-            KoboBookState.book_id == book_id,
+            KoboBookState.edition_id == book_id,
         )
 
     state_result = await db.execute(state_stmt)
@@ -541,7 +541,7 @@ async def update_reading_state(
     if not kobo_state:
         kobo_state = KoboBookState(
             user_id=user_id,
-            book_id=book_id,
+            edition_id=book_id,
             edition_id=edition_id,
         )
         db.add(kobo_state)
@@ -583,7 +583,7 @@ async def update_reading_state(
     if edition_id is not None:
         await _sync_to_user_edition(user_id=user_id, edition_id=edition_id, kobo_state=kobo_state, db=db)
     if book_id is not None:
-        await _sync_to_read_progress(user_id=user_id, book_id=book_id, kobo_state=kobo_state, db=db)
+        await _sync_to_read_progress(user_id=user_id, edition_id=book_id, kobo_state=kobo_state, db=db)
 
     await db.commit()
     await db.refresh(kobo_state)
@@ -637,7 +637,7 @@ async def _sync_to_read_progress(
     """Legacy: sync Kobo reading state into ReadProgress (kept for transition)."""
     stmt = select(ReadProgress).where(
         ReadProgress.user_id == user_id,
-        ReadProgress.book_id == book_id,
+        ReadProgress.edition_id == book_id,
     )
     result = await db.execute(stmt)
     progress = result.scalar_one_or_none()
@@ -646,7 +646,7 @@ async def _sync_to_read_progress(
         device = await _get_or_create_kobo_device(user_id, db)
         progress = ReadProgress(
             user_id=user_id,
-            book_id=book_id,
+            edition_id=book_id,
             device_id=device.id,
         )
         db.add(progress)

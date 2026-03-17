@@ -20,7 +20,7 @@ async def list_read_sessions(
     """List read sessions, optionally filtered to one book."""
     stmt = select(ReadSession).where(ReadSession.user_id == current_user.id)
     if book_id is not None:
-        stmt = stmt.where(ReadSession.book_id == book_id)
+        stmt = stmt.where(ReadSession.work_id == book_id)
     stmt = stmt.order_by(ReadSession.started_at.desc())
     result = await db.execute(stmt)
     return result.scalars().all()

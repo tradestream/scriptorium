@@ -359,13 +359,13 @@ async def sync_progress(db_user_id: int) -> dict:
             rp = (await db.execute(
                 select(ReadProgress).where(
                     ReadProgress.user_id == db_user_id,
-                    ReadProgress.book_id == book.id,
+                    ReadProgress.edition_id == book.id,
                 )
             )).scalar_one_or_none()
             if rp is None:
                 rp = ReadProgress(
                     user_id=db_user_id,
-                    book_id=book.id,
+                    edition_id=book.id,
                     status=status,
                     percentage=prog["progress"],
                     started_at=started_dt,
@@ -616,7 +616,7 @@ async def import_library_items(
                 # Series on legacy Book as well
                 if meta["series_name"] and series:
                     await db.execute(
-                        bs_table.insert().values(book_id=book.id, series_id=series.id)
+                        bs_table.insert().values(edition_id=book.id, series_id=series.id)
                     )
 
                 created += 1
