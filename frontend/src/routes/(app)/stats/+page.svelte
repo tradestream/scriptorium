@@ -159,8 +159,9 @@
               </div>
               <CheckCircle class="h-5 w-5 text-green-500" />
             </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </BlurFade>
 
       <Card>
         <CardContent class="pt-6">
