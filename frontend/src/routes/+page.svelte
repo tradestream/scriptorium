@@ -2,7 +2,7 @@
   import BookGrid from "$lib/components/BookGrid.svelte";
   import { BookOpen, BookMarked, CheckSquare, Library, Clock } from "lucide-svelte";
   import BlurFade from "$lib/components/magic-ui/blur-fade.svelte";
-  import NumberFlow from "@number-flow/svelte";
+  // import NumberFlow from "@number-flow/svelte"; // removed — causes render issues in static build
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
@@ -50,7 +50,7 @@
           <Library class="h-3.5 w-3.5 text-muted-foreground/40 mt-0.5" />
         </div>
         <p class="mt-3 font-serif text-3xl font-semibold tabular-nums text-foreground">
-          {#if stats?.total_books != null}<NumberFlow value={stats.total_books} />{:else}—{/if}
+          {stats?.total_books ?? '—'}
         </p>
         <p class="mt-1 text-xs text-muted-foreground">books in library</p>
       </div>
@@ -63,7 +63,7 @@
           <BookOpen class="h-3.5 w-3.5 text-muted-foreground/40 mt-0.5" />
         </div>
         <p class="mt-3 font-serif text-3xl font-semibold tabular-nums text-foreground">
-          {#if stats?.books_reading != null}<NumberFlow value={stats.books_reading} />{:else}—{/if}
+          {stats?.books_reading ?? '—'}
         </p>
         <p class="mt-1 text-xs text-muted-foreground">in progress</p>
       </div>
@@ -76,7 +76,7 @@
           <CheckSquare class="h-3.5 w-3.5 text-muted-foreground/40 mt-0.5" />
         </div>
         <p class="mt-3 font-serif text-3xl font-semibold tabular-nums text-foreground">
-          {#if stats?.books_completed != null}<NumberFlow value={stats.books_completed} />{:else}—{/if}
+          {stats?.books_completed ?? '—'}
         </p>
         <p class="mt-1 text-xs text-muted-foreground">completed</p>
       </div>

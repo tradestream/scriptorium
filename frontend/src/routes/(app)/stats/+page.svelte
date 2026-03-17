@@ -4,7 +4,7 @@
   import { Progress } from '$lib/components/ui/progress';
   import { BookOpen, CheckCircle, Clock, BookMarked, BarChart2, CalendarCheck, Flame, TrendingUp, Target, Pencil, X, Check } from 'lucide-svelte';
   import BlurFade from '$lib/components/magic-ui/blur-fade.svelte';
-  import NumberFlow from '@number-flow/svelte';
+  // import NumberFlow from '@number-flow/svelte'; // removed — causes render issues in static build
   import * as api from '$lib/api/client';
   import type { ReadingStats, ReadingGoal } from '$lib/api/client';
 
@@ -141,7 +141,7 @@
             <div class="flex items-start justify-between">
               <div>
                 <p class="text-sm text-muted-foreground">In Library</p>
-                <p class="text-3xl font-bold"><NumberFlow value={stats.total_books} /></p>
+                <p class="text-3xl font-bold">{stats.total_books}</p>
               </div>
               <BookMarked class="h-5 w-5 text-muted-foreground" />
             </div>
@@ -155,7 +155,7 @@
             <div class="flex items-start justify-between">
               <div>
                 <p class="text-sm text-muted-foreground">Completed</p>
-                <p class="text-3xl font-bold"><NumberFlow value={stats.books_completed} /></p>
+                <p class="text-3xl font-bold">{stats.books_completed}</p>
               </div>
               <CheckCircle class="h-5 w-5 text-green-500" />
             </div>
@@ -168,7 +168,7 @@
           <div class="flex items-start justify-between">
             <div>
               <p class="text-sm text-muted-foreground">Reading</p>
-              <p class="text-3xl font-bold"><NumberFlow value={stats.books_reading} /></p>
+              <p class="text-3xl font-bold">{stats.books_reading}</p>
             </div>
             <BookOpen class="h-5 w-5 text-blue-500" />
           </div>
@@ -180,7 +180,7 @@
           <div class="flex items-start justify-between">
             <div>
               <p class="text-sm text-muted-foreground">{currentYear}</p>
-              <p class="text-3xl font-bold"><NumberFlow value={stats.sessions_this_year} /></p>
+              <p class="text-3xl font-bold">{stats.sessions_this_year}</p>
             </div>
             <CalendarCheck class="h-5 w-5 text-violet-500" />
           </div>
@@ -288,7 +288,7 @@
           <div class="flex items-start justify-between">
             <div>
               <p class="text-sm text-muted-foreground">Current streak</p>
-              <p class="text-3xl font-bold"><NumberFlow value={stats.current_streak ?? 0} /></p>
+              <p class="text-3xl font-bold">{stats.current_streak ?? 0}</p>
             </div>
             <Flame class="h-5 w-5 text-orange-500" />
           </div>
@@ -301,7 +301,7 @@
           <div class="flex items-start justify-between">
             <div>
               <p class="text-sm text-muted-foreground">Longest streak</p>
-              <p class="text-3xl font-bold"><NumberFlow value={stats.longest_streak ?? 0} /></p>
+              <p class="text-3xl font-bold">{stats.longest_streak ?? 0}</p>
             </div>
             <TrendingUp class="h-5 w-5 text-amber-500" />
           </div>
