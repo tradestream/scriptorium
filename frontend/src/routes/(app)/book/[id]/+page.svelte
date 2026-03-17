@@ -1,8 +1,7 @@
 <script lang="ts">
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
-  import ScrollProgress from "$lib/components/magic-ui/scroll-progress.svelte";
-  import BlurFade from "$lib/components/magic-ui/blur-fade.svelte";
+  // ScrollProgress and BlurFade removed — motion-sv incompatible with static build
   import { Card, CardContent, CardHeader, CardTitle } from "$lib/components/ui/card";
   import { Progress } from "$lib/components/ui/progress";
   import { Separator } from "$lib/components/ui/separator";
@@ -353,8 +352,6 @@
     } catch { /* non-critical */ } finally { togglingPhysical = false; }
   }
 </script>
-
-<ScrollProgress />
 
 {#if book}
   <!-- ColorScape gradient accent from cover -->

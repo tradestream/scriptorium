@@ -4,7 +4,7 @@
   import BookGrid from "$lib/components/BookGrid.svelte";
   import { Input } from "$lib/components/ui/input";
   import { Button } from "$lib/components/ui/button";
-  import BlurFade from "$lib/components/magic-ui/blur-fade.svelte";
+  // BlurFade removed — motion-sv incompatible with static build
   import { Search, BookOpen, Newspaper, Highlighter, Feather, ExternalLink } from "lucide-svelte";
   import * as api from "$lib/api/client";
   import type { Book } from "$lib/types/index";
@@ -83,16 +83,14 @@
 
     <!-- Books -->
     {#if books.length > 0}
-      <BlurFade delay={0.05}>
-        <section class="mb-8">
-          <div class="flex items-center gap-2 mb-3">
-            <BookOpen class="h-4 w-4 text-muted-foreground" />
-            <h2 class="text-lg font-semibold">Books</h2>
+      <section class="mb-8">
+        <div class="flex items-center gap-2 mb-3">
+          <BookOpen class="h-4 w-4 text-muted-foreground" />
+          <h2 class="text-lg font-semibold">Books</h2>
           <span class="text-xs text-muted-foreground">{bookTotal}</span>
         </div>
         <BookGrid {books} />
-        </section>
-      </BlurFade>
+      </section>
     {/if}
 
     <!-- Articles -->

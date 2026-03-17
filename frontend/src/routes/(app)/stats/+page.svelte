@@ -3,7 +3,7 @@
   import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
   import { Progress } from '$lib/components/ui/progress';
   import { BookOpen, CheckCircle, Clock, BookMarked, BarChart2, CalendarCheck, Flame, TrendingUp, Target, Pencil, X, Check } from 'lucide-svelte';
-  import BlurFade from '$lib/components/magic-ui/blur-fade.svelte';
+  // import BlurFade — removed, motion-sv doesn't work in static build
   // import NumberFlow from '@number-flow/svelte'; // removed — causes render issues in static build
   import * as api from '$lib/api/client';
   import type { ReadingStats, ReadingGoal } from '$lib/api/client';
@@ -119,12 +119,10 @@
 </script>
 
 <div class="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
-  <BlurFade delay={0}>
-    <div class="mb-8">
-      <h1 class="text-3xl font-bold tracking-tight">Reading Stats</h1>
-      <p class="mt-1 text-muted-foreground">Your reading activity at a glance</p>
-    </div>
-  </BlurFade>
+  <div class="mb-8">
+    <h1 class="text-3xl font-bold tracking-tight">Reading Stats</h1>
+    <p class="mt-1 text-muted-foreground">Your reading activity at a glance</p>
+  </div>
 
   {#if loading}
     <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -135,7 +133,6 @@
   {:else if stats}
     <!-- Summary cards -->
     <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
-      <BlurFade delay={0.05}>
         <Card>
           <CardContent class="pt-6">
             <div class="flex items-start justify-between">
@@ -147,9 +144,8 @@
             </div>
           </CardContent>
         </Card>
-      </BlurFade>
 
-      <BlurFade delay={0.1}>
+
         <Card>
           <CardContent class="pt-6">
             <div class="flex items-start justify-between">
@@ -161,7 +157,6 @@
             </div>
           </CardContent>
         </Card>
-      </BlurFade>
 
       <Card>
         <CardContent class="pt-6">
