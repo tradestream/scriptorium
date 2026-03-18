@@ -10,6 +10,7 @@ from app.api.auth import get_current_user
 from app.database import get_db
 from app.models import Book, User
 from app.models.annotation import Annotation
+from app.models.work import Work
 from app.schemas.annotation import AnnotationCreate, AnnotationRead, AnnotationUpdate, AnnotationWithBook
 
 router = APIRouter(prefix="/annotations", tags=["annotations"])
@@ -52,23 +53,25 @@ async def list_my_annotations(
     annotations = result.scalars().all()
 
     # Bulk-load books (with authors) to avoid N+1
-    book_ids = list({a.book_id for a in annotations})
+    book_ids = list({a.edition_id for a in annotations})
     books_map: dict[int, Book] = {}
     if book_ids:
         bk_result = await db.execute(
-            select(Book).where(Book.id.in_(book_ids)).options(joinedload(Book.authors))
+            select(Book).where(Book.id.in_(book_ids)).options(
+                joinedload(Book.work).options(joinedload(Work.authors))
+            )
         )
         for b in bk_result.unique().scalars().all():
             books_map[b.id] = b
 
     out = []
     for ann in annotations:
-        bk = books_map.get(ann.book_id)
+        bk = books_map.get(ann.edition_id)
         out.append(
             {
                 "id": ann.id,
                 "user_id": ann.user_id,
-                "book_id": ann.book_id,
+                "book_id": ann.edition_id,
                 "file_id": ann.file_id,
                 "type": ann.type,
                 "content": ann.content,
@@ -92,7 +95,7 @@ async def create_annotation(
 ):
     annotation = Annotation(
         user_id=current_user.id,
-        book_id=data.book_id,
+        edition_id=data.book_id,
         file_id=data.file_id,
         type=data.type,
         content=data.content,

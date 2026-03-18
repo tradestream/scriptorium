@@ -1308,6 +1308,17 @@ export async function getCoverUpgradeJob(jobId: string): Promise<{ job_id: strin
   return fetchAPI(`/admin/covers/upgrade/${jobId}`);
 }
 
+// ── Bulk Cover Fetch (missing covers) ────────────────────────────────────────
+
+export async function startCoverFetch(libraryId?: number): Promise<{ job_id: string; total: number }> {
+  const qs = libraryId ? `?library_id=${libraryId}` : '';
+  return fetchAPI(`/admin/covers/fetch${qs}`, { method: 'POST' });
+}
+
+export async function getCoverFetchJob(jobId: string): Promise<{ job_id: string; status: string; total: number; done: number; found: number; not_found: number; failed: number; current: string }> {
+  return fetchAPI(`/admin/covers/fetch/${jobId}`);
+}
+
 // ── Filename Metadata Extraction ─────────────────────────────────────────────
 
 export async function startFilenameExtract(libraryId?: number, minConfidence: string = 'medium'): Promise<{ job_id: string; total: number }> {

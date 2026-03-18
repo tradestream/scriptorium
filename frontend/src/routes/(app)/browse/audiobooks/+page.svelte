@@ -63,6 +63,19 @@
     void search;
     load(true);
   });
+
+  function infiniteScroll(node: HTMLElement) {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !loadingMore && hasMore) {
+          load(false);
+        }
+      },
+      { rootMargin: '400px' }
+    );
+    observer.observe(node);
+    return { destroy() { observer.disconnect(); } };
+  }
 </script>
 
 <div class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
@@ -111,9 +124,14 @@
           Showing {books.length.toLocaleString()} of {total.toLocaleString()}
         </p>
         {#if hasMore}
-          <Button variant="outline" size="sm" onclick={() => load(false)} disabled={loadingMore} class="min-w-32">
-            {loadingMore ? 'Loading…' : 'Load more'}
-          </Button>
+          <div
+            use:infiniteScroll
+            class="flex items-center justify-center py-4"
+          >
+            {#if loadingMore}
+              <p class="text-xs text-muted-foreground">Loading…</p>
+            {/if}
+          </div>
         {/if}
       </div>
     {/if}

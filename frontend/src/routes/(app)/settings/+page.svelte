@@ -489,6 +489,37 @@
   let coverUpMsg = $state('');
   let _coverUpPoll: ReturnType<typeof setInterval> | null = null;
 
+  // ── Cover Fetch (missing covers) ──────────────────────────────────────────
+  let coverFetchJob = $state<any>(null);
+  let coverFetchStarting = $state(false);
+  let coverFetchMsg = $state('');
+  let _coverFetchPoll: ReturnType<typeof setInterval> | null = null;
+
+  async function startCoverFetch() {
+    coverFetchStarting = true;
+    coverFetchMsg = '';
+    coverFetchJob = null;
+    try {
+      const r = await api.startCoverFetch();
+      coverFetchMsg = `Fetching covers for ${r.total} books…`;
+      coverFetchJob = { ...r, status: 'queued', done: 0, found: 0, not_found: 0, failed: 0, current: '' };
+      _coverFetchPoll = setInterval(async () => {
+        try {
+          coverFetchJob = await api.getCoverFetchJob(r.job_id);
+          coverFetchMsg = `Fetching… ${coverFetchJob.done}/${coverFetchJob.total} (${coverFetchJob.found} found)`;
+          if (coverFetchJob.status === 'done' || coverFetchJob.status === 'cancelled') {
+            clearInterval(_coverFetchPoll!);
+            coverFetchMsg = `Done — ${coverFetchJob.found} covers found, ${coverFetchJob.not_found} not found, ${coverFetchJob.failed} failed`;
+            coverFetchStarting = false;
+          }
+        } catch { clearInterval(_coverFetchPoll!); coverFetchStarting = false; }
+      }, 5000);
+    } catch (e) {
+      coverFetchMsg = e instanceof Error ? e.message : 'Failed';
+      coverFetchStarting = false;
+    }
+  }
+
   async function startCoverUpgrade() {
     coverUpStarting = true;
     coverUpMsg = '';
@@ -1339,6 +1370,49 @@
         <Button onclick={startCoverUpgrade} disabled={coverUpStarting || coverUpJob?.status === 'running'} class="w-full">
           <ImageUp class="mr-2 h-4 w-4" />
           {coverUpStarting ? 'Starting…' : 'Upgrade Low-Quality Covers'}
+        </Button>
+      </CardContent>
+    </Card>
+  {/if}
+
+  <!-- Fetch Missing Covers -->
+  {#if user?.is_admin}
+    <Card>
+      <CardHeader>
+        <CardTitle>Fetch Missing Covers</CardTitle>
+        <CardDescription>Find books with no cover image and download covers from Google Books, Open Library, Hardcover, and Amazon</CardDescription>
+      </CardHeader>
+      <CardContent class="space-y-4">
+        <p class="text-sm text-muted-foreground">
+          Searches all books that have an ISBN but no cover. Tries multiple metadata providers to find and download cover images.
+        </p>
+
+        {#if coverFetchJob && (coverFetchJob.status === 'running' || coverFetchJob.status === 'queued')}
+          <div class="space-y-2 rounded-md border bg-muted/30 p-3">
+            <span class="text-sm font-medium">{coverFetchMsg}</span>
+            {#if coverFetchJob.total > 0}
+              <div class="h-2 w-full overflow-hidden rounded-full bg-muted">
+                <div class="h-full rounded-full bg-primary transition-all" style="width: {Math.round((coverFetchJob.done / coverFetchJob.total) * 100)}%"></div>
+              </div>
+            {/if}
+            {#if coverFetchJob.current}
+              <p class="truncate text-xs text-muted-foreground">{coverFetchJob.current}</p>
+            {/if}
+          </div>
+        {:else if coverFetchJob && coverFetchJob.status === 'done'}
+          <div class="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm dark:border-green-800 dark:bg-green-950/30">
+            <CheckCircle class="h-4 w-4 shrink-0 text-green-500" />
+            <span>{coverFetchMsg}</span>
+          </div>
+        {/if}
+
+        {#if coverFetchMsg && !coverFetchJob}
+          <p class="text-sm text-muted-foreground">{coverFetchMsg}</p>
+        {/if}
+
+        <Button onclick={startCoverFetch} disabled={coverFetchStarting || coverFetchJob?.status === 'running'} class="w-full">
+          <ImageUp class="mr-2 h-4 w-4" />
+          {coverFetchStarting ? 'Starting…' : 'Fetch Missing Covers'}
         </Button>
       </CardContent>
     </Card>

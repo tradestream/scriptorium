@@ -538,7 +538,7 @@ async def extract_text_from_book(
         except Exception:
             pass  # Fall through to live extraction
 
-    stmt = select(BookFile).where(BookFile.book_id == book.id)
+    stmt = select(BookFile).where(BookFile.edition_id == book.id)
     result = await db.execute(stmt)
     files = result.scalars().all()
 

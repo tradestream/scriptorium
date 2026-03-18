@@ -15,6 +15,7 @@ from app.database import get_db
 from app.models import Book, User
 from app.models.annotation import Annotation
 from app.models.marginalium import Marginalium
+from app.models.work import Work
 
 router = APIRouter(prefix="/export", tags=["export"])
 
@@ -218,7 +219,7 @@ async def export_annotated_html(
     """
     # Load book
     bk_result = await db.execute(
-        select(Book).options(joinedload(Book.authors)).where(Book.id == book_id)
+        select(Book).options(joinedload(Book.work).options(joinedload(Work.authors))).where(Book.id == book_id)
     )
     book = bk_result.unique().scalar_one_or_none()
     if not book:

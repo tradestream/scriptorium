@@ -542,7 +542,6 @@ async def update_reading_state(
         kobo_state = KoboBookState(
             user_id=user_id,
             edition_id=book_id,
-            edition_id=edition_id,
         )
         db.add(kobo_state)
 
@@ -725,7 +724,7 @@ async def get_download_path(
     # Fallback to legacy BookFile
     stmt = (
         select(BookFile)
-        .join(Book, BookFile.book_id == Book.id)
+        .join(Book, BookFile.edition_id == Book.id)
         .where(
             Book.uuid == book_uuid,
             BookFile.format == file_format,

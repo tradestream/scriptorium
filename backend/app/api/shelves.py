@@ -9,6 +9,7 @@ from sqlalchemy.orm import joinedload
 from app.database import get_db
 from app.models import Author, Book, Series, Shelf, ShelfBook, Tag, User
 from app.models.progress import ReadProgress
+from app.models.work import Work
 from app.schemas.shelf import ShelfBookAdd, ShelfCreate, ShelfRead, ShelfUpdate
 
 from .auth import get_current_user
@@ -206,7 +207,7 @@ async def add_book_to_shelf(
 
     shelf_book = ShelfBook(
         shelf_id=shelf_id,
-        book_id=data.book_id,
+        work_id=data.book_id,
         position=position,
     )
 
@@ -334,8 +335,12 @@ async def get_shelf_books(
             return []
 
         book_stmt = select(Book).options(
-            joinedload(Book.authors), joinedload(Book.tags), joinedload(Book.series),
+            joinedload(Book.work).options(
+                joinedload(Work.authors), joinedload(Work.tags), joinedload(Work.series),
+                joinedload(Work.contributors),
+            ),
             joinedload(Book.files), joinedload(Book.contributors),
+            joinedload(Book.location_ref),
         )
         # Determine if any rules need a progress join
         progress_fields = {"status", "rating", "min_rating"}
@@ -384,11 +389,15 @@ async def get_shelf_books(
             .join(ShelfBook, ShelfBook.work_id == Book.id)
             .where(ShelfBook.shelf_id == shelf_id)
             .options(
-                joinedload(Book.authors),
-                joinedload(Book.tags),
-                joinedload(Book.series),
+                joinedload(Book.work).options(
+                    joinedload(Work.authors),
+                    joinedload(Work.tags),
+                    joinedload(Work.series),
+                    joinedload(Work.contributors),
+                ),
                 joinedload(Book.files),
                 joinedload(Book.contributors),
+                joinedload(Book.location_ref),
             )
             .order_by(ShelfBook.position)
         )

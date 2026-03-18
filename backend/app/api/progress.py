@@ -13,6 +13,7 @@ from app.database import get_db
 from app.models import Book, ReadProgress
 from app.models.library import Library
 from app.models.progress import Device, KoboBookState
+from app.models.work import Work
 from app.models.read_session import ReadSession
 from app.models.user import User
 
@@ -233,7 +234,7 @@ async def get_reading_stats(
     currently_reading = []
     for rp in reading_rows:
         book_row = await db.execute(
-            select(Book).where(Book.id == rp.edition_id).options(joinedload(Book.authors))
+            select(Book).where(Book.id == rp.edition_id).options(joinedload(Book.work).options(joinedload(Work.authors)))
         )
         book = book_row.unique().scalar_one_or_none()
         if book:
@@ -266,7 +267,7 @@ async def get_reading_stats(
     recently_completed = []
     for rp in completed_rows:
         book_row = await db.execute(
-            select(Book).where(Book.id == rp.edition_id).options(joinedload(Book.authors))
+            select(Book).where(Book.id == rp.edition_id).options(joinedload(Book.work).options(joinedload(Work.authors)))
         )
         book = book_row.unique().scalar_one_or_none()
         if book:
@@ -309,7 +310,7 @@ async def get_reading_stats(
     books_by_id: dict[int, Book] = {}
     if session_book_ids:
         bk_result = await db.execute(
-            select(Book).where(Book.id.in_(session_book_ids)).options(joinedload(Book.authors))
+            select(Book).where(Book.id.in_(session_book_ids)).options(joinedload(Book.work).options(joinedload(Work.authors)))
         )
         for b in bk_result.unique().scalars().all():
             books_by_id[b.id] = b

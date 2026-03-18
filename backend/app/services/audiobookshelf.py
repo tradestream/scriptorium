@@ -479,7 +479,7 @@ async def import_library_items(
                 if author:
                     book = (await db.execute(
                         select(Book)
-                        .join(ba_table, Book.id == ba_table.c.book_id)
+                        .join(ba_table, Book.id == ba_table.c.work_id)
                         .where(
                             ba_table.c.author_id == author.id,
                             sqlfunc.lower(Book.title) == meta["title"].lower(),

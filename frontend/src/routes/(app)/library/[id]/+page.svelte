@@ -100,6 +100,23 @@
     await loadBooks(false);
   }
 
+  function infiniteScroll(node: HTMLElement) {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !loadingMore && hasMore) {
+          loadMore();
+        }
+      },
+      { rootMargin: '400px' }
+    );
+    observer.observe(node);
+    return {
+      destroy() {
+        observer.disconnect();
+      }
+    };
+  }
+
   async function scan() {
     if (!library) return;
     await api.scanLibrary(library.id);
@@ -427,22 +444,21 @@
         {:else}
           <BookGrid {books} mode={viewMode} {selectionMode} {selectedIds} onToggleSelect={toggleSelect} />
 
-          <!-- Load more / status -->
+          <!-- Infinite scroll sentinel + status -->
           {#if books.length > 0}
             <div class="mt-8 flex flex-col items-center gap-2">
               <p class="text-xs text-muted-foreground tabular-nums">
                 Showing {books.length.toLocaleString()} of {total.toLocaleString()}
               </p>
               {#if hasMore}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onclick={loadMore}
-                  disabled={loadingMore}
-                  class="min-w-32"
+                <div
+                  use:infiniteScroll
+                  class="flex items-center justify-center py-4"
                 >
-                  {loadingMore ? 'Loading…' : 'Load more'}
-                </Button>
+                  {#if loadingMore}
+                    <p class="text-xs text-muted-foreground">Loading…</p>
+                  {/if}
+                </div>
               {/if}
             </div>
           {/if}

@@ -14,6 +14,7 @@ from app.api.auth import get_current_user
 from app.database import get_db
 from app.models import Book, User
 from app.models.marginalium import Marginalium
+from app.models.work import Work
 from app.schemas.marginalium import (
     MarginaliumCreate,
     MarginaliumRead,
@@ -62,24 +63,26 @@ async def list_my_marginalia(
     result = await db.execute(stmt)
     items = result.scalars().all()
 
-    book_ids = list({m.book_id for m in items})
+    book_ids = list({m.edition_id for m in items})
     books_map: dict[int, Book] = {}
     if book_ids:
         bk_result = await db.execute(
-            select(Book).where(Book.id.in_(book_ids)).options(joinedload(Book.authors))
+            select(Book).where(Book.id.in_(book_ids)).options(
+                joinedload(Book.work).options(joinedload(Work.authors))
+            )
         )
         for b in bk_result.unique().scalars().all():
             books_map[b.id] = b
 
     out = []
     for m in items:
-        bk = books_map.get(m.book_id)
+        bk = books_map.get(m.edition_id)
         out.append(
             MarginaliumWithBook.model_validate(
                 {
                     "id": m.id,
                     "user_id": m.user_id,
-                    "book_id": m.book_id,
+                    "book_id": m.edition_id,
                     "file_id": m.file_id,
                     "kind": m.kind,
                     "reading_level": m.reading_level,
@@ -108,7 +111,7 @@ async def create_marginalium(
 ):
     m = Marginalium(
         user_id=current_user.id,
-        book_id=data.book_id,
+        edition_id=data.book_id,
         file_id=data.file_id,
         kind=data.kind,
         reading_level=data.reading_level,
@@ -224,11 +227,11 @@ async def get_marginalia_stats(
                 pass
 
     # Book counts — bulk-load titles
-    book_ids = list({m.book_id for m in items})
+    book_ids = list({m.edition_id for m in items})
     bk_result = await db.execute(select(Book).where(Book.id.in_(book_ids)))
     books_map = {b.id: b.title for b in bk_result.scalars().all()}
 
-    book_counter: Counter = Counter(m.book_id for m in items)
+    book_counter: Counter = Counter(m.edition_id for m in items)
 
     top_books = [
         {"book_id": bid, "book_title": books_map.get(bid, f"Book {bid}"), "count": cnt}

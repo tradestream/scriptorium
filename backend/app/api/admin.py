@@ -802,6 +802,138 @@ async def _run_cover_upgrade(job_id: str, edition_ids: list[int]) -> None:
     job["current"] = ""
 
 
+# ── Bulk cover fetch (for books with no cover) ────────────────────────────────
+
+_cover_fetch_jobs: dict[str, dict] = {}
+
+
+@router.post("/covers/fetch")
+async def start_cover_fetch(
+    library_id: Optional[int] = None,
+    background_tasks: BackgroundTasks = None,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(_require_admin),
+):
+    """Find books with no cover and attempt to fetch from enrichment providers."""
+    from sqlalchemy import select
+    from app.models.edition import Edition
+    from app.models.work import Work
+
+    stmt = (
+        select(Edition.id)
+        .where(
+            (Edition.cover_hash.is_(None)) | (Edition.cover_hash == ""),
+            (Edition.isbn.isnot(None)) & (Edition.isbn != ""),
+        )
+    )
+    if library_id:
+        stmt = stmt.where(Edition.library_id == library_id)
+    result = await db.execute(stmt)
+    edition_ids = [r[0] for r in result.all()]
+
+    job_id = str(_uuid.uuid4())
+    _cover_fetch_jobs[job_id] = {
+        "status": "queued",
+        "total": len(edition_ids),
+        "done": 0,
+        "found": 0,
+        "not_found": 0,
+        "failed": 0,
+        "current": "",
+        "started_at": datetime.utcnow().isoformat(),
+    }
+    background_tasks.add_task(_run_cover_fetch, job_id, edition_ids)
+    return {"job_id": job_id, "total": len(edition_ids)}
+
+
+@router.get("/covers/fetch/{job_id}")
+async def get_cover_fetch_job(
+    job_id: str,
+    _admin: User = Depends(_require_admin),
+):
+    """Poll cover fetch job status."""
+    job = _cover_fetch_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"job_id": job_id, **job}
+
+
+async def _run_cover_fetch(job_id: str, edition_ids: list[int]) -> None:
+    """Background task: fetch covers for books that have none."""
+    import httpx
+    from sqlalchemy import select
+    from sqlalchemy.orm import joinedload
+    from app.models.edition import Edition
+    from app.models.work import Work
+    from app.services.covers import cover_service
+    from app.services.metadata_enrichment import enrichment_service
+
+    job = _cover_fetch_jobs[job_id]
+    job["status"] = "running"
+
+    for edition_id in edition_ids:
+        if job.get("status") == "cancelled":
+            break
+
+        try:
+            # Fresh session per book to avoid blocking other requests (SQLite)
+            async with _session_factory() as db:
+                result = await db.execute(
+                    select(Edition)
+                    .where(Edition.id == edition_id)
+                    .options(joinedload(Edition.work).options(joinedload(Work.authors)))
+                )
+                edition = result.unique().scalar_one_or_none()
+                if not edition or edition.cover_hash:
+                    job["done"] += 1
+                    continue
+
+                work = edition.work
+                title = work.title if work else f"Edition {edition_id}"
+                isbn = edition.isbn
+                book_uuid = edition.uuid
+                job["current"] = title
+                author_names = [a.name for a in work.authors] if work else []
+
+            # Do network I/O outside the DB session
+            enriched = await enrichment_service.enrich(title, author_names, isbn)
+
+            cover_url = enriched.get("cover_url") if enriched else None
+            if cover_url:
+                async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+                    resp = await client.get(cover_url)
+                    if resp.status_code == 200 and resp.content and len(resp.content) > 1000:
+                        cover_hash, cover_format, cover_color = await cover_service.save_cover(
+                            resp.content, book_uuid
+                        )
+                        if cover_hash:
+                            async with _session_factory() as db:
+                                edition = await db.get(Edition, edition_id)
+                                if edition:
+                                    edition.cover_hash = cover_hash
+                                    edition.cover_format = cover_format
+                                    edition.cover_color = cover_color
+                                    await db.commit()
+                            job["found"] += 1
+                        else:
+                            job["not_found"] += 1
+                    else:
+                        job["not_found"] += 1
+            else:
+                job["not_found"] += 1
+
+        except Exception as exc:
+            logger.warning("Cover fetch failed for edition %d: %s", edition_id, exc)
+            job["failed"] += 1
+
+        job["done"] += 1
+        # Rate limit — ~1 req/sec to be polite to APIs
+        await asyncio.sleep(1)
+
+    job["status"] = "done" if job.get("status") != "cancelled" else "cancelled"
+    job["current"] = ""
+
+
 @router.get("/backup")
 async def download_backup(_admin: User = Depends(_require_admin)):
     """Download a tar.gz archive containing the database and config directory.

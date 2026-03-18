@@ -7,6 +7,7 @@ from app.api.auth import get_current_user
 from app.database import get_db
 from app.models import User
 from app.models.book import Book
+from app.models.work import Work
 from app.schemas.book import BookRead
 
 router = APIRouter(prefix="/duplicates", tags=["duplicates"])
@@ -35,11 +36,15 @@ async def find_isbn_duplicates(
         books_result = await db.execute(
             select(Book)
             .options(
-                joinedload(Book.authors),
-                joinedload(Book.tags),
-                joinedload(Book.series),
+                joinedload(Book.work).options(
+                    joinedload(Work.authors),
+                    joinedload(Work.tags),
+                    joinedload(Work.series),
+                    joinedload(Work.contributors),
+                ),
                 joinedload(Book.files),
                 joinedload(Book.contributors),
+                joinedload(Book.location_ref),
             )
             .where(Book.isbn == isbn)
             .order_by(Book.created_at)
@@ -75,11 +80,15 @@ async def find_title_author_duplicates(
         books_result = await db.execute(
             select(Book)
             .options(
-                joinedload(Book.authors),
-                joinedload(Book.tags),
-                joinedload(Book.series),
+                joinedload(Book.work).options(
+                    joinedload(Work.authors),
+                    joinedload(Work.tags),
+                    joinedload(Work.series),
+                    joinedload(Work.contributors),
+                ),
                 joinedload(Book.files),
                 joinedload(Book.contributors),
+                joinedload(Book.location_ref),
             )
             .where(func.lower(func.trim(Book.title)) == norm_title)
             .order_by(Book.created_at)
@@ -125,11 +134,15 @@ async def consolidate_duplicates(
     primary_result = await db.execute(
         select(Book)
         .options(
-            joinedload(Book.authors),
-            joinedload(Book.tags),
-            joinedload(Book.series),
+            joinedload(Book.work).options(
+                joinedload(Work.authors),
+                joinedload(Work.tags),
+                joinedload(Work.series),
+                joinedload(Work.contributors),
+            ),
             joinedload(Book.files),
             joinedload(Book.contributors),
+            joinedload(Book.location_ref),
         )
         .where(Book.id == data.primary_id)
     )
@@ -186,11 +199,15 @@ async def consolidate_duplicates(
     fresh_result = await db.execute(
         select(Book)
         .options(
-            joinedload(Book.authors),
-            joinedload(Book.tags),
-            joinedload(Book.series),
+            joinedload(Book.work).options(
+                joinedload(Work.authors),
+                joinedload(Work.tags),
+                joinedload(Work.series),
+                joinedload(Work.contributors),
+            ),
             joinedload(Book.files),
             joinedload(Book.contributors),
+            joinedload(Book.location_ref),
         )
         .where(Book.id == data.primary_id)
     )

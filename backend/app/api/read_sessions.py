@@ -35,7 +35,7 @@ async def create_read_session(
     """Log a read session (new or re-read)."""
     session = ReadSession(
         user_id=current_user.id,
-        book_id=data.book_id,
+        work_id=data.book_id,
         started_at=data.started_at,
         finished_at=data.finished_at,
         rating=data.rating,
