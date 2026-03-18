@@ -526,6 +526,143 @@ async def kobo_remove_item_from_tag(
 
 
 # ---------------------------------------------------------------------------
+# Koblime-style annotation sync — device pushes Bookmark table rows
+# ---------------------------------------------------------------------------
+
+@kobo_device_router.post("/kobo/{auth_token}/v1/annotations/sync")
+async def kobo_sync_annotations(
+    auth_token: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Receive a batch of Kobo Bookmark table rows from the device.
+
+    Expected payload (Koblime format):
+    {
+        "bookmarks": [
+            {
+                "BookmarkID": "uuid",
+                "VolumeID": "file:///mnt/onboard/...",
+                "Text": "highlighted passage",
+                "Annotation": "user note",
+                "StartContainerPath": "OEBPS/chapter1.xhtml",
+                "StartContainerChildIndex": 5,
+                "StartOffset": 42,
+                "EndContainerPath": "OEBPS/chapter1.xhtml",
+                "EndContainerChildIndex": 5,
+                "EndOffset": 120,
+                "DateCreated": "2025-03-17T10:30:00Z",
+                "DateModified": "2025-03-17T10:30:00Z",
+                "ExtraAnnotationData": "{...}"
+            }
+        ],
+        "device_id": "optional-device-identifier"
+    }
+
+    Also accepts the Content table for reading progress:
+    {
+        "content": [
+            {
+                "ContentID": "file:///mnt/onboard/...",
+                "___PercentRead": 45.2,
+                "TimeSpentReading": 3600
+            }
+        ]
+    }
+    """
+    sync_token = await _get_sync_token(auth_token, db)
+    body = await request.json()
+
+    bookmarks = body.get("bookmarks", body.get("Bookmarks", []))
+    device_id = body.get("device_id", body.get("DeviceId"))
+    content_rows = body.get("content", body.get("Content", []))
+
+    result = {"bookmarks": {}, "content": {}}
+
+    # Sync bookmarks (highlights, notes, dogears)
+    if bookmarks:
+        from app.services.kobo_annotations import sync_bookmarks
+        result["bookmarks"] = await sync_bookmarks(
+            user_id=sync_token.user_id,
+            bookmarks=bookmarks,
+            device_id=device_id,
+            db=db,
+        )
+
+    # Sync reading progress from Content table
+    if content_rows:
+        result["content"] = await _sync_content_progress(
+            user_id=sync_token.user_id,
+            content_rows=content_rows,
+            db=db,
+        )
+
+    return result
+
+
+async def _sync_content_progress(
+    user_id: int,
+    content_rows: list[dict],
+    db: AsyncSession,
+) -> dict:
+    """Sync reading progress from Kobo Content table rows.
+
+    Smart merge: only update if TimeSpentReading is higher (prevents
+    data loss when a book is removed from the device and Kobo zeros data).
+    """
+    from app.services.kobo_annotations import resolve_volume_id
+    from app.models.progress import KoboBookState
+
+    updated = 0
+    skipped = 0
+
+    for row in content_rows:
+        content_id = row.get("ContentID") or row.get("content_id", "")
+        if not content_id:
+            skipped += 1
+            continue
+
+        pct = row.get("___PercentRead") or row.get("percent_read", 0)
+        time_spent = row.get("TimeSpentReading") or row.get("time_spent_reading", 0)
+
+        edition_id = await resolve_volume_id(content_id, db)
+        if not edition_id:
+            skipped += 1
+            continue
+
+        # Find or create KoboBookState
+        state_result = await db.execute(
+            select(KoboBookState).where(
+                KoboBookState.user_id == user_id,
+                KoboBookState.edition_id == edition_id,
+            )
+        )
+        state = state_result.scalar_one_or_none()
+
+        if state:
+            # Smart merge: only update if device has more reading time
+            if time_spent > state.time_spent_reading:
+                state.time_spent_reading = time_spent
+                state.content_source_progress = float(pct) / 100 if pct > 1 else float(pct)
+                updated += 1
+            else:
+                skipped += 1
+        else:
+            state = KoboBookState(
+                user_id=user_id,
+                edition_id=edition_id,
+                time_spent_reading=time_spent,
+                content_source_progress=float(pct) / 100 if pct > 1 else float(pct),
+                status="Reading" if pct < 100 else "Finished",
+            )
+            db.add(state)
+            updated += 1
+
+    await db.commit()
+    return {"updated": updated, "skipped": skipped}
+
+
+# ---------------------------------------------------------------------------
 # Catch-all for unhandled Kobo endpoints
 # ---------------------------------------------------------------------------
 
