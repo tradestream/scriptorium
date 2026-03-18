@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     SMTP_FROM: str | None = None
     SMTP_TLS: bool = True
 
+    # Path rewriting for local dev (maps Docker container paths to local mounts)
+    # e.g. "/data/library/booklore=/Volumes/docker/scriptorium/library"
+    PATH_REWRITE: str | None = None
+
     # Loose Leaves — staged review queue (distinct from auto-ingest)
     LOOSE_LEAVES_PATH: str = "data/loose-leaves"
 
@@ -97,6 +101,33 @@ class Settings(BaseSettings):
         case_sensitive = True
 
 
+_settings_instance: Settings | None = None
+
+
 def get_settings() -> Settings:
     """Dependency to get settings."""
+    # No caching — allows hot-reload to pick up .env changes
     return Settings()
+
+
+def resolve_path(path: str) -> str:
+    """Rewrite a stored file path using PATH_REWRITE if configured.
+
+    PATH_REWRITE format: semicolon-separated "docker_prefix=local_prefix" rules.
+    Rules are tried in order; first match wins.
+    e.g. "/data/library/booklore=/Volumes/docker/scriptorium/library;/data/library=/Volumes/docker/scriptorium/library"
+    """
+    settings = get_settings()
+    if not settings.PATH_REWRITE:
+        return path
+    for rule in settings.PATH_REWRITE.split(";"):
+        rule = rule.strip()
+        if not rule:
+            continue
+        try:
+            docker_prefix, local_prefix = rule.split("=", 1)
+            if path.startswith(docker_prefix):
+                return local_prefix + path[len(docker_prefix):]
+        except ValueError:
+            continue
+    return path

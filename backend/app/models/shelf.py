@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models import Base
@@ -18,6 +18,7 @@ class Shelf(Base):
     description: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
     is_smart: Mapped[bool] = mapped_column(default=False)
     smart_filter: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sync_to_kobo: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
 

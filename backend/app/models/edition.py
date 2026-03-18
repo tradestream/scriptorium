@@ -209,6 +209,9 @@ class EditionFile(Base):
     file_path: Mapped[str] = mapped_column(String(512), unique=True)
     file_hash: Mapped[str] = mapped_column(String(64), unique=True)
     file_size: Mapped[int] = mapped_column()
+    # KEPUB conversion cache (for Kobo sync)
+    kepub_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    kepub_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
 
     edition: Mapped["Edition"] = relationship("Edition", back_populates="files")

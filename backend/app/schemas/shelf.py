@@ -16,6 +16,7 @@ class ShelfCreate(ShelfBase):
 
     is_smart: bool = False
     smart_filter: Optional[str] = None
+    sync_to_kobo: bool = False
 
 
 class ShelfUpdate(BaseModel):
@@ -25,6 +26,7 @@ class ShelfUpdate(BaseModel):
     description: Optional[str] = None
     is_smart: Optional[bool] = None
     smart_filter: Optional[str] = None
+    sync_to_kobo: Optional[bool] = None
 
 
 class ShelfBookAdd(BaseModel):
@@ -40,6 +42,7 @@ class ShelfRead(ShelfBase):
     user_id: int
     is_smart: bool = False
     smart_filter: Optional[str] = None
+    sync_to_kobo: bool = False
     created_at: datetime
     updated_at: datetime
     book_count: int = 0

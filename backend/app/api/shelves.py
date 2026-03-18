@@ -85,6 +85,7 @@ async def create_shelf(
         description=shelf_data.description,
         is_smart=shelf_data.is_smart,
         smart_filter=shelf_data.smart_filter,
+        sync_to_kobo=shelf_data.sync_to_kobo,
     )
 
     db.add(shelf)
@@ -128,6 +129,9 @@ async def update_shelf(
 
     if shelf_data.smart_filter is not None:
         shelf.smart_filter = shelf_data.smart_filter
+
+    if shelf_data.sync_to_kobo is not None:
+        shelf.sync_to_kobo = shelf_data.sync_to_kobo
 
     await db.commit()
     await db.refresh(shelf)

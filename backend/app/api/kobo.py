@@ -346,6 +346,186 @@ async def kobo_get_tags(
 
 
 # ---------------------------------------------------------------------------
+# Bidirectional shelf sync — Kobo device creates/deletes tags
+# ---------------------------------------------------------------------------
+
+@kobo_device_router.post("/kobo/{auth_token}/v1/library/tags")
+async def kobo_create_tag(
+    auth_token: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Handle tag/collection creation from the Kobo device.
+
+    Creates a corresponding shelf in Scriptorium (bidirectional sync).
+    """
+    sync_token = await _get_sync_token(auth_token, db)
+    body = await request.json()
+
+    tag_name = body.get("Name", "").strip()
+    tag_id = body.get("Id", "")
+    if not tag_name:
+        return JSONResponse({"error": "No tag name"}, status_code=400)
+
+    from app.models.shelf import Shelf
+    from app.models.progress import KoboShelfArchive
+
+    # Create a local shelf for this tag
+    shelf = Shelf(
+        user_id=sync_token.user_id,
+        name=tag_name,
+        sync_to_kobo=True,  # Auto-sync back to device
+    )
+    db.add(shelf)
+    await db.flush()
+
+    # Track the mapping
+    archive = KoboShelfArchive(
+        user_id=sync_token.user_id,
+        kobo_tag_id=tag_id or str(shelf.id),
+        shelf_id=shelf.id,
+        name=tag_name,
+    )
+    db.add(archive)
+    await db.commit()
+
+    logger.info("Kobo created tag '%s' → shelf %d", tag_name, shelf.id)
+
+    return {
+        "Id": tag_id or str(shelf.id),
+        "Name": tag_name,
+        "Created": shelf.created_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "Items": [],
+        "Type": "UserTag",
+    }
+
+
+@kobo_device_router.delete("/kobo/{auth_token}/v1/library/tags/{tag_id}")
+async def kobo_delete_tag(
+    auth_token: str,
+    tag_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Handle tag/collection deletion from the Kobo device.
+
+    Soft-deletes the shelf archive entry. Optionally deletes the shelf.
+    """
+    sync_token = await _get_sync_token(auth_token, db)
+
+    from app.models.progress import KoboShelfArchive
+    from sqlalchemy import select
+
+    result = await db.execute(
+        select(KoboShelfArchive).where(
+            KoboShelfArchive.user_id == sync_token.user_id,
+            KoboShelfArchive.kobo_tag_id == tag_id,
+        )
+    )
+    archive = result.scalar_one_or_none()
+    if archive:
+        archive.is_deleted = True
+        logger.info("Kobo deleted tag '%s'", archive.name)
+    await db.commit()
+
+    return Response(status_code=204)
+
+
+@kobo_device_router.put("/kobo/{auth_token}/v1/library/tags/{tag_id}/items")
+async def kobo_add_items_to_tag(
+    auth_token: str,
+    tag_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Handle adding books to a tag/collection from the Kobo device."""
+    sync_token = await _get_sync_token(auth_token, db)
+    body = await request.json()
+    items = body.get("Items", [])
+
+    from app.models.progress import KoboShelfArchive
+    from app.models.shelf import ShelfBook
+    from sqlalchemy import select
+
+    # Find the local shelf
+    result = await db.execute(
+        select(KoboShelfArchive).where(
+            KoboShelfArchive.user_id == sync_token.user_id,
+            KoboShelfArchive.kobo_tag_id == tag_id,
+        )
+    )
+    archive = result.scalar_one_or_none()
+    if not archive or not archive.shelf_id:
+        return Response(status_code=404)
+
+    # Add books by UUID
+    for item in items:
+        rev_id = item.get("RevisionId")
+        if not rev_id:
+            continue
+        edition_result = await db.execute(
+            select(Edition).where(Edition.uuid == rev_id)
+        )
+        edition = edition_result.scalar_one_or_none()
+        if edition:
+            # Check if already on shelf
+            existing = await db.execute(
+                select(ShelfBook.id).where(
+                    ShelfBook.shelf_id == archive.shelf_id,
+                    ShelfBook.work_id == edition.work_id,
+                )
+            )
+            if not existing.scalar_one_or_none():
+                db.add(ShelfBook(shelf_id=archive.shelf_id, work_id=edition.work_id, position=0))
+
+    await db.commit()
+    return Response(status_code=201)
+
+
+@kobo_device_router.delete("/kobo/{auth_token}/v1/library/tags/{tag_id}/items/{item_id}")
+async def kobo_remove_item_from_tag(
+    auth_token: str,
+    tag_id: str,
+    item_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Handle removing a book from a tag/collection on the Kobo device."""
+    sync_token = await _get_sync_token(auth_token, db)
+
+    from app.models.progress import KoboShelfArchive
+    from app.models.shelf import ShelfBook
+    from sqlalchemy import select
+
+    result = await db.execute(
+        select(KoboShelfArchive).where(
+            KoboShelfArchive.user_id == sync_token.user_id,
+            KoboShelfArchive.kobo_tag_id == tag_id,
+        )
+    )
+    archive = result.scalar_one_or_none()
+    if not archive or not archive.shelf_id:
+        return Response(status_code=404)
+
+    # Find edition by UUID
+    edition_result = await db.execute(
+        select(Edition).where(Edition.uuid == item_id)
+    )
+    edition = edition_result.scalar_one_or_none()
+    if edition:
+        sb_result = await db.execute(
+            select(ShelfBook).where(
+                ShelfBook.shelf_id == archive.shelf_id,
+                ShelfBook.work_id == edition.work_id,
+            )
+        )
+        sb = sb_result.scalar_one_or_none()
+        if sb:
+            await db.delete(sb)
+
+    await db.commit()
+    return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
 # Catch-all for unhandled Kobo endpoints
 # ---------------------------------------------------------------------------
 

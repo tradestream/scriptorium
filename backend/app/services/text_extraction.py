@@ -549,7 +549,8 @@ async def extract_text_from_book(
     format_priority = {"epub": 0, "txt": 1, "pdf": 2, "mobi": 3}
     sorted_files = sorted(files, key=lambda f: format_priority.get(f.format.lower(), 99))
     book_file = sorted_files[0]
-    file_path = Path(book_file.file_path)
+    from app.config import resolve_path
+    file_path = Path(resolve_path(book_file.file_path))
 
     if not file_path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")

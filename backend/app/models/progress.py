@@ -99,6 +99,40 @@ class KoboBookState(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
 
 
+class KoboSyncedBook(Base):
+    """Lookup table: tracks which editions have been sent to a device.
+
+    Calibre-Web pattern — enables O(1) 'already synced?' checks and
+    prevents re-sending books on subsequent sync requests.
+    """
+
+    __tablename__ = "kobo_synced_books"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sync_token_id: Mapped[int] = mapped_column(ForeignKey("kobo_sync_tokens.id"), index=True)
+    edition_id: Mapped[int] = mapped_column(ForeignKey("editions.id"), index=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+
+
+class KoboShelfArchive(Base):
+    """Tracks shelves/tags created on the Kobo device for bidirectional sync.
+
+    When a user creates a collection on their Kobo, it syncs back as a shelf
+    in Scriptorium. Soft-deleted when the device removes the tag.
+    """
+
+    __tablename__ = "kobo_shelf_archive"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    kobo_tag_id: Mapped[str] = mapped_column(String(255))
+    shelf_id: Mapped[Optional[int]] = mapped_column(ForeignKey("shelves.id"), nullable=True)
+    name: Mapped[str] = mapped_column(String(255))
+    is_deleted: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
+
+
 class KOReaderProgress(Base):
     """Reading progress synced from KOReader devices.
 

@@ -28,11 +28,13 @@ from app.models import Book, BookFile, Edition, EditionFile, Library, User, User
 from app.models.progress import (
     Device,
     KoboBookState,
+    KoboShelfArchive,
+    KoboSyncedBook,
     KoboSyncToken,
     KoboTokenShelf,
     ReadProgress,
 )
-from app.models.shelf import ShelfBook
+from app.models.shelf import Shelf, ShelfBook
 
 logger = logging.getLogger(__name__)
 
@@ -172,11 +174,20 @@ async def get_sync_payload(
     """
     user_id = sync_token.user_id
 
-    # Resolve which shelf IDs are attached to this token (if any)
+    # Resolve shelves to sync: token-attached shelves + all user shelves with sync_to_kobo=True
     shelf_rows = await db.execute(
         select(KoboTokenShelf.shelf_id).where(KoboTokenShelf.token_id == sync_token.id)
     )
     token_shelf_ids = [row[0] for row in shelf_rows]
+
+    # Also include any shelf the user has flagged for Kobo sync
+    from app.models.shelf import Shelf
+    kobo_shelf_rows = await db.execute(
+        select(Shelf.id).where(Shelf.user_id == user_id, Shelf.sync_to_kobo == True)
+    )
+    kobo_sync_ids = [row[0] for row in kobo_shelf_rows]
+    # Merge: union of token shelves and sync_to_kobo shelves
+    token_shelf_ids = list(set(token_shelf_ids + kobo_sync_ids))
 
     # Query editions joined to their work
     stmt = (
@@ -205,7 +216,18 @@ async def get_sync_payload(
         )
 
     if sync_token.books_last_modified:
+        # Incremental: only books changed since last sync
         stmt = stmt.where(Edition.updated_at > sync_token.books_last_modified)
+    else:
+        # Initial sync: exclude books already sent (KoboSyncedBooks lookup)
+        stmt = stmt.where(
+            ~select(KoboSyncedBook.id)
+            .where(
+                KoboSyncedBook.sync_token_id == sync_token.id,
+                KoboSyncedBook.edition_id == Edition.id,
+            )
+            .exists()
+        )
 
     stmt = stmt.limit(SYNC_PAGE_SIZE + 1)
 
@@ -255,10 +277,63 @@ async def get_sync_payload(
                 }
             })
 
+    # Record synced editions in lookup table (Calibre-Web pattern)
     if editions:
         sync_token.books_last_modified = max(e.updated_at for e in editions)
-        await db.commit()
+        for edition in editions:
+            # Upsert: skip if already recorded
+            existing = await db.execute(
+                select(KoboSyncedBook.id).where(
+                    KoboSyncedBook.sync_token_id == sync_token.id,
+                    KoboSyncedBook.edition_id == edition.id,
+                )
+            )
+            if not existing.scalar_one_or_none():
+                db.add(KoboSyncedBook(
+                    sync_token_id=sync_token.id,
+                    edition_id=edition.id,
+                ))
 
+    # ── Shelf tags (appear as collections on the Kobo device) ─────────────
+    # Build a mapping of edition UUID → shelf names for tagged books
+    if token_shelf_ids and editions:
+        work_ids = [e.work_id for e in editions]
+        shelf_book_rows = await db.execute(
+            select(ShelfBook.work_id, Shelf.name)
+            .join(Shelf, Shelf.id == ShelfBook.shelf_id)
+            .where(ShelfBook.shelf_id.in_(token_shelf_ids), ShelfBook.work_id.in_(work_ids))
+        )
+        # Map work_id → list of shelf names
+        work_shelves: dict[int, list[str]] = {}
+        for wid, sname in shelf_book_rows:
+            work_shelves.setdefault(wid, []).append(sname)
+
+        # Build tag entries for each shelf
+        seen_tags: set[str] = set()
+        for edition in editions:
+            shelf_names = work_shelves.get(edition.work_id, [])
+            for sname in shelf_names:
+                tag_id = f"SC-{sname.replace(' ', '-')}"
+                if tag_id not in seen_tags:
+                    seen_tags.add(tag_id)
+                    items.append({
+                        "NewTag": {
+                            "Tag": {
+                                "Created": edition.created_at.isoformat() + "Z" if edition.created_at else None,
+                                "Id": tag_id,
+                                "Items": [
+                                    {"RevisionId": e.uuid, "Type": "ProductRevisionTagItem"}
+                                    for e in editions
+                                    if sname in work_shelves.get(e.work_id, [])
+                                ],
+                                "LastModified": edition.updated_at.isoformat() + "Z" if edition.updated_at else None,
+                                "Name": sname,
+                                "Type": "UserTag",
+                            }
+                        }
+                    })
+
+    await db.commit()
     return items, has_more
 
 
@@ -718,7 +793,22 @@ async def get_download_path(
     edition_file = result.scalar_one_or_none()
 
     if edition_file:
-        path = Path(edition_file.file_path)
+        from app.config import resolve_path
+
+        # Auto-convert EPUB to KEPUB for better Kobo experience
+        if file_format.lower() in ("epub", "kepub") and edition_file.format.lower() == "epub":
+            try:
+                from app.services.kepub import ensure_kepub
+                kepub_path = await ensure_kepub(edition_file)
+                if kepub_path:
+                    resolved = Path(resolve_path(kepub_path))
+                    if resolved.exists():
+                        await db.commit()  # persist kepub_path/hash on edition_file
+                        return resolved
+            except Exception:
+                pass  # Fall through to original file
+
+        path = Path(resolve_path(edition_file.file_path))
         return path if path.exists() else None
 
     # Fallback to legacy BookFile
@@ -736,7 +826,8 @@ async def get_download_path(
     if not book_file:
         return None
 
-    path = Path(book_file.file_path)
+    from app.config import resolve_path
+    path = Path(resolve_path(book_file.file_path))
     return path if path.exists() else None
 
 

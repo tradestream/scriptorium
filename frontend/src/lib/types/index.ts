@@ -256,6 +256,7 @@ export interface Shelf {
   description?: string | null;
   is_smart: boolean;
   smart_filter?: string | null;
+  sync_to_kobo: boolean;
   created_at: string;
   updated_at: string;
   book_count?: number;

@@ -697,7 +697,8 @@ async def download_book_file(
             detail="File not found",
         )
 
-    file_path = Path(edition_file.file_path)
+    from app.config import resolve_path
+    file_path = Path(resolve_path(edition_file.file_path))
     if not file_path.exists():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1025,7 +1026,8 @@ async def get_comic_page_count(
     if not edition_file:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
-    file_path = Path(edition_file.file_path)
+    from app.config import resolve_path as _rp
+    file_path = Path(_rp(edition_file.file_path))
     if not file_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on disk")
 
@@ -1057,7 +1059,8 @@ async def get_comic_page(
     if not edition_file:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
-    file_path = Path(edition_file.file_path)
+    from app.config import resolve_path as _rp
+    file_path = Path(_rp(edition_file.file_path))
     if not file_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on disk")
 
@@ -1105,7 +1108,8 @@ async def convert_book_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
     from app.services.conversion import conversion_service
-    input_path = Path(edition_file.file_path)
+    from app.config import resolve_path as _rp
+    input_path = Path(_rp(edition_file.file_path))
     if not input_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on disk")
 
@@ -1171,7 +1175,8 @@ async def send_book_to_device(
     if not edition_file:
         raise HTTPException(status_code=404, detail="No file available for this book")
 
-    file_path = Path(edition_file.file_path)
+    from app.config import resolve_path as _rp
+    file_path = Path(_rp(edition_file.file_path))
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found on disk")
 
