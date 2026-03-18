@@ -797,8 +797,7 @@
                           {/if}
                         {/each}
                         <!-- Ratings row -->
-                        {@const hasRatings = proposals.some(p => p.goodreads_rating || p.amazon_rating)}
-                        {#if hasRatings}
+                        {#if proposals.some(p => p.goodreads_rating || p.amazon_rating)}
                           <tr class="border-b border-muted/50">
                             <td class="py-1.5 pr-3 font-medium text-muted-foreground">Ratings</td>
                             {#each proposals as p}
@@ -811,8 +810,7 @@
                           </tr>
                         {/if}
                         <!-- Cover row -->
-                        {@const hasCovers = proposals.some(p => p.cover_url)}
-                        {#if hasCovers}
+                        {#if proposals.some(p => p.cover_url)}
                           <tr class="border-b border-muted/50">
                             <td class="py-1.5 pr-3 font-medium text-muted-foreground">Cover</td>
                             {#each proposals as p}
