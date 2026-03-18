@@ -153,43 +153,14 @@ async def _import_book(
         created_at=datetime.utcnow(),
     )
     db.add(edition_file)
-
-    # ── Legacy Book + BookFile (compatibility shim until migration 0034) ───────
-    book = Book(
-        uuid=entity_uuid,
-        title=meta["title"],
-        description=meta.get("description"),
-        isbn=meta.get("isbn"),
-        isbn_10=meta.get("isbn_10"),
-        language=meta.get("language"),
-        published_date=meta.get("published_date"),
-        cover_hash=cover_hash,
-        cover_format=cover_format,
-        library_id=library.id,
-        work_id=work.id,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
-        authors=authors,
-    )
-    db.add(book)
-    await db.flush()
-
-    book_file = BookFile(
-        book_id=book.id,
-        filename=file_path.name,
-        format=fmt,
-        file_path=str(file_path),
-        file_hash=file_hash + "_legacy",  # avoid unique constraint clash with edition_files
-        file_size=file_path.stat().st_size,
-        created_at=datetime.utcnow(),
-    )
-    db.add(book_file)
-
     await db.commit()
 
-    # ── Index in FTS5 ─────────────────────────────────────────────────────────
-    author_names = [a.name for a in authors]
-    await search_service.index_work(db, work, author_names)
+    # ── Index in FTS5 (non-critical) ──────────────────────────────────────────
+    try:
+        author_names = [a.name for a in authors]
+        await search_service.index_work(db, work, author_names)
+    except Exception:
+        pass  # FTS indexing is non-critical; search will work without it
 
     return work, edition
 

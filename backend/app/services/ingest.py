@@ -121,7 +121,14 @@ class IngestService:
                     await db.commit()
                     return
 
-                book = await _import_book(file_path, file_hash, library, db)
+                result = await _import_book(file_path, file_hash, library, db)
+                if result is None:
+                    logger.warning("Unsupported format: %s", file_path.name)
+                    db.add(IngestLog(filename=file_path.name, status='error', error_message='Unsupported format'))
+                    await db.commit()
+                    return
+                work, edition = result
+                book = edition  # alias for downstream code
                 logger.info("Ingested %s into library '%s'", file_path.name, library.name)
                 db.add(IngestLog(filename=file_path.name, status='imported'))
                 await db.commit()
@@ -129,10 +136,8 @@ class IngestService:
                 # Broadcast to connected WebSocket clients
                 try:
                     from app.services.events import broadcaster
-                    book_id = book.id if book else None
-                    await broadcaster.ingest_progress(file_path.name, "imported", book_id)
-                    if book:
-                        await broadcaster.book_added(book.id, book.title, library.id)
+                    await broadcaster.ingest_progress(file_path.name, "imported", edition.id)
+                    await broadcaster.book_added(edition.id, work.title, library.id)
                 except Exception:
                     pass  # events are non-critical
 
@@ -181,26 +186,26 @@ class IngestService:
                         pass  # markdown generation is non-critical
 
                 # Move file to the library directory, applying naming pattern if enabled
-                if naming_enabled and book:
+                if naming_enabled and edition:
                     from app.services.naming import build_relative_path
                     from datetime import datetime as _dt
                     pattern = effective_pattern
                     year = None
-                    if book.published_date:
+                    if edition.published_date:
                         try:
-                            year = book.published_date.year if hasattr(book.published_date, 'year') else int(str(book.published_date)[:4])
+                            year = edition.published_date.year if hasattr(edition.published_date, 'year') else int(str(edition.published_date)[:4])
                         except Exception:
                             pass
                     rel = build_relative_path(
                         pattern,
-                        title=book.title,
-                        authors=[a.name for a in book.authors],
+                        title=work.title,
+                        authors=[a.name for a in work.authors] if work.authors else [],
                         file_ext=file_path.suffix.lower(),
                         year=year,
-                        series=book.series[0].name if book.series else None,
-                        language=book.language,
-                        publisher=book.publisher,
-                        isbn=book.isbn,
+                        series=work.series[0].name if work.series else None,
+                        language=work.language,
+                        publisher=edition.publisher,
+                        isbn=edition.isbn,
                     )
                     dest = Path(library.path) / rel
                     dest.parent.mkdir(parents=True, exist_ok=True)

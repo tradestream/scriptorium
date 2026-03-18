@@ -104,14 +104,19 @@ class SearchService:
                 isbn_parts.append(r[1])
         isbn_str = " ".join(isbn_parts)
 
-        await db.execute(
-            text(
-                "INSERT INTO books_fts(books_fts, rowid, title, description, authors, isbn) "
-                "VALUES ('delete', :id, :title, :desc, :authors, :isbn)"
-            ),
-            {"id": work.id, "title": work.title or "", "desc": work.description or "",
-             "authors": authors_str, "isbn": isbn_str},
-        )
+        # FTS5 delete-then-insert; tolerate errors (stale index is non-fatal)
+        try:
+            await db.execute(
+                text(
+                    "INSERT INTO books_fts(books_fts, rowid, title, description, authors, isbn) "
+                    "VALUES ('delete', :id, :title, :desc, :authors, :isbn)"
+                ),
+                {"id": work.id, "title": work.title or "", "desc": work.description or "",
+                 "authors": authors_str, "isbn": isbn_str},
+            )
+        except Exception:
+            pass  # FTS5 delete can fail if rowid doesn't exist or content mismatches
+
         await db.execute(
             text(
                 "INSERT INTO books_fts(rowid, title, description, authors, isbn) "

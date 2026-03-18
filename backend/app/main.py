@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import logging.config
 from contextlib import asynccontextmanager
@@ -100,9 +101,10 @@ async def lifespan(app: FastAPI):
     except Exception as _e:
         logger.warning("Could not load enrichment key overrides: %s", _e)
 
-    # Start file watcher
+    # Start file watcher + scan existing files in ingest folder
     await ingest_service.start_watcher()
     logger.info("Ingest service started")
+    asyncio.create_task(ingest_service.trigger_scan())
 
     yield
 
