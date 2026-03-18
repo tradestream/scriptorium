@@ -3,7 +3,7 @@ import logging.config
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -19,7 +19,20 @@ from app.services.events import broadcaster
 from app.services.ingest import ingest_service
 
 settings = get_settings()
-limiter = Limiter(key_func=get_remote_address, default_limits=["300/minute"])
+
+
+def _rate_limit_key(request: Request) -> str | None:
+    """Rate limit key function — exempt Kobo sync paths.
+
+    Kobo devices make many rapid requests during sync; rate limiting
+    breaks the protocol. Return None to skip rate limiting for /kobo/ paths.
+    """
+    if request.url.path.startswith("/kobo/"):
+        return None
+    return get_remote_address(request)
+
+
+limiter = Limiter(key_func=_rate_limit_key, default_limits=["300/minute"])
 
 # Structured logging configuration
 logging.config.dictConfig(

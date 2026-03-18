@@ -130,10 +130,19 @@ async def update_shelf(
     if shelf_data.smart_filter is not None:
         shelf.smart_filter = shelf_data.smart_filter
 
+    sync_changed = False
     if shelf_data.sync_to_kobo is not None:
+        sync_changed = shelf.sync_to_kobo != shelf_data.sync_to_kobo
         shelf.sync_to_kobo = shelf_data.sync_to_kobo
 
     await db.commit()
+
+    # If sync_to_kobo changed, reconcile Kobo synced-book records
+    if sync_changed:
+        from app.services.kobo_sync_status import on_shelf_sync_changed
+        await on_shelf_sync_changed(shelf.id, current_user.id, db)
+        await db.commit()
+
     await db.refresh(shelf)
 
     shelf_read = ShelfRead.model_validate(shelf)
@@ -253,8 +262,17 @@ async def remove_book_from_shelf(
             detail="Book not on shelf",
         )
 
+    work_id = shelf_book.work_id
     await db.delete(shelf_book)
     await db.commit()
+
+    # If this was a Kobo-synced shelf, clean up synced-book records
+    shelf_check = await db.execute(select(Shelf).where(Shelf.id == shelf_id))
+    shelf_obj = shelf_check.scalar_one_or_none()
+    if shelf_obj and shelf_obj.sync_to_kobo:
+        from app.services.kobo_sync_status import on_book_removed_from_shelf
+        await on_book_removed_from_shelf(shelf_id, work_id, current_user.id, db)
+        await db.commit()
 
 
 class BulkShelfRequest(BaseModel):
