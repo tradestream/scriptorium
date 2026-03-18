@@ -400,6 +400,108 @@
       </Card>
     {/if}
 
+    <!-- Peak reading hours + Day of week -->
+    {#if (stats.peak_hours ?? []).length > 0 || (stats.day_of_week ?? []).length > 0}
+      <div class="mt-6 grid gap-6 md:grid-cols-2">
+        <!-- Peak hours -->
+        {#if (stats.peak_hours ?? []).length > 0}
+          {@const maxHour = Math.max(1, ...(stats.peak_hours ?? []).map(h => h.count))}
+          <Card>
+            <CardHeader>
+              <CardTitle class="text-base">Peak Reading Hours</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div class="flex items-end gap-px h-20">
+                {#each Array.from({ length: 24 }, (_, i) => i) as hour}
+                  {@const entry = (stats.peak_hours ?? []).find(h => h.hour === hour)}
+                  {@const count = entry?.count ?? 0}
+                  <div class="flex flex-1 flex-col items-center min-w-0">
+                    <div
+                      class="w-full rounded-t-sm transition-all {count > 0 ? 'bg-violet-500/70' : 'bg-muted'}"
+                      style="height: {count === 0 ? '2px' : Math.max(4, Math.round((count / maxHour) * 64)) + 'px'}"
+                      title="{hour}:00 — {count} session{count !== 1 ? 's' : ''}"
+                    ></div>
+                  </div>
+                {/each}
+              </div>
+              <div class="mt-1 flex text-[8px] text-muted-foreground">
+                <span class="flex-1 text-left">12am</span>
+                <span class="flex-1 text-center">6am</span>
+                <span class="flex-1 text-center">12pm</span>
+                <span class="flex-1 text-center">6pm</span>
+                <span class="flex-1 text-right">11pm</span>
+              </div>
+            </CardContent>
+          </Card>
+        {/if}
+
+        <!-- Day of week -->
+        {#if (stats.day_of_week ?? []).length > 0}
+          {@const maxDay = Math.max(1, ...(stats.day_of_week ?? []).map(d => d.count))}
+          <Card>
+            <CardHeader>
+              <CardTitle class="text-base">Favorite Reading Days</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div class="flex items-end gap-2 h-20">
+                {#each stats.day_of_week ?? [] as d}
+                  <div class="flex flex-1 flex-col items-center gap-1">
+                    <div
+                      class="w-full rounded-t-sm transition-all {d.count > 0 ? 'bg-blue-500/70' : 'bg-muted'}"
+                      style="height: {d.count === 0 ? '2px' : Math.max(4, Math.round((d.count / maxDay) * 64)) + 'px'}"
+                      title="{d.day}: {d.count} session{d.count !== 1 ? 's' : ''}"
+                    ></div>
+                    <span class="text-[9px] text-muted-foreground">{d.day}</span>
+                  </div>
+                {/each}
+              </div>
+            </CardContent>
+          </Card>
+        {/if}
+      </div>
+    {/if}
+
+    <!-- Reading speed + Top genres -->
+    <div class="mt-6 grid gap-6 md:grid-cols-2">
+      {#if stats.reading_speed}
+        <Card>
+          <CardContent class="flex items-center gap-4 pt-6">
+            <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary/10">
+              <TrendingUp class="h-6 w-6 text-primary" />
+            </div>
+            <div>
+              <p class="text-2xl font-bold">{stats.reading_speed.pages_per_hour}</p>
+              <p class="text-sm text-muted-foreground">pages per hour avg</p>
+              <p class="text-xs text-muted-foreground">across {stats.reading_speed.books_sampled} book{stats.reading_speed.books_sampled !== 1 ? 's' : ''} with Kobo data</p>
+            </div>
+          </CardContent>
+        </Card>
+      {/if}
+
+      {#if (stats.top_genres ?? []).length > 0}
+        {@const maxGenre = Math.max(1, ...(stats.top_genres ?? []).map(g => g.count))}
+        <Card>
+          <CardHeader>
+            <CardTitle class="text-base">Top Genres</CardTitle>
+          </CardHeader>
+          <CardContent class="space-y-1.5">
+            {#each (stats.top_genres ?? []).slice(0, 8) as g}
+              <div class="flex items-center gap-2 text-sm">
+                <span class="w-24 truncate text-xs text-muted-foreground">{g.tag}</span>
+                <div class="flex-1 rounded-full bg-muted h-2 overflow-hidden">
+                  <div
+                    class="h-full rounded-full bg-primary/60 transition-all"
+                    style="width: {Math.round((g.count / maxGenre) * 100)}%"
+                  ></div>
+                </div>
+                <span class="w-6 text-right text-xs text-muted-foreground tabular-nums">{g.count}</span>
+              </div>
+            {/each}
+          </CardContent>
+        </Card>
+      {/if}
+    </div>
+
     <div class="mt-8 grid gap-6 md:grid-cols-2">
       <!-- Currently reading -->
       <Card>

@@ -144,6 +144,34 @@ class IngestService:
                     except Exception:
                         pass  # identifier extraction is non-critical
 
+                # Auto-enrich metadata from external providers (non-blocking)
+                if book:
+                    try:
+                        from app.services.metadata_enrichment import enrichment_service
+                        from app.api.books import _apply_enrichment
+                        from sqlalchemy.orm import joinedload as _jl
+                        from app.models.edition import Edition
+                        from app.models.work import Work
+
+                        ed_result = await db.execute(
+                            select(Edition).where(Edition.id == book.id)
+                            .options(_jl(Edition.work).options(_jl(Work.authors), _jl(Work.tags)))
+                        )
+                        edition = ed_result.unique().scalar_one_or_none()
+                        if edition:
+                            work = edition.work
+                            author_names = [a.name for a in work.authors] if work.authors else []
+                            file_ext = file_path.suffix.lower()
+                            enriched = await enrichment_service.enrich(
+                                work.title, author_names, edition.isbn, file_extension=file_ext
+                            )
+                            if enriched:
+                                await _apply_enrichment(db, edition, work, enriched, force=False)
+                                await db.commit()
+                                logger.info("Auto-enriched '%s' from metadata providers", work.title)
+                    except Exception as enrich_exc:
+                        logger.debug("Auto-enrich failed for %s: %s", file_path.name, enrich_exc)
+
                 # Generate cached markdown (non-blocking, non-critical)
                 if book:
                     try:

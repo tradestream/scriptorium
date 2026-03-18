@@ -556,6 +556,10 @@ async def delete_book(
             detail="Book not found",
         )
 
+    from app.services.audit import log_action
+    title = edition.work.title if edition.work else f"Edition {book_id}"
+    await log_action(db, "book.delete", user_id=current_user.id,
+                     entity_type="edition", entity_id=book_id, detail=title)
     await db.delete(edition)
     await db.commit()
 
@@ -716,6 +720,99 @@ async def list_enrichment_providers(
     return enrichment_service.available_providers()
 
 
+@router.get("/{book_id}/enrich/stream")
+async def enrich_book_metadata_stream(
+    book_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Stream metadata enrichment results per-provider via Server-Sent Events."""
+    import json as _json
+    from starlette.responses import StreamingResponse
+
+    if not current_user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+
+    stmt = select(Edition).where(Edition.id == book_id).options(*_edition_options())
+    result = await db.execute(stmt)
+    edition = result.unique().scalar_one_or_none()
+    if not edition:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+
+    work = edition.work
+    from app.services.metadata_enrichment import enrichment_service
+    author_names = [a.name for a in work.authors]
+    file_ext = f".{edition.files[0].format}" if edition.files else None
+
+    async def event_generator():
+        merged: dict = {}
+        async for provider_name, result, provider_status in enrichment_service.enrich_stream(
+            work.title, author_names, edition.isbn, file_extension=file_ext
+        ):
+            event = {
+                "provider": provider_name,
+                "status": provider_status,
+                "fields": list(result.keys()) if result else [],
+                "has_cover": bool(result.get("cover_url")) if result else False,
+                "has_description": bool(result.get("description")) if result else False,
+                "title": result.get("title") if result else None,
+            }
+            if result:
+                for key, val in result.items():
+                    if key not in merged and val:
+                        merged[key] = val
+            yield f"data: {_json.dumps(event)}\n\n"
+
+        # Final merged result
+        yield f"data: {_json.dumps({'event': 'done', 'merged_fields': list(merged.keys()), 'total_providers': len(enrichment_service.available_providers())})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/{book_id}/enrich/proposals")
+async def get_enrichment_proposals(
+    book_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return metadata results from all providers for side-by-side comparison."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+
+    stmt = select(Edition).where(Edition.id == book_id).options(*_edition_options())
+    result = await db.execute(stmt)
+    edition = result.unique().scalar_one_or_none()
+    if not edition:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+
+    work = edition.work
+    from app.services.metadata_enrichment import enrichment_service
+    author_names = [a.name for a in work.authors]
+    file_ext = f".{edition.files[0].format}" if edition.files else None
+
+    proposals = await enrichment_service.search_all_providers(
+        work.title, author_names, edition.isbn, file_extension=file_ext
+    )
+
+    # Sanitize: only return serializable fields
+    safe_fields = {
+        "title", "subtitle", "description", "authors", "tags", "isbn",
+        "published_date", "publisher", "page_count", "language",
+        "cover_url", "goodreads_rating", "goodreads_rating_count",
+        "amazon_rating", "amazon_rating_count", "goodreads_id",
+        "google_id", "hardcover_id", "asin", "doi", "awards",
+        "content_warnings", "characters", "places", "_provider",
+    }
+    return [
+        {k: v for k, v in p.items() if k in safe_fields and v}
+        for p in proposals
+    ]
+
+
 @router.post("/{book_id}/enrich", response_model=BookRead)
 async def enrich_book_metadata(
     book_id: int,
@@ -751,6 +848,11 @@ async def enrich_book_metadata(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="No enrichment data found")
 
     await _apply_enrichment(db, edition, work, enriched, force=force)
+
+    from app.services.audit import log_action
+    await log_action(db, "book.enrich", user_id=current_user.id,
+                     entity_type="edition", entity_id=book_id,
+                     detail=f"provider={provider or 'auto'}, fields={list(enriched.keys())[:10]}")
     await db.commit()
     await db.refresh(edition)
 

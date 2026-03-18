@@ -294,6 +294,58 @@ export async function enrichBook(bookId: number | string, provider?: string): Pr
   return fetchAPI(`/books/${bookId}/enrich${qs}`, { method: 'POST' });
 }
 
+export interface EnrichStreamEvent {
+  provider: string;
+  status: 'ok' | 'error' | 'skipped';
+  fields: string[];
+  has_cover: boolean;
+  has_description: boolean;
+  title: string | null;
+  event?: string;
+}
+
+export async function getEnrichmentProposals(bookId: number | string): Promise<Array<Record<string, any>>> {
+  return fetchAPI(`/books/${bookId}/enrich/proposals`);
+}
+
+export function enrichBookStream(
+  bookId: number | string,
+  onEvent: (event: EnrichStreamEvent) => void,
+  onDone: () => void,
+): AbortController {
+  const controller = new AbortController();
+  const token = getAuthToken();
+  const url = `${getApiBase()}/books/${bookId}/enrich/stream`;
+
+  fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: controller.signal,
+  }).then(async (resp) => {
+    if (!resp.ok || !resp.body) { onDone(); return; }
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            onEvent(data);
+          } catch { /* skip */ }
+        }
+      }
+    }
+    onDone();
+  }).catch(() => onDone());
+
+  return controller;
+}
+
 export async function convertBookFile(bookId: number | string, fileId: number | string, outputFormat: string): Promise<Book> {
   return fetchAPI(`/books/${bookId}/files/${fileId}/convert?output_format=${encodeURIComponent(outputFormat)}`, { method: 'POST' });
 }
@@ -1010,6 +1062,12 @@ export interface ReadingStats {
   longest_streak: number;
   avg_rating: number | null;
   rating_distribution: Record<string, number>;
+  // BookLore-inspired analytics
+  peak_hours: Array<{ hour: number; count: number }>;
+  day_of_week: Array<{ day: string; count: number }>;
+  reading_speed: { pages_per_hour: number; books_sampled: number } | null;
+  time_by_month: Array<{ month: string; seconds: number }>;
+  top_genres: Array<{ tag: string; count: number }>;
 }
 
 export async function getReadingStats(): Promise<ReadingStats> {

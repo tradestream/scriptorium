@@ -71,6 +71,13 @@ class ReadingStats(BaseModel):
     avg_rating: Optional[float] = None
     rating_distribution: dict[str, int]  # "1".."5" → count
 
+    # BookLore-inspired analytics
+    peak_hours: list[dict] = []         # [{"hour": 0-23, "count": int}]
+    day_of_week: list[dict] = []        # [{"day": "Mon".."Sun", "count": int}]
+    reading_speed: Optional[dict] = None  # {"pages_per_hour": float, "books_sampled": int}
+    time_by_month: list[dict] = []      # [{"month": "2025-03", "seconds": int}]
+    top_genres: list[dict] = []         # [{"tag": str, "count": int}]
+
 
 @router.get("", response_model=ReadingStats)
 async def get_reading_stats(
@@ -86,7 +93,8 @@ async def get_reading_stats(
         .options(
             joinedload(UserEdition.edition).options(
                 joinedload(Edition.work).options(
-                    joinedload(Work.authors)
+                    joinedload(Work.authors),
+                    joinedload(Work.tags)
                 )
             )
         )
@@ -242,6 +250,56 @@ async def get_reading_stats(
     rating_counter: Counter = Counter(str(r) for r in ratings)
     rating_distribution = dict(rating_counter)
 
+    # ── Peak reading hours (from Kobo updated_at + session started_at) ────────
+    hour_counter: Counter = Counter()
+    for k in kobo_states:
+        if k.updated_at:
+            hour_counter[k.updated_at.hour] += 1
+    for s in sessions:
+        if s.started_at:
+            hour_counter[s.started_at.hour] += 1
+    peak_hours = [{"hour": h, "count": c} for h, c in sorted(hour_counter.items())]
+
+    # ── Day-of-week distribution ──────────────────────────────────────────────
+    dow_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    dow_counter: Counter = Counter()
+    for k in kobo_states:
+        if k.updated_at:
+            dow_counter[k.updated_at.weekday()] += 1
+    for s in sessions:
+        if s.started_at:
+            dow_counter[s.started_at.weekday()] += 1
+    day_of_week = [{"day": dow_names[d], "count": dow_counter.get(d, 0)} for d in range(7)]
+
+    # ── Reading speed (pages per hour from Kobo data) ─────────────────────────
+    reading_speed = None
+    speed_samples = []
+    for k in kobo_states:
+        if k.time_spent_reading > 60 and k.current_page > 0:
+            hours = k.time_spent_reading / 3600
+            speed_samples.append(k.current_page / hours)
+    if speed_samples:
+        avg_speed = sum(speed_samples) / len(speed_samples)
+        reading_speed = {"pages_per_hour": round(avg_speed, 1), "books_sampled": len(speed_samples)}
+
+    # ── Time reading by month (from Kobo updated_at) ──────────────────────────
+    time_month_map: dict[str, int] = {}
+    for k in kobo_states:
+        if k.updated_at and k.time_spent_reading > 0:
+            key = k.updated_at.strftime("%Y-%m")
+            time_month_map[key] = time_month_map.get(key, 0) + k.time_spent_reading
+    time_by_month = [{"month": k, "seconds": v} for k, v in sorted(time_month_map.items())]
+
+    # ── Top genres / tags ─────────────────────────────────────────────────────
+    tag_counter: Counter = Counter()
+    for ue in user_editions:
+        try:
+            for tag in ue.edition.work.tags:
+                tag_counter[tag.name] += 1
+        except Exception:
+            pass
+    top_genres = [{"tag": t, "count": c} for t, c in tag_counter.most_common(10)]
+
     return ReadingStats(
         total_books=len(user_editions),
         books_reading=status_counter.get("reading", 0),
@@ -259,4 +317,9 @@ async def get_reading_stats(
         longest_streak=longest_streak,
         avg_rating=avg_rating,
         rating_distribution=rating_distribution,
+        peak_hours=peak_hours,
+        day_of_week=day_of_week,
+        reading_speed=reading_speed,
+        time_by_month=time_by_month,
+        top_genres=top_genres,
     )

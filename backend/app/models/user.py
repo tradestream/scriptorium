@@ -30,5 +30,7 @@ class User(Base):
     # OAuth tokens (populated if Full API consumer key is configured)
     instapaper_token: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     instapaper_secret: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # Content restriction — max age rating this user can see (null = unrestricted)
+    max_age_rating: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())

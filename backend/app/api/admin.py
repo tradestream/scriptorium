@@ -934,6 +934,76 @@ async def _run_cover_fetch(job_id: str, edition_ids: list[int]) -> None:
     job["current"] = ""
 
 
+# ── Audit Log ──────────────────────────────────────────────────────────────────
+
+@router.get("/audit-log")
+async def get_audit_log(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    action: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(_require_admin),
+):
+    """Retrieve recent audit log entries."""
+    from sqlalchemy import select
+    from app.models.audit import AuditLog
+
+    stmt = select(AuditLog).order_by(AuditLog.created_at.desc())
+    if action:
+        stmt = stmt.where(AuditLog.action.ilike(f"%{action}%"))
+    stmt = stmt.offset(skip).limit(limit)
+    result = await db.execute(stmt)
+    entries = result.scalars().all()
+    return [
+        {
+            "id": e.id,
+            "user_id": e.user_id,
+            "action": e.action,
+            "entity_type": e.entity_type,
+            "entity_id": e.entity_id,
+            "detail": e.detail,
+            "ip_address": e.ip_address,
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+        }
+        for e in entries
+    ]
+
+
+# ── Scheduled Enrichment ────────────────────────────────────────────────────────
+
+@router.get("/scheduler/status")
+async def get_scheduler_status(_admin: User = Depends(_require_admin)):
+    from app.services.scheduled_enrichment import get_scheduler_status
+    return get_scheduler_status()
+
+
+@router.post("/scheduler/start")
+async def start_scheduler(
+    interval_hours: int = Query(24, ge=1, le=168),
+    _admin: User = Depends(_require_admin),
+):
+    from app.services.scheduled_enrichment import start_scheduler
+    start_scheduler(interval_hours)
+    return {"status": "started", "interval_hours": interval_hours}
+
+
+@router.post("/scheduler/stop")
+async def stop_scheduler(_admin: User = Depends(_require_admin)):
+    from app.services.scheduled_enrichment import stop_scheduler
+    stop_scheduler()
+    return {"status": "stopped"}
+
+
+@router.post("/scheduler/run-now")
+async def run_scheduler_now(
+    background_tasks: BackgroundTasks = None,
+    _admin: User = Depends(_require_admin),
+):
+    from app.services.scheduled_enrichment import _run_enrichment_cycle
+    background_tasks.add_task(_run_enrichment_cycle)
+    return {"status": "triggered"}
+
+
 @router.get("/backup")
 async def download_backup(_admin: User = Depends(_require_admin)):
     """Download a tar.gz archive containing the database and config directory.

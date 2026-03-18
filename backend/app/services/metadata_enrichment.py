@@ -1172,6 +1172,57 @@ class MetadataEnrichmentService:
 
         return merged if merged else None
 
+    async def enrich_stream(
+        self,
+        title: str,
+        authors: list[str],
+        isbn: Optional[str] = None,
+        file_extension: Optional[str] = None,
+    ):
+        """Yield (provider_name, result_or_None) for each provider tried.
+
+        Used by SSE endpoints to stream per-provider results to the frontend.
+        """
+        is_comic = (file_extension or "").lower() in COMIC_EXTENSIONS
+        providers = self._comic_providers if is_comic else self._book_providers
+
+        for provider in providers:
+            if not provider.is_available():
+                yield provider.name, None, "skipped"
+                continue
+            try:
+                result = await provider.search(title, authors, isbn, is_comic=is_comic)
+                yield provider.name, result, "ok"
+            except Exception as exc:
+                logger.warning("Provider %s failed: %s", provider.name, exc)
+                yield provider.name, None, "error"
+
+    async def search_all_providers(
+        self,
+        title: str,
+        authors: list[str],
+        isbn: Optional[str] = None,
+        file_extension: Optional[str] = None,
+    ) -> list[dict]:
+        """Query all providers and return a list of results with provider names.
+
+        Used by the metadata proposal UI to show side-by-side comparisons.
+        """
+        is_comic = (file_extension or "").lower() in COMIC_EXTENSIONS
+        providers = self._comic_providers if is_comic else self._book_providers
+        results = []
+        for provider in providers:
+            if not provider.is_available():
+                continue
+            try:
+                result = await provider.search(title, authors, isbn, is_comic=is_comic)
+                if result:
+                    result["_provider"] = provider.name
+                    results.append(result)
+            except Exception as exc:
+                logger.warning("Provider %s failed: %s", provider.name, exc)
+        return results
+
     async def search_provider(
         self,
         provider_name: str,

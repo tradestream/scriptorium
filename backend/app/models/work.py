@@ -84,6 +84,14 @@ class Work(Base):
     age_range: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)      # e.g. "8-12", "Young Adult"
     interest_level: Mapped[Optional[str]] = mapped_column(String(20), nullable=True) # LG, MG, MG+, UG (Lower/Middle/Upper Grades)
 
+    # ── Content restrictions ─────────────────────────────────────────────────
+    age_rating: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # everyone, teen, mature, adult
+    content_rating: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # G, PG, PG-13, R, X
+
+    # ── Embedding vectors ─────────────────────────────────────────────────────
+    embedding: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON array of floats
+    search_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # composite searchable text
+
     # JSON array of field names locked from enrichment edits
     locked_fields: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default=None)
     esoteric_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")

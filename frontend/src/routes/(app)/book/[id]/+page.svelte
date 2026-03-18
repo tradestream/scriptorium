@@ -12,7 +12,8 @@
   import BookMetaEditor from "$lib/components/BookMetaEditor.svelte";
   import { bookCoverUrl, enrichBook, getEnrichmentProviders, convertBookFile, bookFileUrl, sendBookToDevice, setBookStatus, getShelves, getBookShelves, addBookToShelf, removeBookFromShelf, getCollections, addBookToCollection, removeBookFromCollection, getAnnotations, createAnnotation, deleteAnnotation, getReadSessions, createReadSession, deleteReadSession, setCoverFromUrl, setLockedFields, setEsotericEnabled, exportAnnotations, getBookRecommendations, updateBook, extractBookIdentifiers, citationUrl, computeReadingLevel, getBook, getSeriesNeighbors } from "$lib/api/client";
   import type { SeriesNav } from "$lib/api/client";
-  import type { EnrichmentProvider, BookRecommendation } from "$lib/api/client";
+  import type { EnrichmentProvider, BookRecommendation, EnrichStreamEvent } from "$lib/api/client";
+  import { enrichBookStream } from "$lib/api/client";
   import type { Book, Shelf, Collection, Annotation, ReadSession, User } from "$lib/types/index";
   import type { PageData } from './$types';
 
@@ -67,6 +68,33 @@
   let providers = $state<EnrichmentProvider[]>([]);
   let selectedProvider = $state('');
   let showProviders = $state(false);
+  let enrichEvents = $state<Array<{ provider: string; status: string; fields: string[]; has_cover: boolean }>>([]);
+  let proposals = $state<Array<Record<string, any>>>([]);
+  let loadingProposals = $state(false);
+  let showProposals = $state(false);
+
+  async function loadProposals() {
+    if (!book) return;
+    loadingProposals = true;
+    showProposals = true;
+    try {
+      const { getEnrichmentProposals } = await import('$lib/api/client');
+      proposals = await getEnrichmentProposals(book.id);
+    } catch { proposals = []; }
+    finally { loadingProposals = false; }
+  }
+
+  async function applyProposal(providerName: string) {
+    if (!book) return;
+    enriching = true;
+    try {
+      book = await enrichBook(book.id, providerName);
+      enrichSuccess = `Applied metadata from ${providerName}`;
+      showProposals = false;
+    } catch (err) {
+      enrichError = err instanceof Error ? err.message : 'Failed';
+    } finally { enriching = false; }
+  }
 
   let extractingIds = $state(false);
   let extractIdsMsg = $state('');
@@ -172,14 +200,41 @@
     enriching = true;
     enrichError = '';
     enrichSuccess = '';
-    try {
-      book = await enrichBook(book.id, selectedProvider || undefined);
-      enrichSuccess = 'Metadata updated successfully';
-      showProviders = false;
-    } catch (err) {
-      enrichError = err instanceof Error ? err.message : 'Enrichment failed';
-    } finally {
-      enriching = false;
+    enrichEvents = [];
+
+    if (selectedProvider) {
+      // Direct single-provider enrich (no streaming)
+      try {
+        book = await enrichBook(book.id, selectedProvider);
+        enrichSuccess = 'Metadata updated successfully';
+        showProviders = false;
+      } catch (err) {
+        enrichError = err instanceof Error ? err.message : 'Enrichment failed';
+      } finally {
+        enriching = false;
+      }
+    } else {
+      // Stream results from all providers via SSE
+      enrichBookStream(
+        book.id,
+        (event) => {
+          if (!event.event) {
+            enrichEvents = [...enrichEvents, event];
+          }
+        },
+        async () => {
+          // SSE done — now apply via POST
+          try {
+            book = await enrichBook(book!.id);
+            const found = enrichEvents.filter(e => e.status === 'ok' && e.fields.length > 0).length;
+            enrichSuccess = `Done — ${found} provider${found !== 1 ? 's' : ''} returned data`;
+          } catch (err) {
+            enrichError = err instanceof Error ? err.message : 'Enrichment failed';
+          } finally {
+            enriching = false;
+          }
+        }
+      );
     }
   }
 
@@ -621,6 +676,16 @@
               <Button
                 variant="outline"
                 size="sm"
+                onclick={loadProposals}
+                disabled={loadingProposals}
+                title="Compare metadata from all providers"
+              >
+                <Layers class="mr-1.5 h-3.5 w-3.5" />
+                {loadingProposals ? 'Loading…' : 'Compare'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
                 onclick={handleExtractIdentifiers}
                 disabled={extractingIds}
                 title="Scan file content for ISBN & DOI"
@@ -653,6 +718,25 @@
             </div>
           </div>
 
+          {#if enrichEvents.length > 0}
+            <div class="mt-3 space-y-1">
+              {#each enrichEvents as ev}
+                <div class="flex items-center gap-2 text-xs">
+                  <span class="w-2 h-2 rounded-full shrink-0 {ev.status === 'ok' && ev.fields.length > 0 ? 'bg-green-500' : ev.status === 'error' ? 'bg-red-400' : 'bg-muted-foreground/30'}"></span>
+                  <span class="font-medium capitalize">{ev.provider}</span>
+                  {#if ev.status === 'ok' && ev.fields.length > 0}
+                    <span class="text-muted-foreground">{ev.fields.length} fields{ev.has_cover ? ' + cover' : ''}</span>
+                  {:else if ev.status === 'ok'}
+                    <span class="text-muted-foreground">no match</span>
+                  {:else if ev.status === 'skipped'}
+                    <span class="text-muted-foreground/50">not configured</span>
+                  {:else}
+                    <span class="text-red-400">error</span>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          {/if}
           {#if enrichSuccess}
             <p class="mt-2 text-sm text-green-600">{enrichSuccess}</p>
           {/if}
@@ -661,6 +745,105 @@
           {/if}
           {#if extractIdsMsg}
             <p class="mt-2 text-sm text-muted-foreground">{extractIdsMsg}</p>
+          {/if}
+
+          <!-- Metadata Proposals Panel -->
+          {#if showProposals}
+            <Card class="mt-4">
+              <CardHeader class="pb-3">
+                <div class="flex items-center justify-between">
+                  <CardTitle class="text-base">Metadata Proposals</CardTitle>
+                  <button onclick={() => showProposals = false} class="text-muted-foreground hover:text-foreground">
+                    <X class="h-4 w-4" />
+                  </button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {#if loadingProposals}
+                  <p class="text-sm text-muted-foreground">Querying all providers…</p>
+                {:else if proposals.length === 0}
+                  <p class="text-sm text-muted-foreground">No providers returned results.</p>
+                {:else}
+                  <div class="overflow-x-auto">
+                    <table class="w-full text-xs">
+                      <thead>
+                        <tr class="border-b text-left text-muted-foreground">
+                          <th class="pb-2 pr-3 font-medium">Field</th>
+                          {#each proposals as p}
+                            <th class="pb-2 px-2 font-medium capitalize min-w-32">{p._provider}</th>
+                          {/each}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {#each ['title', 'subtitle', 'description', 'authors', 'isbn', 'published_date', 'publisher', 'page_count', 'language', 'tags'] as field}
+                          {@const hasAny = proposals.some(p => p[field])}
+                          {#if hasAny}
+                            <tr class="border-b border-muted/50">
+                              <td class="py-1.5 pr-3 font-medium text-muted-foreground capitalize">{field.replace(/_/g, ' ')}</td>
+                              {#each proposals as p}
+                                <td class="py-1.5 px-2 max-w-48 truncate" title={String(p[field] ?? '')}>
+                                  {#if field === 'description' && p[field]}
+                                    <span class="text-muted-foreground">{String(p[field]).slice(0, 80)}…</span>
+                                  {:else if field === 'authors' && Array.isArray(p[field])}
+                                    {p[field].join(', ')}
+                                  {:else if field === 'tags' && Array.isArray(p[field])}
+                                    {p[field].slice(0, 5).join(', ')}
+                                  {:else}
+                                    {p[field] ?? '—'}
+                                  {/if}
+                                </td>
+                              {/each}
+                            </tr>
+                          {/if}
+                        {/each}
+                        <!-- Ratings row -->
+                        {@const hasRatings = proposals.some(p => p.goodreads_rating || p.amazon_rating)}
+                        {#if hasRatings}
+                          <tr class="border-b border-muted/50">
+                            <td class="py-1.5 pr-3 font-medium text-muted-foreground">Ratings</td>
+                            {#each proposals as p}
+                              <td class="py-1.5 px-2">
+                                {#if p.goodreads_rating}GR: {p.goodreads_rating}{p.goodreads_rating_count ? ` (${p.goodreads_rating_count})` : ''}{/if}
+                                {#if p.amazon_rating}{p.goodreads_rating ? ' · ' : ''}AMZ: {p.amazon_rating}{/if}
+                                {#if !p.goodreads_rating && !p.amazon_rating}—{/if}
+                              </td>
+                            {/each}
+                          </tr>
+                        {/if}
+                        <!-- Cover row -->
+                        {@const hasCovers = proposals.some(p => p.cover_url)}
+                        {#if hasCovers}
+                          <tr class="border-b border-muted/50">
+                            <td class="py-1.5 pr-3 font-medium text-muted-foreground">Cover</td>
+                            {#each proposals as p}
+                              <td class="py-1.5 px-2">
+                                {#if p.cover_url}
+                                  <img src={p.cover_url} alt="" class="h-16 w-auto rounded" />
+                                {:else}—{/if}
+                              </td>
+                            {/each}
+                          </tr>
+                        {/if}
+                      </tbody>
+                    </table>
+                  </div>
+                  <!-- Apply buttons -->
+                  <div class="mt-3 flex gap-2 flex-wrap">
+                    {#each proposals as p}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onclick={() => applyProposal(p._provider)}
+                        disabled={enriching}
+                        class="capitalize"
+                      >
+                        Apply {p._provider}
+                      </Button>
+                    {/each}
+                  </div>
+                {/if}
+              </CardContent>
+            </Card>
           {/if}
 
           {#if book.series?.length}
