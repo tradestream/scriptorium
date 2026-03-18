@@ -168,7 +168,11 @@ async def _import_book(
 async def _get_or_create_entities(
     db: AsyncSession, model, field: str, names: list[str]
 ) -> list:
-    """Return model instances for each name, creating missing ones."""
+    """Return model instances for each name, creating missing ones.
+
+    Handles race conditions from concurrent workers by catching
+    UNIQUE constraint errors and retrying with a fresh lookup.
+    """
     entities = []
     for name in names:
         name = name.strip()
@@ -177,9 +181,17 @@ async def _get_or_create_entities(
         result = await db.execute(select(model).where(getattr(model, field) == name))
         entity = result.scalar_one_or_none()
         if entity is None:
-            entity = model(**{field: name})
-            db.add(entity)
-            await db.flush()
+            try:
+                entity = model(**{field: name})
+                db.add(entity)
+                await db.flush()
+            except Exception:
+                # UNIQUE constraint — another worker created it concurrently
+                await db.rollback()
+                result = await db.execute(select(model).where(getattr(model, field) == name))
+                entity = result.scalar_one_or_none()
+                if entity is None:
+                    continue  # skip if still not found after rollback
         entities.append(entity)
     return entities
 

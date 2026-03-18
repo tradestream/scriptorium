@@ -104,7 +104,24 @@ async def lifespan(app: FastAPI):
     # Start file watcher + scan existing files in ingest folder
     await ingest_service.start_watcher()
     logger.info("Ingest service started")
-    asyncio.create_task(ingest_service.trigger_scan())
+    # Delay startup scan to avoid race with other workers; use a lock file
+    async def _deferred_scan():
+        import tempfile, os
+        lock = Path(tempfile.gettempdir()) / "scriptorium_ingest_scan.lock"
+        try:
+            # Only one worker gets the lock
+            fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+            await asyncio.sleep(2)  # let other workers start first
+            await ingest_service.trigger_scan()
+        except FileExistsError:
+            pass  # another worker already scanning
+        finally:
+            try:
+                lock.unlink(missing_ok=True)
+            except Exception:
+                pass
+    asyncio.create_task(_deferred_scan())
 
     yield
 

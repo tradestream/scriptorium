@@ -218,18 +218,21 @@ class IngestService:
                                 dest = candidate
                                 break
                     # Update the stored file_path to the new location
-                    from app.models import BookFile
+                    from app.models.edition import EditionFile
                     from sqlalchemy import select as _select
-                    bf_result = await db.execute(_select(BookFile).where(BookFile.file_hash == file_hash))
-                    bf = bf_result.scalar_one_or_none()
-                    file_path.rename(dest)
-                    if bf:
-                        bf.file_path = str(dest)
-                        bf.filename = dest.name
-                        await db.commit()
+                    if file_path.exists():
+                        ef_result = await db.execute(
+                            _select(EditionFile).where(EditionFile.file_hash == file_hash)
+                        )
+                        ef = ef_result.scalar_one_or_none()
+                        file_path.rename(dest)
+                        if ef:
+                            ef.file_path = str(dest)
+                            ef.filename = dest.name
+                            await db.commit()
                 else:
                     dest = Path(library.path) / file_path.name
-                    if not dest.exists():
+                    if file_path.exists() and not dest.exists():
                         file_path.rename(dest)
         except Exception as exc:
             logger.error("Error processing %s: %s", file_path.name, exc)
