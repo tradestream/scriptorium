@@ -28,6 +28,7 @@ class CollectionCreate(BaseModel):
     cover_book_id: Optional[int] = None
     is_smart: bool = False
     is_pinned: bool = False
+    sync_to_kobo: bool = False
     smart_filter: Optional[SmartFilter] = None
 
 
@@ -37,6 +38,7 @@ class CollectionUpdate(BaseModel):
     cover_book_id: Optional[int] = None
     is_smart: Optional[bool] = None
     is_pinned: Optional[bool] = None
+    sync_to_kobo: Optional[bool] = None
     smart_filter: Optional[SmartFilter] = None
 
 
@@ -48,6 +50,8 @@ class CollectionRead(BaseModel):
     cover_book_id: Optional[int] = None
     is_smart: bool = False
     is_pinned: bool = False
+    sync_to_kobo: bool = False
+    source: Optional[str] = None
     smart_filter: Optional[dict] = None
     created_at: datetime
     updated_at: datetime

@@ -35,6 +35,8 @@ class Collection(Base):
     is_smart: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     smart_filter: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON
     is_pinned: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    sync_to_kobo: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    source: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # "kobo", null=web
     # Optional: pin a work whose cover represents this collection
     cover_work_id: Mapped[Optional[int]] = mapped_column(ForeignKey("works.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())

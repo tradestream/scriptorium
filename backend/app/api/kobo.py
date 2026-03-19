@@ -409,7 +409,6 @@ async def kobo_create_tag(
         shelf = Shelf(
             user_id=sync_token.user_id,
             name=tag_name,
-            description="Created on Kobo",
             sync_to_kobo=True,
         )
         db.add(shelf)
@@ -426,7 +425,8 @@ async def kobo_create_tag(
         collection = Collection(
             user_id=sync_token.user_id,
             name=tag_name,
-            description="Created on Kobo",
+            sync_to_kobo=True,
+            source="kobo",
         )
         db.add(collection)
         await db.flush()

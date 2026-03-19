@@ -380,6 +380,8 @@ export interface Collection {
   cover_work_id?: number | null;
   is_smart: boolean;
   is_pinned: boolean;
+  sync_to_kobo: boolean;
+  source?: string | null;
   smart_filter?: SmartFilter | null;
   created_at: string;
   updated_at: string;

@@ -2,6 +2,7 @@
   import { Card, CardContent, CardHeader, CardTitle } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
+  import { Badge } from "$lib/components/ui/badge";
   import { Layers, Plus, Pencil, Trash2, X } from "lucide-svelte";
   import * as api from "$lib/api/client";
   import type { Collection } from "$lib/types/index";
@@ -77,6 +78,19 @@
               <a href="/collections/{col.id}" class="hover:underline">
                 <CardTitle class="text-lg truncate">{col.name}</CardTitle>
               </a>
+              <div class="mt-1 flex gap-1.5">
+                {#if col.sync_to_kobo}
+                  <Badge variant="outline" class="text-xs border-blue-300 text-blue-600 dark:border-blue-700 dark:text-blue-400">
+                    Kobo
+                  </Badge>
+                {/if}
+                {#if col.is_smart}
+                  <Badge variant="secondary" class="text-xs">Smart</Badge>
+                {/if}
+                {#if col.is_pinned}
+                  <Badge variant="secondary" class="text-xs">Pinned</Badge>
+                {/if}
+              </div>
               {#if col.description}
                 <p class="mt-1 text-sm text-muted-foreground line-clamp-2">{col.description}</p>
               {/if}

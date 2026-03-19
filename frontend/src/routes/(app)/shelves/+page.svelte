@@ -184,11 +184,18 @@
               <a href="/shelves/{shelf.id}" class="hover:underline">
                 <CardTitle class="text-lg">{shelf.name}</CardTitle>
               </a>
-              {#if shelf.is_smart}
-                <Badge variant="secondary" class="mt-1 text-xs">
-                  <Sparkles class="mr-1 h-3 w-3" />Smart
-                </Badge>
-              {/if}
+              <div class="mt-1 flex gap-1.5">
+                {#if shelf.is_smart}
+                  <Badge variant="secondary" class="text-xs">
+                    <Sparkles class="mr-1 h-3 w-3" />Smart
+                  </Badge>
+                {/if}
+                {#if shelf.sync_to_kobo}
+                  <Badge variant="outline" class="text-xs border-blue-300 text-blue-600 dark:border-blue-700 dark:text-blue-400">
+                    Kobo
+                  </Badge>
+                {/if}
+              </div>
             </div>
             <div class="flex gap-1">
               <Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => openEdit(shelf)}>
