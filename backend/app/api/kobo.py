@@ -68,9 +68,17 @@ async def _get_sync_token(
 
 
 def _get_base_url(request: Request) -> str:
-    """Extract the base URL from the incoming request for building absolute URLs."""
+    """Extract the base URL from the incoming request for building absolute URLs.
+
+    Checks X-Forwarded-Proto/Host headers from reverse proxy. Falls back to
+    request scheme/host. Forces HTTPS if the host looks like a public domain
+    (not localhost/IP) since Kobo devices require HTTPS for downloads.
+    """
     scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
     host = request.headers.get("x-forwarded-host", request.url.netloc)
+    # Force HTTPS for non-local hosts (reverse proxy may not forward proto header)
+    if scheme == "http" and host and not any(h in host for h in ("localhost", "127.0.0.1", "192.168.", "10.", "172.")):
+        scheme = "https"
     return f"{scheme}://{host}"
 
 
