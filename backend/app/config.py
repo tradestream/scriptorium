@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     LOOSE_LEAVES_PATH: str = "data/loose-leaves"
 
     # Ingest / conversion preferences
+    INGEST_DEFAULT_LIBRARY: str = ""           # Library name for ingest (empty = first active)
     INGEST_AUTO_CONVERT: bool = False          # Auto-convert ingested files
     INGEST_TARGET_FORMAT: str = "epub"         # Target format when auto-converting
     INGEST_AUTO_ENRICH: bool = False           # Auto-enrich metadata on ingest

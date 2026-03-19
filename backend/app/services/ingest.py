@@ -44,7 +44,7 @@ class IngestService:
         try:
             from watchfiles import awatch, Change
 
-            async for changes in awatch(str(self.ingest_path)):
+            async for changes in awatch(str(self.ingest_path), recursive=True):
                 if not self.is_running:
                     break
                 for change_type, path_str in changes:
@@ -57,27 +57,67 @@ class IngestService:
         except Exception as exc:
             logger.error("Ingest watcher error: %s", exc)
 
+    def _detect_library_from_path(self, file_path: Path) -> str | None:
+        """Detect target library from subfolder name.
+
+        If a file is at /data/ingest/Books/mybook.epub, return "Books".
+        If at /data/ingest/mybook.epub (root), return None.
+        """
+        try:
+            relative = file_path.relative_to(self.ingest_path)
+            parts = relative.parts
+            if len(parts) > 1:
+                return parts[0]  # subfolder name = library name
+        except ValueError:
+            pass
+        return None
+
     async def _ingest_file(self, file_path: Path):
-        """Import a single file from the ingest directory into the default library."""
+        """Import a single file into the appropriate library.
+
+        Library resolution order:
+        1. Subfolder name (e.g. /ingest/Books/file.epub → "Books" library)
+        2. INGEST_DEFAULT_LIBRARY env var
+        3. First active library
+        """
         from app.database import get_session_factory
         from app.models import Library
         from app.models.ingest import IngestLog
         from app.services.scanner import _import_book, _hash_file
-        from sqlalchemy import select
+        from sqlalchemy import select, func
 
         factory = get_session_factory()
         try:
             async with factory() as db:
-                # Find or create a default "Ingest" library
-                result = await db.execute(
-                    select(Library).where(Library.name == "Ingest").limit(1)
-                )
-                library = result.scalar_one_or_none()
+                library = None
 
-                if library is None:
-                    # Fall back to the first active library
+                # 1. Try subfolder name → library
+                subfolder = self._detect_library_from_path(file_path)
+                if subfolder:
                     result = await db.execute(
-                        select(Library).where(Library.is_active == True).limit(1)
+                        select(Library).where(
+                            func.lower(Library.name) == subfolder.lower()
+                        ).limit(1)
+                    )
+                    library = result.scalar_one_or_none()
+                    if library:
+                        logger.debug("Matched subfolder '%s' → library '%s'", subfolder, library.name)
+
+                # 2. Try INGEST_DEFAULT_LIBRARY setting
+                if library is None and settings.INGEST_DEFAULT_LIBRARY:
+                    result = await db.execute(
+                        select(Library).where(
+                            func.lower(Library.name) == settings.INGEST_DEFAULT_LIBRARY.lower()
+                        ).limit(1)
+                    )
+                    library = result.scalar_one_or_none()
+
+                # 3. Fall back to first active library
+                if library is None:
+                    result = await db.execute(
+                        select(Library).where(Library.is_active == True)
+                        .order_by(Library.id)
+                        .limit(1)
                     )
                     library = result.scalar_one_or_none()
 
@@ -248,9 +288,12 @@ class IngestService:
                 logger.error("Ingest: failed to log error for %s: %s", file_path.name, log_exc)
 
     async def trigger_scan(self):
-        """Process all existing files in the ingest directory immediately."""
+        """Process all existing files in the ingest directory immediately.
+
+        Scans root and subdirectories (subfolder name = target library).
+        """
         logger.info("Ingest: scanning %s for existing files", self.ingest_path)
-        for file_path in self.ingest_path.iterdir():
+        for file_path in self.ingest_path.rglob("*"):
             if file_path.is_file() and file_path.suffix.lower() in BOOK_EXTENSIONS:
                 await self._ingest_file(file_path)
 
