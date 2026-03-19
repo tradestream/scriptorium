@@ -39,7 +39,7 @@ from app.models.shelf import Shelf, ShelfBook
 logger = logging.getLogger(__name__)
 
 # Number of books per sync page (Kobo devices expect pagination)
-SYNC_PAGE_SIZE = 100
+SYNC_PAGE_SIZE = 10  # Small pages like BookLore (5-10) for Kobo device compatibility
 
 
 def _utcnow() -> datetime:
@@ -132,30 +132,128 @@ async def list_user_sync_tokens(
 # ---------------------------------------------------------------------------
 
 def build_initialization_response(auth_token: str, base_url: str) -> dict:
-    """Build the /v1/initialization response."""
+    """Build the /v1/initialization response.
+
+    Returns the full Kobo Resources object (matching what the real Kobo store
+    returns) with our library/image/tags URLs overriding the store defaults.
+    This prevents devices from rejecting the response due to missing fields.
+    """
     kobo_base = f"{base_url}/kobo/{auth_token}"
 
-    return {
-        "Resources": {
-            "library_sync": f"{kobo_base}/v1/library/sync",
-            "library_items": f"{kobo_base}/v1/library/{{ItemId}}",
-            "book": f"{kobo_base}/v1/library/{{ItemId}}/metadata",
-            "reading_state": f"{kobo_base}/v1/library/{{ItemId}}/state",
-            "content_url": f"{kobo_base}/v1/library/{{ItemId}}/download",
-            "content_access_book": f"{kobo_base}/v1/library/{{ItemId}}/download/{{Type}}",
-            "image_host": base_url,
-            "image_url_quality_template": (
-                f"{base_url}/covers/{{ImageId}}/{{Width}}/{{Height}}"
-                "/false/image.jpg"
-            ),
-            "image_url_template": f"{base_url}/covers/{{ImageId}}/image.jpg",
-            "tags": f"{kobo_base}/v1/library/tags",
-            "affiliate": "",
-            "deals": "",
-            "featured": "",
-            "stacks": "",
-        }
+    # Full Kobo Resources object — based on BookLore's reverse-engineered template.
+    # We override library_sync, image_host, image_url_*, and tags with our URLs.
+    resources = {
+        "account_page": "https://www.kobo.com/account/settings",
+        "account_page_rakuten": "https://my.rakuten.co.jp/",
+        "add_device": "https://storeapi.kobo.com/v1/user/add-device",
+        "add_entitlement": "https://storeapi.kobo.com/v1/library/{RevisionIds}",
+        "affiliaterequest": "https://storeapi.kobo.com/v1/affiliate",
+        "audiobook_landing_page": "https://www.kobo.com/{region}/{language}/audiobooks",
+        "authorproduct_recommendations": "https://storeapi.kobo.com/v1/products/books/authors/recommendations",
+        "autocomplete": "https://storeapi.kobo.com/v1/products/autocomplete",
+        "book": "https://storeapi.kobo.com/v1/products/books/{ProductId}",
+        "book_detail_page": "https://www.kobo.com/{region}/{language}/ebook/{slug}",
+        "book_landing_page": "https://www.kobo.com/ebooks",
+        "book_subscription": "https://storeapi.kobo.com/v1/products/books/subscriptions",
+        "categories": "https://storeapi.kobo.com/v1/categories",
+        "categories_page": "https://www.kobo.com/ebooks/categories",
+        "category": "https://storeapi.kobo.com/v1/categories/{CategoryId}",
+        "category_featured_lists": "https://storeapi.kobo.com/v1/categories/{CategoryId}/featured",
+        "category_products": "https://storeapi.kobo.com/v1/categories/{CategoryId}/products",
+        "configuration_data": "https://storeapi.kobo.com/v1/configuration",
+        "content_access_book": "https://storeapi.kobo.com/v1/products/books/{ProductId}/access",
+        "daily_deal": "https://storeapi.kobo.com/v1/products/dailydeal",
+        "deals": "https://storeapi.kobo.com/v1/deals",
+        "delete_entitlement": "https://storeapi.kobo.com/v1/library/{Ids}",
+        "delete_tag": "https://storeapi.kobo.com/v1/library/tags/{TagId}",
+        "delete_tag_items": "https://storeapi.kobo.com/v1/library/tags/{TagId}/items/delete",
+        "device_auth": "https://storeapi.kobo.com/v1/auth/device",
+        "device_refresh": "https://storeapi.kobo.com/v1/auth/refresh",
+        "dictionary_host": "https://ereaderfiles.kobo.com",
+        "discovery_host": "https://discovery.kobobooks.com",
+        "eula_page": "https://www.kobo.com/termsofuse?style=onestore",
+        "exchange_auth": "https://storeapi.kobo.com/v1/auth/exchange",
+        "external_book": "https://storeapi.kobo.com/v1/products/books/external/{Ids}",
+        "featured_list": "https://storeapi.kobo.com/v1/products/featured/{FeaturedListId}",
+        "featured_lists": "https://storeapi.kobo.com/v1/products/featured",
+        "get_download_keys": "https://storeapi.kobo.com/v1/library/downloadkeys",
+        "get_download_link": "https://storeapi.kobo.com/v1/library/downloadlink",
+        "get_tests_request": "https://storeapi.kobo.com/v1/analytics/gettests",
+        "gpb_flow_enabled": "False",
+        "help_page": "https://www.kobo.com/help",
+        "kobo_audiobooks_enabled": "False",
+        "kobo_display_price": "False",
+        "kobo_nativeborrow_enabled": "False",
+        "kobo_onestorelibrary_enabled": "False",
+        "kobo_redeem_enabled": "False",
+        "kobo_shelfie_enabled": "False",
+        "kobo_subscriptions_enabled": "False",
+        "kobo_superpoints_enabled": "False",
+        "kobo_wishlist_enabled": "False",
+        "library_book": "https://storeapi.kobo.com/v1/user/library/books/{LibraryItemId}",
+        "library_items": "https://storeapi.kobo.com/v1/user/library",
+        "library_metadata": "https://storeapi.kobo.com/v1/library/{Ids}/metadata",
+        "library_prices": "https://storeapi.kobo.com/v1/user/library/previews/prices",
+        "library_search": "https://storeapi.kobo.com/v1/library/search",
+        "love_dashboard_page": "https://www.kobo.com/{region}/{language}/kobosuperpoints",
+        "magazine_landing_page": "https://www.kobo.com/emagazines",
+        "notebooks": "https://storeapi.kobo.com/api/internal/notebooks",
+        "notifications_registration_issue": "https://storeapi.kobo.com/v1/notifications/registration",
+        "oauth_host": "https://oauth.kobo.com",
+        "password_retrieval_page": "https://www.kobo.com/passwordretrieval.html",
+        "post_analytics_event": "https://storeapi.kobo.com/v1/analytics/event",
+        "privacy_page": "https://www.kobo.com/privacypolicy?style=onestore",
+        "product_nextread": "https://storeapi.kobo.com/v1/products/{ProductIds}/nextread",
+        "product_prices": "https://storeapi.kobo.com/v1/products/{ProductIds}/prices",
+        "product_recommendations": "https://storeapi.kobo.com/v1/products/{ProductId}/recommendations",
+        "product_reviews": "https://storeapi.kobo.com/v1/products/{ProductIds}/reviews",
+        "products": "https://storeapi.kobo.com/v1/products",
+        "rating": "https://storeapi.kobo.com/v1/products/{ProductId}/rating/{Rating}",
+        "reading_services_host": "https://readingservices.kobo.com",
+        "registration_page": "https://authorize.kobo.com/signup?returnUrl=http://kobo.com/",
+        "related_items": "https://storeapi.kobo.com/v1/products/{Id}/related",
+        "remaining_book_series": "https://storeapi.kobo.com/v1/products/books/series/{SeriesId}",
+        "rename_tag": "https://storeapi.kobo.com/v1/library/tags/{TagId}",
+        "review": "https://storeapi.kobo.com/v1/products/reviews/{ReviewId}",
+        "search": "https://storeapi.kobo.com/v1/products",
+        "sign_in_page": "https://auth.kobobooks.com/ActivateOnWeb",
+        "social_authorization_host": "https://social.kobobooks.com:8443",
+        "social_host": "https://social.kobobooks.com",
+        "store_home": "www.kobo.com/{region}/{language}",
+        "store_host": "www.kobo.com",
+        "store_newreleases": "https://www.kobo.com/{region}/{language}/List/new-releases/961XUjtsU0qxkFItWOutGA",
+        "store_search": "https://www.kobo.com/{region}/{language}/Search?Query={query}",
+        "store_top50": "https://www.kobo.com/{region}/{language}/ebooks/Top",
+        "tag_items": "https://storeapi.kobo.com/v1/library/tags/{TagId}/Items",
+        "taste_profile": "https://storeapi.kobo.com/v1/products/tasteprofile",
+        "update_accessibility_to_preview": "https://storeapi.kobo.com/v1/library/{EntitlementIds}/preview",
+        "use_one_store": "True",
+        "user_loyalty_benefits": "https://storeapi.kobo.com/v1/user/loyalty/benefits",
+        "user_platform": "https://storeapi.kobo.com/v1/user/platform",
+        "user_profile": "https://storeapi.kobo.com/v1/user/profile",
+        "user_ratings": "https://storeapi.kobo.com/v1/user/ratings",
+        "user_recommendations": "https://storeapi.kobo.com/v1/user/recommendations",
+        "user_reviews": "https://storeapi.kobo.com/v1/user/reviews",
+        "user_wishlist": "https://storeapi.kobo.com/v1/user/wishlist",
+        "userguide_host": "https://ereaderfiles.kobo.com",
+        "wishlist_page": "https://www.kobo.com/{region}/{language}/account/wishlist",
     }
+
+    # Override with our local URLs
+    resources["library_sync"] = f"{kobo_base}/v1/library/sync"
+    resources["library_items"] = f"{kobo_base}/v1/library/{{ItemId}}"
+    resources["reading_state"] = f"{kobo_base}/v1/library/{{ItemId}}/state"
+    resources["image_host"] = base_url
+    resources["image_url_quality_template"] = (
+        f"{base_url}/covers/{{ImageId}}/{{Width}}/{{Height}}/false/image.jpg"
+    )
+    resources["image_url_template"] = f"{base_url}/covers/{{ImageId}}/image.jpg"
+    resources["tags"] = f"{kobo_base}/v1/library/tags"
+    resources["tag_items"] = f"{kobo_base}/v1/library/tags/{{TagId}}/Items"
+    resources["delete_tag"] = f"{kobo_base}/v1/library/tags/{{TagId}}"
+    resources["delete_tag_items"] = f"{kobo_base}/v1/library/tags/{{TagId}}/items/delete"
+
+    return {"Resources": resources}
 
 
 # ---------------------------------------------------------------------------
@@ -420,7 +518,8 @@ def _build_edition_entry(
                     }
                 ],
                 "EntitlementId": edition.uuid,
-                "ExternalIds": [],
+                "ExternalIds": [{"Id": edition.isbn, "Source": "ISBN"}] if edition.isbn else [],
+                "Isbn": edition.isbn or "",
                 "Genre": "00000000-0000-0000-0000-000000000001",
                 "IsEligibleForKoboLove": False,
                 "IsInternetArchive": False,
@@ -509,7 +608,8 @@ def _build_book_entry(
                     }
                 ],
                 "EntitlementId": book.uuid,
-                "ExternalIds": [],
+                "ExternalIds": [{"Id": book.isbn, "Source": "ISBN"}] if book.isbn else [],
+                "Isbn": book.isbn or "",
                 "Genre": "00000000-0000-0000-0000-000000000001",
                 "IsEligibleForKoboLove": False,
                 "IsInternetArchive": False,
@@ -542,21 +642,30 @@ def _build_book_entry(
 
 def _build_reading_state(entity_uuid: str, state: KoboBookState) -> dict:
     """Build the Kobo ReadingState object from our stored state."""
+    status_info = {
+        "LastModified": _kobo_timestamp(state.updated_at),
+        "Status": state.status,
+        "TimesStartedReading": state.times_started_reading,
+    }
+    # Add timestamp fields that BookLore includes
+    if state.updated_at:
+        status_info["LastTimeStartedReading"] = _kobo_timestamp(state.updated_at)
+    if state.status == "Finished" and state.updated_at:
+        status_info["LastTimeFinished"] = _kobo_timestamp(state.updated_at)
+
     return {
         "EntitlementId": entity_uuid,
         "Created": _kobo_timestamp(state.created_at),
         "LastModified": _kobo_timestamp(state.updated_at),
         "PriorityTimestamp": _kobo_timestamp(state.updated_at),
-        "StatusInfo": {
-            "LastModified": _kobo_timestamp(state.updated_at),
-            "Status": state.status,
-            "TimesStartedReading": state.times_started_reading,
-        },
+        "StatusInfo": status_info,
         "Statistics": {
+            "LastModified": _kobo_timestamp(state.updated_at),
             "SpentReadingMinutes": state.time_spent_reading // 60,
             "RemainingTimeMinutes": 0,
         },
         "CurrentBookmark": {
+            "LastModified": _kobo_timestamp(state.updated_at),
             "ContentSourceProgressPercent": state.content_source_progress,
             "Location": {
                 "Source": state.content_id or "",

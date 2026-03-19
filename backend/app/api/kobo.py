@@ -144,10 +144,19 @@ async def kobo_library_sync(
 
     items, has_more = await get_sync_payload(sync_token, db, base_url)
 
-    response = JSONResponse(content=items)
+    # Build sync token for device to send back on next request
+    import base64 as _b64
+    import json as _json
+    sync_state = {
+        "last_modified": sync_token.books_last_modified.isoformat() if sync_token.books_last_modified else None,
+        "token_id": sync_token.id,
+    }
+    sync_token_b64 = _b64.b64encode(_json.dumps(sync_state).encode()).decode()
 
-    if has_more:
-        response.headers["X-Kobo-Sync"] = "continue"
+    response = JSONResponse(content=items)
+    response.headers["x-kobo-sync"] = "continue" if has_more else ""
+    response.headers["x-kobo-synctoken"] = sync_token_b64
+    response.headers["x-kobo-apitoken"] = "e30="
 
     return response
 
@@ -681,16 +690,36 @@ async def _sync_content_progress(
 async def kobo_catch_all(
     auth_token: str,
     path: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """Catch-all for Kobo endpoints we don't implement yet.
 
-    Returns empty success responses to prevent the device from erroring out.
-    Logs the path for future implementation.
+    Returns appropriate empty responses based on the path pattern.
+    Specific no-ops for analytics, nextread, etc. to prevent device errors.
     """
     await _get_sync_token(auth_token, db)
-    logger.debug(f"Unhandled Kobo endpoint: /kobo/.../{ path}")
-    return Response(status_code=200, content="[]", media_type="application/json")
+    logger.debug("Unhandled Kobo endpoint: %s %s", request.method, path)
+
+    # Analytics events — device sends these frequently, just acknowledge
+    if "analytics" in path:
+        return Response(status_code=200, content="{}", media_type="application/json")
+
+    # Nextread recommendations — return empty
+    if "nextread" in path:
+        return JSONResponse(content={"NewEntitlement": None, "SyncToken": None})
+
+    # Download keys — return empty success
+    if "downloadkeys" in path:
+        return Response(status_code=200, content="[]", media_type="application/json")
+
+    # Default: return 200 with empty JSON object (not array — some endpoints expect object)
+    return Response(
+        status_code=200,
+        content="{}",
+        media_type="application/json",
+        headers={"x-kobo-apitoken": "e30="},
+    )
 
 
 # ---------------------------------------------------------------------------
