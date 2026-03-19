@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { Button } from "$lib/components/ui/button";
-  import { ChevronLeft, ChevronRight, Settings, X, Minus, Plus, AlignJustify, Columns2, Moon, Sun } from "lucide-svelte";
+  import { ChevronLeft, ChevronRight, Settings, X, Minus, Plus, AlignJustify, Columns2, Moon, Sun, List } from "lucide-svelte";
   import { downloadBookFile } from "$lib/api/client";
 
   interface Props {
@@ -24,6 +24,8 @@
   let loading = $state(true);
   let error = $state('');
   let showSettings = $state(false);
+  let showToc = $state(false);
+  let toc = $state<Array<{ label: string; href: string; level: number }>>([]);
   let chapterTitle = $state('');
 
   // Reader settings (BookLore-inspired)
@@ -92,6 +94,22 @@
         await rendition.display();
       }
 
+      // Load table of contents
+      try {
+        const nav = book.navigation;
+        if (nav?.toc) {
+          const flatToc: Array<{ label: string; href: string; level: number }> = [];
+          function walkToc(items: any[], level: number) {
+            for (const item of items) {
+              flatToc.push({ label: item.label?.trim() || '', href: item.href, level });
+              if (item.subitems?.length) walkToc(item.subitems, level + 1);
+            }
+          }
+          walkToc(nav.toc, 0);
+          toc = flatToc;
+        }
+      } catch { /* non-critical */ }
+
       loading = false;
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to load book';
@@ -106,6 +124,11 @@
 
   function prevPage() { rendition?.prev(); }
   function nextPage() { rendition?.next(); }
+
+  function goToChapter(href: string) {
+    rendition?.display(href);
+    showToc = false;
+  }
 
   function applyStyles() {
     if (!rendition) return;
@@ -198,82 +221,85 @@
   ontouchend={handleTouchEnd}
 >
   <!-- Toolbar -->
-  <div class="flex items-center justify-between border-b px-4 py-2 {darkMode ? 'border-white/10 bg-[#1a1a1a]/95' : 'border-black/10 bg-[#fafaf9]/95'} backdrop-blur">
-    <Button variant="ghost" size="icon" onclick={onClose} class={darkMode ? 'text-white/70 hover:text-white' : ''}>
-      <X class="h-4 w-4" />
-    </Button>
-    <div class="flex flex-col items-center gap-0 min-w-0 flex-1 mx-4">
+  <div class="flex items-center justify-between border-b px-2 py-1.5 {darkMode ? 'border-white/10 bg-[#1a1a1a]/95' : 'border-black/10 bg-[#fafaf9]/95'} backdrop-blur">
+    <div class="flex items-center gap-0.5 shrink-0">
+      <Button variant="ghost" size="icon" class="h-8 w-8 {darkMode ? 'text-white/70 hover:text-white' : ''}" onclick={onClose}>
+        <X class="h-4 w-4" />
+      </Button>
+      <Button variant="ghost" size="icon" class="h-8 w-8 {darkMode ? 'text-white/70 hover:text-white' : ''}" onclick={() => { showToc = !showToc; showSettings = false; }} title="Table of contents">
+        <List class="h-4 w-4" />
+      </Button>
+    </div>
+    <div class="flex flex-col items-center gap-0 min-w-0 flex-1 mx-2 overflow-hidden">
       {#if chapterTitle}
-        <span class="text-xs truncate max-w-48 {darkMode ? 'text-white/50' : 'text-black/50'}">{chapterTitle}</span>
+        <span class="text-[11px] truncate max-w-full {darkMode ? 'text-white/50' : 'text-black/50'}">{chapterTitle}</span>
       {/if}
       {#if totalPages > 0}
-        <span class="text-xs tabular-nums {darkMode ? 'text-white/40' : 'text-black/40'}">{pct}%</span>
+        <span class="text-[11px] tabular-nums {darkMode ? 'text-white/40' : 'text-black/40'}">{pct}%</span>
       {/if}
     </div>
-    <Button variant="ghost" size="icon" onclick={() => showSettings = !showSettings} class={darkMode ? 'text-white/70 hover:text-white' : ''}>
+    <Button variant="ghost" size="icon" class="h-8 w-8 shrink-0 {darkMode ? 'text-white/70 hover:text-white' : ''}" onclick={() => { showSettings = !showSettings; showToc = false; }}>
       <Settings class="h-4 w-4" />
     </Button>
   </div>
 
+  <!-- TOC panel -->
+  {#if showToc}
+    <div class="border-b overflow-y-auto max-h-[50vh] {darkMode ? 'border-white/10 bg-[#222]' : 'border-black/10 bg-white'}">
+      {#if toc.length === 0}
+        <p class="px-4 py-6 text-xs text-center {darkMode ? 'text-white/40' : 'text-black/40'}">No table of contents available</p>
+      {:else}
+        {#each toc as item}
+          <button
+            class="block w-full text-left px-4 py-2 text-xs hover:bg-black/5 {darkMode ? 'hover:bg-white/5' : ''} border-b {darkMode ? 'border-white/5' : 'border-black/5'}"
+            style="padding-left: {16 + item.level * 16}px"
+            onclick={() => goToChapter(item.href)}
+          >
+            {item.label}
+          </button>
+        {/each}
+      {/if}
+    </div>
+  {/if}
+
   <!-- Settings panel -->
   {#if showSettings}
-    <div class="border-b px-4 py-3 space-y-3 {darkMode ? 'border-white/10 bg-[#222]' : 'border-black/10 bg-white'}">
-      <!-- Font size -->
-      <div class="flex items-center justify-between">
-        <span class="text-xs font-medium {darkMode ? 'text-white/60' : 'text-black/60'}">Font size</span>
-        <div class="flex items-center gap-2">
-          <button onclick={() => changeFontSize(-10)} class="rounded-md border px-2 py-1 text-xs {darkMode ? 'border-white/20 hover:bg-white/10' : 'border-black/20 hover:bg-black/5'}">
+    <div class="border-b px-3 py-3 space-y-3 {darkMode ? 'border-white/10 bg-[#222]' : 'border-black/10 bg-white'}">
+      <!-- Font size + Line height in one row -->
+      <div class="flex items-center gap-4">
+        <div class="flex items-center gap-1.5">
+          <span class="text-[10px] {darkMode ? 'text-white/40' : 'text-black/40'}">Aa</span>
+          <button onclick={() => changeFontSize(-10)} class="rounded border p-1 {darkMode ? 'border-white/20 hover:bg-white/10' : 'border-black/20 hover:bg-black/5'}">
             <Minus class="h-3 w-3" />
           </button>
-          <span class="text-xs tabular-nums w-10 text-center">{fontSize}%</span>
-          <button onclick={() => changeFontSize(10)} class="rounded-md border px-2 py-1 text-xs {darkMode ? 'border-white/20 hover:bg-white/10' : 'border-black/20 hover:bg-black/5'}">
+          <span class="text-[10px] tabular-nums w-8 text-center">{fontSize}%</span>
+          <button onclick={() => changeFontSize(10)} class="rounded border p-1 {darkMode ? 'border-white/20 hover:bg-white/10' : 'border-black/20 hover:bg-black/5'}">
+            <Plus class="h-3 w-3" />
+          </button>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="text-[10px] {darkMode ? 'text-white/40' : 'text-black/40'}">↕</span>
+          <button onclick={() => changeLineHeight(-0.1)} class="rounded border p-1 {darkMode ? 'border-white/20 hover:bg-white/10' : 'border-black/20 hover:bg-black/5'}">
+            <Minus class="h-3 w-3" />
+          </button>
+          <span class="text-[10px] tabular-nums w-6 text-center">{lineHeight}</span>
+          <button onclick={() => changeLineHeight(0.1)} class="rounded border p-1 {darkMode ? 'border-white/20 hover:bg-white/10' : 'border-black/20 hover:bg-black/5'}">
             <Plus class="h-3 w-3" />
           </button>
         </div>
       </div>
-      <!-- Line height -->
-      <div class="flex items-center justify-between">
-        <span class="text-xs font-medium {darkMode ? 'text-white/60' : 'text-black/60'}">Line height</span>
-        <div class="flex items-center gap-2">
-          <button onclick={() => changeLineHeight(-0.1)} class="rounded-md border px-2 py-1 text-xs {darkMode ? 'border-white/20 hover:bg-white/10' : 'border-black/20 hover:bg-black/5'}">
-            <Minus class="h-3 w-3" />
-          </button>
-          <span class="text-xs tabular-nums w-10 text-center">{lineHeight}</span>
-          <button onclick={() => changeLineHeight(0.1)} class="rounded-md border px-2 py-1 text-xs {darkMode ? 'border-white/20 hover:bg-white/10' : 'border-black/20 hover:bg-black/5'}">
-            <Plus class="h-3 w-3" />
-          </button>
-        </div>
-      </div>
-      <!-- Toggles row -->
-      <div class="flex items-center gap-2">
-        <button
-          onclick={toggleJustify}
-          class="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs {justify ? (darkMode ? 'border-white/30 bg-white/10' : 'border-black/30 bg-black/5') : (darkMode ? 'border-white/10' : 'border-black/10')}"
-          title="Toggle justify"
-        >
-          <AlignJustify class="h-3 w-3" />
+      <!-- Toggles row — wrap on narrow screens -->
+      <div class="flex flex-wrap items-center gap-1.5">
+        <button onclick={toggleJustify} class="rounded border px-2 py-1 text-[10px] {justify ? (darkMode ? 'border-white/30 bg-white/10' : 'border-black/30 bg-black/5') : (darkMode ? 'border-white/10' : 'border-black/10')}">
           Justify
         </button>
-        <button
-          onclick={toggleColumns}
-          class="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs {columns > 1 ? (darkMode ? 'border-white/30 bg-white/10' : 'border-black/30 bg-black/5') : (darkMode ? 'border-white/10' : 'border-black/10')}"
-          title="Toggle two-page spread"
-        >
-          <Columns2 class="h-3 w-3" />
+        <button onclick={toggleColumns} class="rounded border px-2 py-1 text-[10px] {columns > 1 ? (darkMode ? 'border-white/30 bg-white/10' : 'border-black/30 bg-black/5') : (darkMode ? 'border-white/10' : 'border-black/10')}">
           {columns > 1 ? '2-up' : '1-up'}
         </button>
-        <button
-          onclick={toggleFlow}
-          class="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs {darkMode ? 'border-white/10' : 'border-black/10'}"
-          title="Toggle scroll mode"
-        >
+        <button onclick={toggleFlow} class="rounded border px-2 py-1 text-[10px] {darkMode ? 'border-white/10' : 'border-black/10'}">
           {flow === 'paginated' ? 'Paged' : 'Scroll'}
         </button>
-        <button
-          onclick={toggleDarkMode}
-          class="ml-auto flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs {darkMode ? 'border-white/10' : 'border-black/10'}"
-          title="Toggle dark mode"
-        >
+        <button onclick={toggleDarkMode} class="rounded border px-2 py-1 text-[10px] {darkMode ? 'border-white/10' : 'border-black/10'}">
           {#if darkMode}<Sun class="h-3 w-3" />{:else}<Moon class="h-3 w-3" />{/if}
         </button>
       </div>
