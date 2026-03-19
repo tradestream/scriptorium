@@ -374,7 +374,8 @@ async def kobo_create_tag(
 ):
     """Handle tag/collection creation from the Kobo device.
 
-    Creates a corresponding shelf in Scriptorium (bidirectional sync).
+    Creates BOTH a Shelf (for Kobo sync) and a Collection (for browsing).
+    Deduplicates by tag_id and name to prevent duplicates on repeated syncs.
     """
     sync_token = await _get_sync_token(auth_token, db)
     body = await request.json()
@@ -385,18 +386,52 @@ async def kobo_create_tag(
         return JSONResponse({"error": "No tag name"}, status_code=400)
 
     from app.models.shelf import Shelf
+    from app.models.collection import Collection
     from app.models.progress import KoboShelfArchive
 
-    # Create a local shelf for this tag
-    shelf = Shelf(
-        user_id=sync_token.user_id,
-        name=tag_name,
-        sync_to_kobo=True,  # Auto-sync back to device
+    # Check if we already have this tag mapped
+    existing_archive = await db.execute(
+        select(KoboShelfArchive).where(
+            KoboShelfArchive.user_id == sync_token.user_id,
+            KoboShelfArchive.kobo_tag_id == tag_id,
+            KoboShelfArchive.is_deleted == False,
+        )
     )
-    db.add(shelf)
-    await db.flush()
+    if existing_archive.scalar_one_or_none():
+        return {"Id": tag_id, "Name": tag_name, "Items": [], "Type": "UserTag"}
 
-    # Track the mapping
+    # --- Shelf (for Kobo sync) ---
+    existing_shelf = await db.execute(
+        select(Shelf).where(Shelf.user_id == sync_token.user_id, Shelf.name == tag_name)
+    )
+    shelf = existing_shelf.scalar_one_or_none()
+    if not shelf:
+        shelf = Shelf(
+            user_id=sync_token.user_id,
+            name=tag_name,
+            description="Created on Kobo",
+            sync_to_kobo=True,
+        )
+        db.add(shelf)
+        await db.flush()
+    elif not shelf.sync_to_kobo:
+        shelf.sync_to_kobo = True
+
+    # --- Collection (for browsing) ---
+    existing_col = await db.execute(
+        select(Collection).where(Collection.user_id == sync_token.user_id, Collection.name == tag_name)
+    )
+    collection = existing_col.scalar_one_or_none()
+    if not collection:
+        collection = Collection(
+            user_id=sync_token.user_id,
+            name=tag_name,
+            description="Created on Kobo",
+        )
+        db.add(collection)
+        await db.flush()
+
+    # --- Archive mapping ---
     archive = KoboShelfArchive(
         user_id=sync_token.user_id,
         kobo_tag_id=tag_id or str(shelf.id),
@@ -406,12 +441,12 @@ async def kobo_create_tag(
     db.add(archive)
     await db.commit()
 
-    logger.info("Kobo created tag '%s' → shelf %d", tag_name, shelf.id)
+    logger.info("Kobo tag '%s' → shelf %d + collection %d", tag_name, shelf.id, collection.id)
 
     return {
         "Id": tag_id or str(shelf.id),
         "Name": tag_name,
-        "Created": shelf.created_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "Created": shelf.created_at.strftime("%Y-%m-%dT%H:%M:%SZ") if shelf.created_at else None,
         "Items": [],
         "Type": "UserTag",
     }
@@ -454,16 +489,16 @@ async def kobo_add_items_to_tag(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """Handle adding books to a tag/collection from the Kobo device."""
+    """Handle adding books to a tag from the Kobo device. Adds to both Shelf and Collection."""
     sync_token = await _get_sync_token(auth_token, db)
     body = await request.json()
     items = body.get("Items", [])
 
     from app.models.progress import KoboShelfArchive
     from app.models.shelf import ShelfBook
+    from app.models.collection import Collection, CollectionBook
     from sqlalchemy import select
 
-    # Find the local shelf
     result = await db.execute(
         select(KoboShelfArchive).where(
             KoboShelfArchive.user_id == sync_token.user_id,
@@ -471,28 +506,39 @@ async def kobo_add_items_to_tag(
         )
     )
     archive = result.scalar_one_or_none()
-    if not archive or not archive.shelf_id:
+    if not archive:
         return Response(status_code=404)
 
-    # Add books by UUID
+    # Find matching collection
+    col_result = await db.execute(
+        select(Collection).where(Collection.user_id == sync_token.user_id, Collection.name == archive.name)
+    )
+    collection = col_result.scalar_one_or_none()
+
     for item in items:
         rev_id = item.get("RevisionId")
         if not rev_id:
             continue
-        edition_result = await db.execute(
-            select(Edition).where(Edition.uuid == rev_id)
-        )
+        edition_result = await db.execute(select(Edition).where(Edition.uuid == rev_id))
         edition = edition_result.scalar_one_or_none()
-        if edition:
-            # Check if already on shelf
+        if not edition:
+            continue
+
+        # Add to shelf
+        if archive.shelf_id:
             existing = await db.execute(
-                select(ShelfBook.id).where(
-                    ShelfBook.shelf_id == archive.shelf_id,
-                    ShelfBook.work_id == edition.work_id,
-                )
+                select(ShelfBook.id).where(ShelfBook.shelf_id == archive.shelf_id, ShelfBook.work_id == edition.work_id)
             )
             if not existing.scalar_one_or_none():
                 db.add(ShelfBook(shelf_id=archive.shelf_id, work_id=edition.work_id, position=0))
+
+        # Add to collection
+        if collection:
+            existing = await db.execute(
+                select(CollectionBook.id).where(CollectionBook.collection_id == collection.id, CollectionBook.work_id == edition.work_id)
+            )
+            if not existing.scalar_one_or_none():
+                db.add(CollectionBook(collection_id=collection.id, work_id=edition.work_id, position=0))
 
     await db.commit()
     return Response(status_code=201)
@@ -505,11 +551,12 @@ async def kobo_remove_item_from_tag(
     item_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """Handle removing a book from a tag/collection on the Kobo device."""
+    """Handle removing a book from a tag on the Kobo device. Removes from both Shelf and Collection."""
     sync_token = await _get_sync_token(auth_token, db)
 
     from app.models.progress import KoboShelfArchive
     from app.models.shelf import ShelfBook
+    from app.models.collection import Collection, CollectionBook
     from sqlalchemy import select
 
     result = await db.execute(
@@ -519,24 +566,30 @@ async def kobo_remove_item_from_tag(
         )
     )
     archive = result.scalar_one_or_none()
-    if not archive or not archive.shelf_id:
+    if not archive:
         return Response(status_code=404)
 
-    # Find edition by UUID
-    edition_result = await db.execute(
-        select(Edition).where(Edition.uuid == item_id)
-    )
+    edition_result = await db.execute(select(Edition).where(Edition.uuid == item_id))
     edition = edition_result.scalar_one_or_none()
     if edition:
-        sb_result = await db.execute(
-            select(ShelfBook).where(
-                ShelfBook.shelf_id == archive.shelf_id,
-                ShelfBook.work_id == edition.work_id,
-            )
-        )
-        sb = sb_result.scalar_one_or_none()
-        if sb:
-            await db.delete(sb)
+        # Remove from shelf
+        if archive.shelf_id:
+            sb = (await db.execute(
+                select(ShelfBook).where(ShelfBook.shelf_id == archive.shelf_id, ShelfBook.work_id == edition.work_id)
+            )).scalar_one_or_none()
+            if sb:
+                await db.delete(sb)
+
+        # Remove from collection
+        col = (await db.execute(
+            select(Collection).where(Collection.user_id == sync_token.user_id, Collection.name == archive.name)
+        )).scalar_one_or_none()
+        if col:
+            cb = (await db.execute(
+                select(CollectionBook).where(CollectionBook.collection_id == col.id, CollectionBook.work_id == edition.work_id)
+            )).scalar_one_or_none()
+            if cb:
+                await db.delete(cb)
 
     await db.commit()
     return Response(status_code=204)
