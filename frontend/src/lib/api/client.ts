@@ -104,8 +104,24 @@ async function fetchAPI<T>(endpoint: string, options: RequestInit = {}): Promise
   const response = await fetch(url, { ...options, headers });
 
   if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`API Error (${response.status}): ${error}`);
+    const text = await response.text();
+    let message: string;
+    try {
+      const json = JSON.parse(text);
+      message = json.detail || json.message || JSON.stringify(json);
+    } catch {
+      // Non-JSON response (e.g. Cloudflare error page) — use a friendly message
+      if (response.status === 502) {
+        message = 'Server is unreachable. Please try again in a few minutes.';
+      } else if (response.status === 503) {
+        message = 'Server is temporarily unavailable. Please try again shortly.';
+      } else if (response.status === 504) {
+        message = 'Server timed out. Please try again.';
+      } else {
+        message = `Unexpected error (${response.status}). Please try again.`;
+      }
+    }
+    throw new Error(message);
   }
 
   if (response.status === 204) return undefined as T;
