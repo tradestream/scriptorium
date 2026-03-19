@@ -961,7 +961,7 @@
           {/if}
 
           {#if book.description}
-            <p class="mt-4 leading-relaxed text-muted-foreground">{book.description}</p>
+            <div class="mt-4 leading-relaxed text-muted-foreground prose prose-sm dark:prose-invert max-w-none [&>br]:block [&>br]:mt-2">{@html book.description}</div>
           {/if}
 
           <Separator class="my-6" />
