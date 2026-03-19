@@ -1004,10 +1004,11 @@
               </div>
             {/if}
             {#if book.files?.length}
+              {@const uniqueFormats = [...new Map(book.files.map(f => [f.format.toLowerCase(), f])).values()]}
               <div>
-                <p class="text-sm text-muted-foreground">Format{book.files.length > 1 ? 's' : ''}</p>
+                <p class="text-sm text-muted-foreground">Format{uniqueFormats.length > 1 ? 's' : ''} ({book.files.length} file{book.files.length > 1 ? 's' : ''})</p>
                 <div class="flex flex-wrap gap-1.5 mt-0.5">
-                  {#each book.files as f}
+                  {#each uniqueFormats as f}
                     <span class="rounded bg-secondary px-2 py-0.5 text-sm font-semibold uppercase">{f.format}</span>
                   {/each}
                   {#if book.abs_item_id}
