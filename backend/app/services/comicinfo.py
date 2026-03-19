@@ -147,7 +147,7 @@ async def apply_comicinfo(work, edition, comicinfo: dict, db) -> bool:
     Returns True if any field was changed.
     """
     from sqlalchemy import select
-    from app.models.comic import Publisher, Imprint, StoryArc, StoryArcEntry, ComicCredit
+    from app.models.comic import Publisher, Imprint, StoryArc, StoryArcEntry
     from app.models import Author
 
     changed = False
@@ -218,23 +218,32 @@ async def apply_comicinfo(work, edition, comicinfo: dict, db) -> bool:
             ))
             changed = True
 
-    # Credits
+    # Credits — use WorkContributor (unified with book contributors)
+    from app.models.work import WorkContributor
     for credit in comicinfo.get("credits", []):
         person_name = credit["name"]
         role = credit["role"]
-        person = (await db.execute(select(Author).where(Author.name == person_name))).scalar_one_or_none()
-        if not person:
-            person = Author(name=person_name)
-            db.add(person)
-            await db.flush()
         existing = (await db.execute(
-            select(ComicCredit).where(
-                ComicCredit.work_id == work.id, ComicCredit.person_id == person.id, ComicCredit.role == role
+            select(WorkContributor).where(
+                WorkContributor.work_id == work.id,
+                WorkContributor.name == person_name,
+                WorkContributor.role == role,
             )
         )).scalar_one_or_none()
         if not existing:
-            db.add(ComicCredit(work_id=work.id, person_id=person.id, role=role))
+            db.add(WorkContributor(work_id=work.id, name=person_name, role=role))
             changed = True
+
+        # Also add to authors if writer (so they show on book cards)
+        if role == "writer":
+            existing_author = (await db.execute(select(Author).where(Author.name == person_name))).scalar_one_or_none()
+            if not existing_author:
+                existing_author = Author(name=person_name)
+                db.add(existing_author)
+                await db.flush()
+            if existing_author not in work.authors:
+                work.authors.append(existing_author)
+                changed = True
 
     return changed
 
