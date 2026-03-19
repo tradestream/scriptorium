@@ -70,23 +70,7 @@ class StoryArcEntry(Base):
     story_arc: Mapped["StoryArc"] = relationship("StoryArc", back_populates="entries")
 
 
-class ComicCredit(Base):
-    """A credit role for a person on a comic work.
-
-    Roles: writer, penciler, inker, colorist, letterer, editor, cover_artist
-    Uses the existing Author table for person identity.
-    """
-
-    __tablename__ = "comic_credits"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    work_id: Mapped[int] = mapped_column(ForeignKey("works.id"), index=True)
-    person_id: Mapped[int] = mapped_column(ForeignKey("authors.id"), index=True)
-    role: Mapped[str] = mapped_column(String(50), index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
-
-
-# Valid comic credit roles
+    # Comic credit roles (used by WorkContributor, not a separate model)
 COMIC_ROLES = [
     "writer",
     "penciler",
