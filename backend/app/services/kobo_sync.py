@@ -204,15 +204,21 @@ async def get_sync_payload(
         .order_by(Edition.updated_at.desc())
     )
 
-    # Shelf filter: include editions whose work is on one of the token's shelves
+    # Shelf filter: include editions whose work is on one of the token's shelves.
+    # Only apply if the shelves actually have books — otherwise sync everything
+    # from visible libraries (the pre-shelf-filter behavior).
     if token_shelf_ids:
-        stmt = stmt.where(
-            select(ShelfBook.work_id)
-            .where(
-                ShelfBook.work_id == Edition.work_id,
-                ShelfBook.shelf_id.in_(token_shelf_ids),
-            )
-            .exists()
+        has_books = await db.scalar(
+            select(ShelfBook.id).where(ShelfBook.shelf_id.in_(token_shelf_ids)).limit(1)
+        )
+        if has_books:
+            stmt = stmt.where(
+                select(ShelfBook.work_id)
+                .where(
+                    ShelfBook.work_id == Edition.work_id,
+                    ShelfBook.shelf_id.in_(token_shelf_ids),
+                )
+                .exists()
         )
 
     if sync_token.books_last_modified:
