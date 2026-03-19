@@ -334,22 +334,22 @@ async def kobo_get_tags(
 
     from sqlalchemy import select
     from sqlalchemy.orm import selectinload
-    from app.models import Shelf
+    from app.models.shelf import Shelf
 
     stmt = (
         select(Shelf)
         .where(Shelf.user_id == sync_token.user_id)
-        .options(selectinload(Shelf.books))
+        .options(selectinload(Shelf.works))
     )
     result = await db.execute(stmt)
-    shelves = result.scalars().all()
+    shelves = result.unique().scalars().all()
 
     tags = []
     for shelf in shelves:
         created = shelf.created_at.strftime("%Y-%m-%dT%H:%M:%SZ") if shelf.created_at else None
         items = [
-            {"RevisionId": book.uuid, "Type": "ProductRevisionTagItem"}
-            for book in shelf.books
+            {"RevisionId": work.uuid, "Type": "ProductRevisionTagItem"}
+            for work in shelf.works
         ]
         tags.append({
             "Id": str(shelf.id),
