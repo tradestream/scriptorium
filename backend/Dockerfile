@@ -12,7 +12,7 @@ COPY pyproject.toml pyproject.toml
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --upgrade pip setuptools wheel && \
-    pip install -e .
+    pip install .
 
 
 # Stage 2: Runtime
