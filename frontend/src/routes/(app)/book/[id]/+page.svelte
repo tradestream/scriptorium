@@ -844,6 +844,8 @@
                                     {p[field].join(', ')}
                                   {:else if field === 'tags' && Array.isArray(p[field])}
                                     {p[field].slice(0, 5).join(', ')}
+                                  {:else if field === 'published_date' && p[field]}
+                                    {String(p[field]).slice(0, 10)}
                                   {:else}
                                     {p[field] ?? '—'}
                                   {/if}
