@@ -21,6 +21,7 @@ class EventBroadcaster:
     def __init__(self) -> None:
         self._connections: list[WebSocket] = []
         self._lock = asyncio.Lock()
+        self.sse_clients: list = []  # SSE callback functions
 
     async def connect(self, ws: WebSocket) -> None:
         await ws.accept()
@@ -63,6 +64,13 @@ class EventBroadcaster:
                         self._connections.remove(ws)
                     except ValueError:
                         pass
+
+        # Also notify SSE clients
+        for callback in list(self.sse_clients):
+            try:
+                await callback(event_type, data)
+            except Exception:
+                pass
 
     # ── Typed event helpers ────────────────────────────────────────────────
 

@@ -1055,6 +1055,55 @@ async def compute_book_reading_level(
     return result
 
 
+@router.get("/{book_id}/files/{file_id}/manifest.json")
+async def get_divina_manifest(
+    book_id: int,
+    file_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """Return a DiViNa WebPub Manifest for a comic file (Readium compatible)."""
+    stmt = select(EditionFile).where(EditionFile.id == file_id, EditionFile.edition_id == book_id)
+    result = await db.execute(stmt)
+    edition_file = result.scalar_one_or_none()
+    if not edition_file:
+        raise HTTPException(status_code=404, detail="File not found")
+    if edition_file.format.lower() not in ("cbz", "cbr"):
+        raise HTTPException(status_code=400, detail="DiViNa manifests only for comic files")
+
+    edition_result = await db.execute(
+        select(Edition).where(Edition.id == book_id).options(*_edition_options())
+    )
+    edition = edition_result.unique().scalar_one_or_none()
+    if not edition:
+        raise HTTPException(status_code=404, detail="Book not found")
+
+    from app.services.divina import generate_divina_manifest
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("x-forwarded-host", request.url.netloc)
+    base_url = f"{scheme}://{host}"
+
+    work = edition.work
+    manifest = generate_divina_manifest(
+        edition_id=book_id,
+        file_id=file_id,
+        file_path=edition_file.file_path,
+        title=work.title if work else f"Edition {book_id}",
+        authors=[a.name for a in work.authors] if work and work.authors else [],
+        base_url=base_url,
+        reading_direction=work.reading_direction or "ltr" if work else "ltr",
+        page_count=work.page_count_comic if work else None,
+    )
+    if not manifest:
+        raise HTTPException(status_code=404, detail="Could not generate manifest")
+
+    return JSONResponse(
+        content=manifest,
+        media_type="application/divina+json",
+    )
+
+
 @router.get("/{book_id}/files/{file_id}/pages")
 async def get_comic_page_count(
     book_id: int,

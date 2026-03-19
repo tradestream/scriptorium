@@ -209,6 +209,47 @@ def create_app() -> FastAPI:
         except WebSocketDisconnect:
             await broadcaster.disconnect(websocket)
 
+    # SSE endpoint — lighter alternative to WebSocket with heartbeat
+    @app.get("/api/v1/events/stream")
+    async def sse_events(request: Request):
+        """Server-Sent Events endpoint for real-time library updates.
+
+        Sends a heartbeat every 15 seconds to keep the connection alive.
+        Lighter than WebSocket — no bidirectional channel needed.
+        """
+        import json as _json
+        from starlette.responses import StreamingResponse
+
+        async def event_generator():
+            queue: asyncio.Queue = asyncio.Queue()
+
+            # Register this SSE client with the broadcaster
+            async def on_event(event_type: str, data: dict):
+                await queue.put({"type": event_type, **data})
+
+            broadcaster.sse_clients.append(on_event)
+            try:
+                while True:
+                    try:
+                        # Wait up to 15s for an event; send heartbeat if timeout
+                        event = await asyncio.wait_for(queue.get(), timeout=15.0)
+                        yield f"data: {_json.dumps(event)}\n\n"
+                    except asyncio.TimeoutError:
+                        # Heartbeat — keeps the connection alive through proxies
+                        yield ": heartbeat\n\n"
+
+                    # Check if client disconnected
+                    if await request.is_disconnected():
+                        break
+            finally:
+                broadcaster.sse_clients.remove(on_event)
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
     return app
 
 

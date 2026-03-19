@@ -1004,6 +1004,40 @@ async def run_scheduler_now(
     return {"status": "triggered"}
 
 
+# ── Page Hash Duplicate Detection ──────────────────────────────────────────────
+
+@router.get("/comics/duplicates/{edition_id}")
+async def find_duplicate_pages_in_file(
+    edition_id: int,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(_require_admin),
+):
+    """Find duplicate pages within a single comic file."""
+    from sqlalchemy import select
+    from app.models.edition import EditionFile
+    ef = (await db.execute(
+        select(EditionFile).where(EditionFile.edition_id == edition_id, EditionFile.format == "cbz")
+    )).scalar_one_or_none()
+    if not ef:
+        raise HTTPException(status_code=404, detail="No CBZ file found")
+
+    from app.services.page_hash import find_duplicate_pages
+    dupes = find_duplicate_pages(ef.file_path)
+    return {"edition_id": edition_id, "duplicates": dupes}
+
+
+@router.post("/comics/duplicates/cross-file")
+async def find_cross_file_duplicate_pages(
+    edition_ids: list[int],
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(_require_admin),
+):
+    """Find pages that appear across multiple comic files."""
+    from app.services.page_hash import find_cross_file_duplicates
+    dupes = await find_cross_file_duplicates(edition_ids, db)
+    return {"edition_count": len(edition_ids), "cross_duplicates": dupes}
+
+
 # ── Split Edition (fix multi-file editions) ────────────────────────────────────
 
 @router.post("/editions/{edition_id}/split")
