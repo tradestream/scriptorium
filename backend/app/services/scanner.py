@@ -153,6 +153,18 @@ async def _import_book(
         created_at=datetime.utcnow(),
     )
     db.add(edition_file)
+
+    # ── ComicInfo.xml extraction for CBZ/CBR ──────────────────────────────────
+    if fmt in ("cbz", "cbr"):
+        try:
+            from app.services.comicinfo import parse_comicinfo_from_cbz, parse_comicinfo_from_cbr, apply_comicinfo
+            parser = parse_comicinfo_from_cbz if fmt == "cbz" else parse_comicinfo_from_cbr
+            comicinfo = parser(str(file_path))
+            if comicinfo:
+                await apply_comicinfo(work, edition, comicinfo, db)
+        except Exception:
+            pass  # ComicInfo extraction is non-critical
+
     await db.commit()
 
     # ── Index in FTS5 (non-critical) ──────────────────────────────────────────

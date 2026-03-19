@@ -4,7 +4,7 @@ from app.api import (
     admin, analysis, annotations, api_keys, articles, audiobookshelf, auth, books, loose_leaves,
     browse, collections, devices, duplicates, editions, export, goals, ingest, kobo, libraries,
     locations, marginalia, metadata, notebooks, opds, progress, read_sessions, search, shelves,
-    stats, sync, users, works,
+    stats, story_arcs, sync, users, works,
 )
 
 router = APIRouter(prefix="/api/v1")
@@ -39,6 +39,7 @@ router.include_router(goals.router, tags=["goals"])
 router.include_router(locations.router, tags=["locations"])
 router.include_router(articles.router, tags=["articles"])
 router.include_router(audiobookshelf.router, tags=["audiobookshelf"])
+router.include_router(story_arcs.router, tags=["story-arcs"])
 router.include_router(kobo.kobo_management_router)
 
 # Routers mounted at app root (not under /api/v1):

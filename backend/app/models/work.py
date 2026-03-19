@@ -84,6 +84,15 @@ class Work(Base):
     age_range: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)      # e.g. "8-12", "Young Adult"
     interest_level: Mapped[Optional[str]] = mapped_column(String(20), nullable=True) # LG, MG, MG+, UG (Lower/Middle/Upper Grades)
 
+    # ── Comic taxonomy ──────────────────────────────────────────────────────
+    publisher_id: Mapped[Optional[int]] = mapped_column(ForeignKey("publishers.id"), nullable=True)
+    imprint_id: Mapped[Optional[int]] = mapped_column(ForeignKey("imprints.id"), nullable=True)
+    reading_direction: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)  # ltr, rtl
+    issue_number: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # "1", "1.5", "Annual 1"
+    volume_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    page_count_comic: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    comic_format: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # TPB, HC, Single Issue
+
     # ── Content restrictions ─────────────────────────────────────────────────
     age_rating: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # everyone, teen, mature, adult
     content_rating: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # G, PG, PG-13, R, X
