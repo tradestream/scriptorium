@@ -135,7 +135,70 @@
     return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
   }
 
+  // Global default library + bulk actions
+  let defaultLibraryId = $state<number | null>(null);
+  let selected = $state<Set<string>>(new Set());
+  let bulkImporting = $state(false);
+  let bulkMsg = $state('');
+
+  function toggleSelect(fn: string) {
+    const next = new Set(selected);
+    if (next.has(fn)) next.delete(fn); else next.add(fn);
+    selected = next;
+  }
+
+  function selectAll() {
+    selected = new Set(items.map(i => i.filename));
+  }
+
+  function selectNone() {
+    selected = new Set();
+  }
+
+  function applyDefaultToAll() {
+    if (!defaultLibraryId) return;
+    const updated = { ...selectedLibrary };
+    for (const item of items) {
+      if (selected.size === 0 || selected.has(item.filename)) {
+        updated[item.filename] = defaultLibraryId;
+      }
+    }
+    selectedLibrary = updated;
+  }
+
+  async function importAll() {
+    const toImport = items.filter(i => selected.size === 0 || selected.has(i.filename));
+    if (toImport.length === 0) return;
+    if (!confirm(`Import ${toImport.length} file${toImport.length > 1 ? 's' : ''}?`)) return;
+    bulkImporting = true;
+    bulkMsg = '';
+    try {
+      const files = toImport.map(i => ({
+        filename: i.filename,
+        library_id: selectedLibrary[i.filename] || null,
+      }));
+      const defLib = defaultLibraryId || (libraries.length > 0 ? libraries[0].id : 0);
+      const result = await api.bulkImportFromLooseLeaves(files, defLib);
+      bulkMsg = `Imported ${result.imported} of ${result.total} files`;
+      // Remove imported items from the list
+      const importedFilenames = new Set(result.results.filter(r => r.status === 'imported').map(r => r.filename));
+      items = items.filter(i => !importedFilenames.has(i.filename));
+      selected = new Set();
+    } catch (e) {
+      bulkMsg = e instanceof Error ? e.message : 'Bulk import failed';
+    } finally {
+      bulkImporting = false;
+    }
+  }
+
   $effect(() => { load(); });
+  $effect(() => {
+    if (libraries.length > 0 && !defaultLibraryId) {
+      // Default to "Books" library if it exists, otherwise first
+      const booksLib = libraries.find(l => l.name.toLowerCase() === 'books');
+      defaultLibraryId = booksLib?.id ?? libraries[0].id;
+    }
+  });
 </script>
 
 <div class="mx-auto max-w-3xl space-y-6 p-6">
@@ -202,6 +265,39 @@
       </p>
     </div>
   {:else}
+    <!-- Global controls bar -->
+    <div class="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 p-3">
+      <div class="flex items-center gap-2 text-xs">
+        <button onclick={selected.size === items.length ? selectNone : selectAll}
+          class="rounded border px-2 py-1 hover:bg-accent transition-colors">
+          {selected.size === items.length ? 'Deselect all' : 'Select all'}
+        </button>
+        <span class="text-muted-foreground">{selected.size > 0 ? `${selected.size} selected` : `${items.length} files`}</span>
+      </div>
+      <div class="flex items-center gap-2 ml-auto">
+        <label class="text-xs text-muted-foreground shrink-0">Default library:</label>
+        <select bind:value={defaultLibraryId}
+          class="h-7 rounded border bg-background px-2 text-xs outline-none focus:ring-1 focus:ring-ring">
+          {#each libraries as lib}
+            <option value={lib.id}>{lib.name}</option>
+          {/each}
+        </select>
+        <button onclick={applyDefaultToAll}
+          class="rounded border px-2 py-1 text-xs hover:bg-accent transition-colors"
+          title="Apply default library to all{selected.size > 0 ? ' selected' : ''} files">
+          Apply to {selected.size > 0 ? 'selected' : 'all'}
+        </button>
+        <button onclick={importAll}
+          disabled={bulkImporting}
+          class="rounded bg-primary px-3 py-1 text-xs text-primary-foreground disabled:opacity-50 transition-opacity">
+          {bulkImporting ? 'Importing…' : `Import ${selected.size > 0 ? selected.size : 'all'}`}
+        </button>
+      </div>
+    </div>
+    {#if bulkMsg}
+      <p class="text-sm text-muted-foreground">{bulkMsg}</p>
+    {/if}
+
     <div class="space-y-3">
       {#each items as item (item.filename)}
         {@const fn = item.filename}
@@ -211,6 +307,12 @@
         <div class="rounded-lg border">
           <!-- Header row -->
           <div class="flex items-center gap-3 p-4">
+            <input
+              type="checkbox"
+              checked={selected.has(fn)}
+              onchange={() => toggleSelect(fn)}
+              class="h-4 w-4 rounded border accent-primary shrink-0"
+            />
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2">
                 <span class="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted-foreground shrink-0">{item.format}</span>

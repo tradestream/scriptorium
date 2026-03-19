@@ -80,6 +80,12 @@ class ImportRequest(BaseModel):
     library_id: int
 
 
+class BulkImportRequest(BaseModel):
+    """Import multiple files at once, with per-file or default library."""
+    files: list[dict]  # [{"filename": str, "library_id": int | null}]
+    default_library_id: int
+
+
 class RejectRequest(BaseModel):
     filename: str
 
@@ -200,6 +206,67 @@ async def import_book(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(exc),
         ) from exc
+
+
+@router.post("/bulk-import")
+async def bulk_import_books(
+    data: BulkImportRequest,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(_require_admin),
+):
+    """Import multiple files from Loose Leaves, each with its own library target.
+
+    BookLore-style finalization: per-file library_id with a default fallback.
+    """
+    drop_path = _loose_leaves_path()
+    results = []
+
+    for entry in data.files:
+        filename = entry.get("filename", "")
+        lib_id = entry.get("library_id") or data.default_library_id
+        file_path = drop_path / filename
+
+        if not file_path.exists() or not file_path.is_file():
+            results.append({"filename": filename, "status": "not_found"})
+            continue
+
+        lib_result = await db.execute(select(Library).where(Library.id == lib_id))
+        library = lib_result.scalar_one_or_none()
+        if not library:
+            results.append({"filename": filename, "status": "invalid_library"})
+            continue
+
+        from app.models.edition import EditionFile
+        file_hash = _hash_file(file_path)
+        existing = await db.scalar(
+            select(EditionFile.id).where(EditionFile.file_hash == file_hash).limit(1)
+        )
+        if existing:
+            file_path.unlink(missing_ok=True)
+            results.append({"filename": filename, "status": "duplicate"})
+            continue
+
+        try:
+            result = await _import_book(file_path, file_hash, library, db)
+            if result:
+                work, edition = result
+                await db.commit()
+                # Move file
+                dest = Path(library.path) / file_path.name
+                if file_path.exists():
+                    if dest.exists():
+                        file_path.unlink(missing_ok=True)
+                    else:
+                        file_path.rename(dest)
+                results.append({"filename": filename, "status": "imported", "book_id": edition.id, "library": library.name})
+            else:
+                results.append({"filename": filename, "status": "unsupported_format"})
+        except Exception as exc:
+            logger.error("Bulk import failed for %s: %s", filename, exc)
+            results.append({"filename": filename, "status": "error", "message": str(exc)})
+
+    imported = sum(1 for r in results if r["status"] == "imported")
+    return {"total": len(data.files), "imported": imported, "results": results}
 
 
 @router.post("/upload", response_model=list[DropItem])

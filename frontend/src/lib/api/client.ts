@@ -1241,6 +1241,16 @@ export async function rejectFromLooseLeaves(filename: string): Promise<void> {
   return fetchAPI('/loose-leaves/reject', { method: 'DELETE', body: JSON.stringify({ filename }) });
 }
 
+export async function bulkImportFromLooseLeaves(
+  files: Array<{ filename: string; library_id?: number | null }>,
+  defaultLibraryId: number,
+): Promise<{ total: number; imported: number; results: Array<{ filename: string; status: string; book_id?: number; library?: string }> }> {
+  return fetchAPI('/loose-leaves/bulk-import', {
+    method: 'POST',
+    body: JSON.stringify({ files, default_library_id: defaultLibraryId }),
+  });
+}
+
 export async function uploadToLooseLeaves(files: File[]): Promise<DropItem[]> {
   const form = new FormData();
   for (const f of files) form.append('files', f, f.name);
