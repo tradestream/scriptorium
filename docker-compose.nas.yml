@@ -33,6 +33,7 @@ services:
       - GOOGLE_BOOKS_API_KEY=AIzaSyC8eq8Nnx2QZBB0LVfdh2Wc6Wnf_ZLwjvY
       - ABS_URL=https://audiobookshelf.heisui.house
       - ABS_API_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJrZXlJZCI6Ijc0Nzc4OWYyLWE0NzgtNGQ0My1iYmMyLWU4NmUzZDNhMjE3OSIsIm5hbWUiOiJTY3JpcHRvcml1bSIsInR5cGUiOiJhcGkiLCJpYXQiOjE3NzM1MTI0ODd9.oq6-mOka_Ymsf8Dx8sFAxvRLuta4bplPfQMcRASw_Bw
+      - INGEST_DEFAULT_LIBRARY=Books
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:6060/health"]
