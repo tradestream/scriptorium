@@ -14,7 +14,7 @@
   // Pick the first readable file, preferring formats we can render
   const FORMAT_PRIORITY = ['epub', 'cbz', 'pdf', 'cbr'];
   let file = $derived(
-    book?.files?.slice().sort((a, b) => {
+    book?.files?.slice().sort((a: { format: string }, b: { format: string }) => {
       const ai = FORMAT_PRIORITY.indexOf(a.format.toLowerCase());
       const bi = FORMAT_PRIORITY.indexOf(b.format.toLowerCase());
       return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);

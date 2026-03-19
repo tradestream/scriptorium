@@ -1022,7 +1022,7 @@ export async function getComicPageCount(bookId: number | string, fileId: number 
 
 export async function saveReadProgress(
   bookId: number | string,
-  data: { current_page?: number; total_pages?: number; percentage: number; status?: string }
+  data: { current_page?: number; total_pages?: number; percentage: number; status?: string; file_id?: number; format?: string }
 ): Promise<ReadProgress> {
   return fetchAPI(`/books/${bookId}/progress`, { method: 'PUT', body: JSON.stringify(data) });
 }
