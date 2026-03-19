@@ -1004,6 +1004,184 @@ async def run_scheduler_now(
     return {"status": "triggered"}
 
 
+# ── Split Edition (fix multi-file editions) ────────────────────────────────────
+
+@router.post("/editions/{edition_id}/split")
+async def split_edition(
+    edition_id: int,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(_require_admin),
+):
+    """Split an edition with multiple files into separate works/editions.
+
+    Each file gets its own Work + Edition based on the title extracted from
+    the filename. The original edition keeps the first file; new editions
+    are created for the rest. Authors and library are inherited.
+    """
+    import re
+    import uuid as _uuid
+    from datetime import datetime
+    from sqlalchemy import select
+    from sqlalchemy.orm import joinedload
+    from app.models.edition import Edition, EditionFile
+    from app.models.work import Work
+
+    result = await db.execute(
+        select(Edition)
+        .where(Edition.id == edition_id)
+        .options(
+            joinedload(Edition.files),
+            joinedload(Edition.work).options(joinedload(Work.authors)),
+        )
+    )
+    edition = result.unique().scalar_one_or_none()
+    if not edition:
+        raise HTTPException(status_code=404, detail="Edition not found")
+
+    files = list(edition.files)
+    if len(files) <= 1:
+        return {"status": "nothing_to_split", "files": len(files)}
+
+    work = edition.work
+    authors = list(work.authors) if work.authors else []
+
+    def guess_title(filename: str) -> str:
+        stem = filename.rsplit(".", 1)[0] if "." in filename else filename
+        # Remove common noise: hash, "Anna's Archive", year in parens, etc.
+        stem = re.sub(r"\s*--\s*.*$", "", stem)  # strip everything after " -- "
+        stem = re.sub(r"\s*-\s*[A-Z][a-z]+\s+[A-Z].*$", "", stem)  # " - Author Name"
+        stem = re.sub(r"\s*\([^)]*\)\s*$", "", stem)  # trailing (year) or (edition)
+        stem = re.sub(r"[_]+", " ", stem)
+        return stem.strip() or filename
+
+    # Keep the first file on the original edition; split the rest
+    keep_file = files[0]
+    split_files = files[1:]
+
+    created = []
+    for ef in split_files:
+        title = guess_title(ef.filename)
+
+        # Create new Work
+        new_uuid = str(_uuid.uuid4())
+        new_work = Work(
+            uuid=new_uuid,
+            title=title,
+            language=work.language,
+            authors=authors,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(new_work)
+        await db.flush()
+
+        # Create new Edition
+        new_edition = Edition(
+            uuid=new_uuid,
+            work_id=new_work.id,
+            library_id=edition.library_id,
+            format=ef.format,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(new_edition)
+        await db.flush()
+
+        # Move the file to the new edition
+        ef.edition_id = new_edition.id
+        created.append({"edition_id": new_edition.id, "title": title, "file": ef.filename})
+
+    await db.commit()
+
+    return {
+        "status": "split",
+        "original_edition": edition_id,
+        "kept_file": keep_file.filename,
+        "created": created,
+        "total_split": len(created),
+    }
+
+
+@router.post("/editions/split-all")
+async def split_all_bloated_editions(
+    min_files: int = Query(3, ge=2, le=100),
+    background_tasks: BackgroundTasks = None,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(_require_admin),
+):
+    """Find all editions with more than min_files and split them.
+
+    Returns the list of edition IDs that will be processed.
+    """
+    from sqlalchemy import select, func
+    from app.models.edition import Edition, EditionFile
+
+    stmt = (
+        select(Edition.id, func.count(EditionFile.id).label("cnt"))
+        .join(EditionFile, EditionFile.edition_id == Edition.id)
+        .group_by(Edition.id)
+        .having(func.count(EditionFile.id) >= min_files)
+        .order_by(func.count(EditionFile.id).desc())
+    )
+    result = await db.execute(stmt)
+    edition_ids = [(r[0], r[1]) for r in result.all()]
+
+    async def _run_splits():
+        from app.database import _session_factory
+        for eid, cnt in edition_ids:
+            try:
+                async with _session_factory() as sdb:
+                    # Re-use the split logic inline
+                    import re
+                    import uuid as _uuid2
+                    from datetime import datetime as _dt
+                    from sqlalchemy.orm import joinedload as _jl
+                    from app.models.edition import Edition as _Ed, EditionFile as _EF
+                    from app.models.work import Work as _Wk
+
+                    res = await sdb.execute(
+                        select(_Ed).where(_Ed.id == eid)
+                        .options(_jl(_Ed.files), _jl(_Ed.work).options(_jl(_Wk.authors)))
+                    )
+                    ed = res.unique().scalar_one_or_none()
+                    if not ed or len(ed.files) <= 1:
+                        continue
+
+                    wk = ed.work
+                    authors = list(wk.authors) if wk.authors else []
+                    files = list(ed.files)
+
+                    for ef in files[1:]:
+                        stem = ef.filename.rsplit(".", 1)[0] if "." in ef.filename else ef.filename
+                        title = re.sub(r"\s*--\s*.*$", "", stem)
+                        title = re.sub(r"\s*-\s*[A-Z][a-z]+\s+[A-Z].*$", "", title)
+                        title = re.sub(r"\s*\([^)]*\)\s*$", "", title)
+                        title = title.strip() or ef.filename
+
+                        new_uuid = str(_uuid2.uuid4())
+                        nw = _Wk(uuid=new_uuid, title=title, language=wk.language,
+                                 authors=authors, created_at=_dt.utcnow(), updated_at=_dt.utcnow())
+                        sdb.add(nw)
+                        await sdb.flush()
+                        ne = _Ed(uuid=new_uuid, work_id=nw.id, library_id=ed.library_id,
+                                 format=ef.format, created_at=_dt.utcnow(), updated_at=_dt.utcnow())
+                        sdb.add(ne)
+                        await sdb.flush()
+                        ef.edition_id = ne.id
+
+                    await sdb.commit()
+                    logger.info("Split edition %d: %d files → %d new editions", eid, cnt, cnt - 1)
+            except Exception as exc:
+                logger.warning("Failed to split edition %d: %s", eid, exc)
+
+    background_tasks.add_task(_run_splits)
+    return {
+        "status": "queued",
+        "editions_to_split": len(edition_ids),
+        "details": [{"edition_id": eid, "file_count": cnt} for eid, cnt in edition_ids[:20]],
+    }
+
+
 @router.get("/backup")
 async def download_backup(_admin: User = Depends(_require_admin)):
     """Download a tar.gz archive containing the database and config directory.
