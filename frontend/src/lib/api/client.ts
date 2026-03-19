@@ -1695,6 +1695,10 @@ export async function deleteDevice(id: number): Promise<void> {
 
 // ── Cover from URL ────────────────────────────────────────────────────────────
 
+export async function searchCovers(bookId: number | string): Promise<Array<{ provider: string; url: string }>> {
+  return fetchAPI(`/books/${bookId}/cover/search`);
+}
+
 export async function setCoverFromUrl(bookId: number, url: string): Promise<import('$lib/types/index').Book> {
   return fetchAPI(`/books/${bookId}/cover/from-url`, { method: 'POST', body: JSON.stringify({ url }) });
 }

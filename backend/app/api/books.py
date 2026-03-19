@@ -627,6 +627,49 @@ async def upload_book_cover(
     return BookRead.model_validate(edition)
 
 
+@router.get("/{book_id}/cover/search")
+async def search_covers(
+    book_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Search all metadata providers for cover images for this book.
+
+    Returns a list of {provider, url, thumbnail_url} objects for the UI
+    to display as a cover picker grid.
+    """
+    if not current_user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+
+    stmt = select(Edition).where(Edition.id == book_id).options(*_edition_options())
+    result = await db.execute(stmt)
+    edition = result.unique().scalar_one_or_none()
+    if not edition:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+
+    work = edition.work
+    from app.services.metadata_enrichment import enrichment_service
+    author_names = [a.name for a in work.authors]
+    file_ext = f".{edition.files[0].format}" if edition.files else None
+
+    results = await enrichment_service.search_all_providers(
+        work.title, author_names, edition.isbn, file_extension=file_ext
+    )
+
+    covers = []
+    seen_urls = set()
+    for r in results:
+        url = r.get("cover_url")
+        if url and url not in seen_urls:
+            seen_urls.add(url)
+            covers.append({
+                "provider": r.get("_provider", "unknown"),
+                "url": url,
+            })
+
+    return covers
+
+
 class CoverUrlRequest(BaseModel):
     url: str
 

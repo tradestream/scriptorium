@@ -114,6 +114,32 @@
   let coverUrl = $derived(book ? bookCoverUrl(book) : null);
   let showCoverUrlInput = $state(false);
   let coverUrlInput = $state('');
+  let showCoverPicker = $state(false);
+  let coverOptions = $state<Array<{ provider: string; url: string }>>([]);
+  let loadingCovers = $state(false);
+  let applyingCover = $state('');
+
+  async function loadCoverOptions() {
+    if (!book) return;
+    showCoverPicker = true;
+    loadingCovers = true;
+    try {
+      const { searchCovers } = await import('$lib/api/client');
+      coverOptions = await searchCovers(book.id);
+    } catch { coverOptions = []; }
+    finally { loadingCovers = false; }
+  }
+
+  async function applyCover(url: string, provider: string) {
+    if (!book) return;
+    applyingCover = provider;
+    try {
+      const updated = await setCoverFromUrl(book.id, url);
+      book = updated;
+      showCoverPicker = false;
+    } catch { /* non-critical */ }
+    finally { applyingCover = ''; }
+  }
   let settingCoverUrl = $state(false);
 
   async function applyUrlCover() {
@@ -442,9 +468,14 @@
               </div>
             {/if}
           </div>
-          <button onclick={() => showCoverUrlInput = !showCoverUrlInput} class="mt-1 w-full text-center text-[11px] text-muted-foreground/50 hover:text-muted-foreground transition-colors">
-            set cover from URL
-          </button>
+          <div class="mt-1 flex justify-center gap-3">
+            <button onclick={loadCoverOptions} class="text-[11px] text-muted-foreground/50 hover:text-muted-foreground transition-colors">
+              {loadingCovers ? 'searching…' : 'browse covers'}
+            </button>
+            <button onclick={() => showCoverUrlInput = !showCoverUrlInput} class="text-[11px] text-muted-foreground/50 hover:text-muted-foreground transition-colors">
+              paste URL
+            </button>
+          </div>
           {#if showCoverUrlInput}
             <div class="mt-2 flex gap-1">
               <input type="url" placeholder="Image URL…" bind:value={coverUrlInput}
@@ -452,6 +483,31 @@
                 onkeydown={(e) => { if (e.key === 'Enter') applyUrlCover(); if (e.key === 'Escape') showCoverUrlInput = false; }} />
               <Button size="sm" variant="outline" class="h-7 px-2 text-xs" onclick={applyUrlCover} disabled={settingCoverUrl || !coverUrlInput.trim()}>Set</Button>
               <Button size="sm" variant="ghost" class="h-7 px-2 text-xs" onclick={() => showCoverUrlInput = false}>✕</Button>
+            </div>
+          {/if}
+          {#if showCoverPicker}
+            <div class="mt-3 space-y-2">
+              {#if loadingCovers}
+                <p class="text-xs text-muted-foreground text-center">Searching providers…</p>
+              {:else if coverOptions.length === 0}
+                <p class="text-xs text-muted-foreground text-center">No covers found</p>
+              {:else}
+                <div class="grid grid-cols-2 gap-2">
+                  {#each coverOptions as opt}
+                    <button
+                      class="group relative overflow-hidden rounded-md border hover:border-primary transition-colors {applyingCover === opt.provider ? 'opacity-50' : ''}"
+                      onclick={() => applyCover(opt.url, opt.provider)}
+                      disabled={!!applyingCover}
+                    >
+                      <img src={opt.url} alt={opt.provider} class="aspect-2/3 w-full object-cover" />
+                      <span class="absolute bottom-0 left-0 right-0 bg-black/60 px-1.5 py-0.5 text-[10px] text-white capitalize">
+                        {applyingCover === opt.provider ? 'applying…' : opt.provider}
+                      </span>
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+              <button onclick={() => showCoverPicker = false} class="w-full text-center text-[10px] text-muted-foreground/40 hover:text-muted-foreground">close</button>
             </div>
           {/if}
           <div class="mt-4 flex gap-2">
