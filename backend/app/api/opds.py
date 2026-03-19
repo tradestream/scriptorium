@@ -41,6 +41,7 @@ PAGE_SIZE = 30
 ATOM_NS = "http://www.w3.org/2005/Atom"
 OPDS_NS = "http://opds-spec.org/2010/catalog"
 DC_NS = "http://purl.org/dc/terms/"
+PSE_NS = "http://vaemendis.net/opds-pse/ns"
 
 MIME_NAV = "application/atom+xml;profile=opds-catalog;kind=navigation"
 MIME_ACQ = "application/atom+xml;profile=opds-catalog;kind=acquisition"
@@ -86,6 +87,7 @@ async def _basic_auth(
 def _feed(feed_id: str, title: str, updated: str, feed_type: str) -> Element:
     feed = Element("feed", {
         "xmlns": ATOM_NS,
+        "xmlns:pse": PSE_NS,
         "xmlns:opds": OPDS_NS,
         "xmlns:dc": DC_NS,
     })
@@ -154,8 +156,23 @@ def _book_entry(feed: Element, book: Book, base_url: str) -> None:
     for f in (book.files or []):
         fmt = (f.format or "").lower()
         mime = MIME_EPUB if fmt == "epub" else (MIME_PDF if fmt == "pdf" else "application/octet-stream")
+        if fmt == "cbz":
+            mime = "application/vnd.comicbook+zip"
+        elif fmt == "cbr":
+            mime = "application/vnd.comicbook-rar"
         _link(entry, f"{base_url}/api/v1/books/{book.id}/download/{f.id}",
               f"{OPDS_NS}/acquisition", mime, title=fmt.upper())
+
+        # OPDS-PSE: page streaming for comics
+        if fmt in ("cbz", "cbr"):
+            pse_link = _link(
+                entry,
+                f"{base_url}/api/v1/books/{book.id}/files/{f.id}/pages/{{pageNumber}}",
+                "http://vaemendis.net/opds-pse/stream",
+                "image/jpeg",
+                title="Page Stream",
+            )
+            pse_link.set("pse:count", str(book.page_count_comic or 0) if hasattr(book, 'page_count_comic') else "0")
 
 
 def _xml_response(feed: Element) -> Response:
@@ -217,6 +234,7 @@ async def opds_root(request: Request, _user: User = Depends(_basic_auth)):
         ("urn:scriptorium:by-author",   "By Author",   "Browse books by author",           "/opds/authors", MIME_NAV),
         ("urn:scriptorium:by-series",   "By Series",   "Browse books by series",           "/opds/series",  MIME_NAV),
         ("urn:scriptorium:by-tag",      "By Tag",      "Browse books by tag or genre",     "/opds/tags",    MIME_NAV),
+        ("urn:scriptorium:by-arc",     "Story Arcs",  "Browse comics by story arc",       "/opds/arcs",    MIME_NAV),
         ("urn:scriptorium:search",      "Search",      "Search for books by title/author", "/opds/search?q=", MIME_ACQ),
     ]
     for eid, title, summary, href, mime in entries:
@@ -405,6 +423,59 @@ async def opds_tag_books(
     )
     feed = _feed(f"urn:scriptorium:tag:{tag_id}", tag.name, _now(), MIME_ACQ)
     _paginate_links(feed, f"/opds/tags/{tag_id}", page, total)
+    for book in books:
+        _book_entry(feed, book, base)
+    return _xml_response(feed)
+
+
+@router.get("/arcs")
+async def opds_story_arcs(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(_basic_auth),
+):
+    """OPDS navigation feed listing story arcs."""
+    from app.models.comic import StoryArc, StoryArcEntry
+    arcs = (await db.execute(
+        select(StoryArc).order_by(StoryArc.name)
+    )).scalars().all()
+
+    feed = _feed("urn:scriptorium:arcs", "Story Arcs", _now(), MIME_NAV)
+    for arc in arcs:
+        e = SubElement(feed, "entry")
+        _sub(e, "title", arc.name)
+        _sub(e, "id", f"urn:scriptorium:arc:{arc.id}")
+        _sub(e, "updated", _now())
+        if arc.description:
+            _sub(e, "summary", arc.description)
+        _link(e, f"/opds/arcs/{arc.id}", "subsection", MIME_ACQ)
+    return _xml_response(feed)
+
+
+@router.get("/arcs/{arc_id}")
+async def opds_story_arc_books(
+    arc_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(_basic_auth),
+):
+    """OPDS acquisition feed for books in a story arc (reading order)."""
+    from app.models.comic import StoryArc, StoryArcEntry
+    arc = (await db.execute(select(StoryArc).where(StoryArc.id == arc_id))).scalar_one_or_none()
+    if not arc:
+        raise HTTPException(status_code=404, detail="Story arc not found")
+
+    base = _base_url(request)
+    stmt = (
+        select(Book)
+        .join(StoryArcEntry, StoryArcEntry.work_id == Book.work_id)
+        .where(StoryArcEntry.story_arc_id == arc_id)
+        .options(selectinload(Book.work).options(selectinload(Work.authors)), selectinload(Book.files))
+        .order_by(StoryArcEntry.sequence_number.nulls_last(), Book.title)
+    )
+    books = (await db.execute(stmt)).unique().scalars().all()
+
+    feed = _feed(f"urn:scriptorium:arc:{arc_id}", arc.name, _now(), MIME_ACQ)
     for book in books:
         _book_entry(feed, book, base)
     return _xml_response(feed)

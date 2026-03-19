@@ -1,8 +1,11 @@
-"""Browse endpoints for authors, tags, and series."""
+"""Browse endpoints for authors, tags, series, and dynamic covers."""
 
 from typing import Optional
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -421,3 +424,56 @@ async def update_series_entries(
         )
 
     await db.commit()
+
+
+# ── Dynamic covers (first-in-group pattern) ────────────────────────────────
+
+async def _group_cover(db: AsyncSession, stmt):
+    """Return the cover of the first edition with a cover in a group query."""
+    from app.config import get_settings
+    result = await db.execute(stmt)
+    edition = result.scalar_one_or_none()
+    if not edition or not edition.cover_hash:
+        raise HTTPException(status_code=404, detail="No cover available")
+
+    settings = get_settings()
+    cover_path = Path(settings.COVERS_PATH) / f"{edition.uuid}.{edition.cover_format}"
+    if not cover_path.exists():
+        raise HTTPException(status_code=404, detail="Cover file not found")
+
+    return FileResponse(str(cover_path), media_type=f"image/{edition.cover_format}")
+
+
+@router.get("/series/{series_id}/cover", tags=["browse"])
+async def series_cover(
+    series_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Dynamic cover for a series — returns the first book's cover."""
+    from app.models import Series
+    from app.models.work import work_series
+    stmt = (
+        select(Edition)
+        .join(work_series, work_series.c.work_id == Edition.work_id)
+        .where(work_series.c.series_id == series_id, Edition.cover_hash.isnot(None))
+        .order_by(Edition.created_at)
+        .limit(1)
+    )
+    return await _group_cover(db, stmt)
+
+
+@router.get("/authors/{author_id}/cover", tags=["browse"])
+async def author_cover(
+    author_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Dynamic cover for an author — returns the first book's cover."""
+    from app.models.work import work_authors
+    stmt = (
+        select(Edition)
+        .join(work_authors, work_authors.c.work_id == Edition.work_id)
+        .where(work_authors.c.author_id == author_id, Edition.cover_hash.isnot(None))
+        .order_by(Edition.created_at)
+        .limit(1)
+    )
+    return await _group_cover(db, stmt)
