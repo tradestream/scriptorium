@@ -61,6 +61,9 @@ class Edition(Base):
     location: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # legacy free-text
     location_id: Mapped[Optional[int]] = mapped_column(ForeignKey("locations.id"), nullable=True, index=True)
 
+    # True after bulk identifier extraction has scanned this edition's files
+    identifiers_scanned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
 

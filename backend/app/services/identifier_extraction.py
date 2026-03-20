@@ -357,7 +357,7 @@ async def extract_identifiers_for_edition(edition_id: int) -> dict:
             edition.work.doi = ids["doi"]
             changed = True
 
-        if changed:
-            await db.commit()
+        edition.identifiers_scanned = True
+        await db.commit()
 
         return ids

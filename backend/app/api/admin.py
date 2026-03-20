@@ -556,10 +556,12 @@ async def start_bulk_identifier_extraction(
     from app.models.work import Work
 
     # Find editions missing ISBN or whose work is missing DOI, that have files
+    # Skip editions already scanned in a previous run
     stmt = (
         select(Edition)
         .join(Edition.work)
         .where(Edition.files.any())
+        .where(Edition.identifiers_scanned == False)
         .where(or_(Edition.isbn.is_(None), Work.doi.is_(None)))
     )
     if library_id:
