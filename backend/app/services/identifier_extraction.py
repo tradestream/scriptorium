@@ -343,7 +343,15 @@ async def extract_identifiers_for_edition(edition_id: int) -> dict:
             return {"isbn_13": None, "isbn_10": None, "doi": None}
 
     # Phase 2: CPU-heavy file parsing in a thread (no DB access)
-    ids = await asyncio.get_event_loop().run_in_executor(None, extract_identifiers, fpath)
+    # Timeout after 15s to prevent bad PDFs from blocking the server
+    try:
+        ids = await asyncio.wait_for(
+            asyncio.get_event_loop().run_in_executor(None, extract_identifiers, fpath),
+            timeout=15.0,
+        )
+    except asyncio.TimeoutError:
+        ids = {"isbn_13": None, "isbn_10": None, "doi": None,
+               "isbn_source": None, "doi_source": None}
 
     # Phase 3: write results back to DB
     async with factory() as db:
