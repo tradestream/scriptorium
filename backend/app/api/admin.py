@@ -289,6 +289,17 @@ async def start_bulk_enrich(
     return {"job_id": job_id, "total": len(editions)}
 
 
+@router.get("/enrich/bulk/active")
+async def get_active_enrich_job(
+    _admin: User = Depends(_require_admin),
+):
+    """Return the currently running/queued bulk enrichment job, if any."""
+    for job_id, job in _bulk_jobs.items():
+        if job["status"] in ("running", "queued"):
+            return {"job_id": job_id, **job}
+    return None
+
+
 @router.get("/enrich/bulk/{job_id}")
 async def get_bulk_enrich_job(
     job_id: str,
@@ -446,6 +457,17 @@ async def start_bulk_markdown(
     return {"job_id": job_id, "total": len(edition_ids)}
 
 
+@router.get("/markdown/bulk/active")
+async def get_active_markdown_job(
+    _admin: User = Depends(_require_admin),
+):
+    """Return the currently running/queued markdown generation job, if any."""
+    for job_id, job in _markdown_jobs.items():
+        if job["status"] in ("running", "queued"):
+            return {"job_id": job_id, **job}
+    return None
+
+
 @router.get("/markdown/bulk/{job_id}")
 async def get_bulk_markdown_job(
     job_id: str,
@@ -585,6 +607,17 @@ async def start_bulk_identifier_extraction(
 
     background_tasks.add_task(_run_bulk_identifiers, job_id, edition_ids)
     return {"job_id": job_id, "total": len(edition_ids)}
+
+
+@router.get("/identifiers/bulk/active")
+async def get_active_identifier_job(
+    _admin: User = Depends(_require_admin),
+):
+    """Return the currently running/queued identifier extraction job, if any."""
+    for job_id, job in _identifier_jobs.items():
+        if job["status"] in ("running", "queued"):
+            return {"job_id": job_id, **job}
+    return None
 
 
 @router.get("/identifiers/bulk/{job_id}")

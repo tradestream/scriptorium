@@ -1335,6 +1335,10 @@ export async function getBulkEnrichJob(jobId: string): Promise<BulkEnrichJob> {
   return fetchAPI(`/admin/enrich/bulk/${jobId}`);
 }
 
+export async function getActiveBulkEnrichJob(): Promise<BulkEnrichJob | null> {
+  return fetchAPI('/admin/enrich/bulk/active');
+}
+
 export async function cancelBulkEnrichJob(jobId: string): Promise<void> {
   await fetchAPI(`/admin/enrich/bulk/${jobId}`, { method: 'DELETE' });
 }
@@ -1348,6 +1352,10 @@ export async function startBulkMarkdown(libraryId?: number): Promise<{ job_id: s
 
 export async function getBulkMarkdownJob(jobId: string): Promise<{ job_id: string; status: string; total: number; done: number; failed: number; skipped: number; current: string }> {
   return fetchAPI(`/admin/markdown/bulk/${jobId}`);
+}
+
+export async function getActiveBulkMarkdownJob(): Promise<{ job_id: string; status: string; total: number; done: number; failed: number; skipped: number; current: string } | null> {
+  return fetchAPI('/admin/markdown/bulk/active');
 }
 
 export async function updateLibraryNaming(libraryId: number, namingPattern: string | null): Promise<Library> {
@@ -1366,6 +1374,10 @@ export async function startBulkIdentifiers(libraryId?: number): Promise<{ job_id
 
 export async function getBulkIdentifiersJob(jobId: string): Promise<{ job_id: string; status: string; total: number; done: number; found_isbn: number; found_doi: number; failed: number }> {
   return fetchAPI(`/admin/identifiers/bulk/${jobId}`);
+}
+
+export async function getActiveBulkIdentifiersJob(): Promise<{ job_id: string; status: string; total: number; done: number; found_isbn: number; found_doi: number; failed: number } | null> {
+  return fetchAPI('/admin/identifiers/bulk/active');
 }
 
 export async function extractBookIdentifiers(bookId: number | string): Promise<{ isbn_13: string | null; isbn_10: string | null; doi: string | null; isbn_source: string | null; doi_source: string | null }> {

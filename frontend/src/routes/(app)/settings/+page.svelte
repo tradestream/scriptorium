@@ -598,6 +598,38 @@
     if (data.user?.is_admin) loadAbsStatus();
   });
 
+  // ── Reconnect to active background jobs on page load ──────────────────────
+  $effect(() => {
+    if (!data.user?.is_admin) return;
+    // Check for active bulk enrichment job
+    api.getActiveBulkEnrichJob().then((job) => {
+      if (job && (job.status === 'running' || job.status === 'queued')) {
+        bulkJob = job;
+        bulkMsg = `Reconnected — ${job.done}/${job.total} processed`;
+        bulkMsgOk = true;
+        _bulkPollTimer = setInterval(() => _pollBulkJob(job.job_id), 2000);
+      }
+    }).catch(() => {});
+    // Check for active identifier extraction job
+    api.getActiveBulkIdentifiersJob().then((job) => {
+      if (job && (job.status === 'running' || job.status === 'queued')) {
+        idJob = job;
+        idMsg = `Reconnected — ${job.done}/${job.total} scanned`;
+        idMsgOk = true;
+        _idPollTimer = setInterval(() => _pollIdJob(job.job_id), 2000);
+      }
+    }).catch(() => {});
+    // Check for active markdown generation job
+    api.getActiveBulkMarkdownJob().then((job) => {
+      if (job && (job.status === 'running' || job.status === 'queued')) {
+        mdJob = job;
+        mdMsg = `Reconnected — ${job.done}/${job.total} processed`;
+        mdMsgOk = true;
+        _mdPollTimer = setInterval(() => _pollMdJob(job.job_id), 2000);
+      }
+    }).catch(() => {});
+  });
+
   async function loadAbsLibraries() {
     absLibrariesLoaded = false;
     try {
