@@ -310,6 +310,7 @@ async def extract_identifiers_for_edition(edition_id: int) -> dict:
     Updates the edition's isbn/isbn_10 and work's doi if found and currently empty.
     Returns the extraction result dict.
     """
+    import asyncio
     from sqlalchemy import select
     from sqlalchemy.orm import joinedload
     from app.database import get_session_factory
@@ -317,6 +318,8 @@ async def extract_identifiers_for_edition(edition_id: int) -> dict:
     from app.models.work import Work
 
     factory = get_session_factory()
+
+    # Phase 1: resolve file path from DB
     async with factory() as db:
         result = await db.execute(
             select(Edition)
@@ -330,34 +333,39 @@ async def extract_identifiers_for_edition(edition_id: int) -> dict:
         if not edition or not edition.files:
             return {"isbn_13": None, "isbn_10": None, "doi": None}
 
-        # Pick best file (epub preferred over pdf)
         priority = {"epub": 0, "pdf": 1}
         files = sorted(edition.files, key=lambda f: priority.get(f.format.lower(), 99))
-        best = files[0]
-        fpath = Path(best.file_path)
+        fpath = Path(files[0].file_path)
 
         if not fpath.exists():
+            edition.identifiers_scanned = True
+            await db.commit()
             return {"isbn_13": None, "isbn_10": None, "doi": None}
 
-        import asyncio
-        ids = await asyncio.get_event_loop().run_in_executor(None, extract_identifiers, fpath)
-        changed = False
+    # Phase 2: CPU-heavy file parsing in a thread (no DB access)
+    ids = await asyncio.get_event_loop().run_in_executor(None, extract_identifiers, fpath)
 
-        # Update ISBN if edition has none
+    # Phase 3: write results back to DB
+    async with factory() as db:
+        result = await db.execute(
+            select(Edition)
+            .where(Edition.id == edition_id)
+            .options(joinedload(Edition.work))
+        )
+        edition = result.unique().scalar_one_or_none()
+        if not edition:
+            return ids
+
         if ids["isbn_13"] and not edition.isbn:
             edition.isbn = ids["isbn_13"]
             edition.isbn_10 = ids["isbn_10"]
-            changed = True
-        elif ids["isbn_10"] and not edition.isbn_10:
+        elif ids.get("isbn_10") and not edition.isbn_10:
             edition.isbn_10 = ids["isbn_10"]
-            changed = True
 
-        # Update DOI if work has none
         if ids["doi"] and edition.work and not edition.work.doi:
             edition.work.doi = ids["doi"]
-            changed = True
 
         edition.identifiers_scanned = True
         await db.commit()
 
-        return ids
+    return ids
