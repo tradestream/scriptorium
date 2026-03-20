@@ -339,7 +339,8 @@ async def extract_identifiers_for_edition(edition_id: int) -> dict:
         if not fpath.exists():
             return {"isbn_13": None, "isbn_10": None, "doi": None}
 
-        ids = extract_identifiers(fpath)
+        import asyncio
+        ids = await asyncio.get_event_loop().run_in_executor(None, extract_identifiers, fpath)
         changed = False
 
         # Update ISBN if edition has none

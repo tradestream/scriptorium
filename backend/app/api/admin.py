@@ -630,7 +630,8 @@ async def _run_bulk_identifiers(job_id: str, edition_ids: list[int]) -> None:
             except Exception:
                 pass
 
-        await asyncio.sleep(0.05)
+        # Throttle to avoid starving the API event loop during heavy PDF/EPUB parsing
+        await asyncio.sleep(0.5)
 
     job["status"] = "done" if job.get("status") != "cancelled" else "cancelled"
     job["current"] = ""
