@@ -108,7 +108,8 @@ async function fetchAPI<T>(endpoint: string, options: RequestInit = {}): Promise
     let message: string;
     try {
       const json = JSON.parse(text);
-      message = json.detail || json.message || JSON.stringify(json);
+      const detail = json.detail || json.message || '';
+      message = typeof detail === 'string' ? detail : JSON.stringify(detail);
     } catch {
       // Non-JSON response (e.g. Cloudflare error page) — use a friendly message
       if (response.status === 502) {
@@ -121,6 +122,8 @@ async function fetchAPI<T>(endpoint: string, options: RequestInit = {}): Promise
         message = `Unexpected error (${response.status}). Please try again.`;
       }
     }
+    // Keep error messages short for UI display
+    if (message.length > 200) message = message.slice(0, 200) + '…';
     throw new Error(message);
   }
 
