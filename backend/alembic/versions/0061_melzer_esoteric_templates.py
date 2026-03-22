@@ -364,8 +364,8 @@ def upgrade() -> None:
         conn.execute(
             text(
                 "INSERT INTO analysis_templates "
-                "(name, description, system_prompt, user_prompt_template, is_default, is_builtin) "
-                "VALUES (:name, :desc, :sys, :user, 0, 1)"
+                "(name, description, system_prompt, user_prompt_template, is_default, is_builtin, created_at, updated_at) "
+                "VALUES (:name, :desc, :sys, :user, 0, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
             ),
             {
                 "name": tmpl["name"],
