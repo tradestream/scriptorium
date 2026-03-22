@@ -159,12 +159,26 @@ async def _consolidate_editions(db: AsyncSession, primary_id: int, source_ids: l
 
         # Move work-level data if different works
         if src_work_id and primary_work_id and src_work_id != primary_work_id:
-            for tbl in ("shelf_books", "collection_books", "read_sessions"):
+            _WORK_TABLES = (
+                "shelf_books", "collection_books", "read_sessions", "story_arc_entries",
+                "book_analyses", "book_prompt_configs", "computational_analyses",
+                "external_identifiers",
+            )
+            for tbl in _WORK_TABLES:
                 await db.execute(
                     text(f"UPDATE OR IGNORE {tbl} SET work_id = :primary WHERE work_id = :src"),
                     {"primary": primary_work_id, "src": src_work_id},
                 )
                 await db.execute(text(f"DELETE FROM {tbl} WHERE work_id = :src"), {"src": src_work_id})
+
+        # Delete file_progress rows that reference source edition_files (FK on edition_files.id)
+        await db.execute(
+            text(
+                "DELETE FROM file_progress WHERE edition_file_id IN "
+                "(SELECT id FROM edition_files WHERE edition_id = :src)"
+            ),
+            {"src": src_id},
+        )
 
         # Move files
         await db.execute(
@@ -173,9 +187,14 @@ async def _consolidate_editions(db: AsyncSession, primary_id: int, source_ids: l
         )
         await db.execute(text("DELETE FROM edition_files WHERE edition_id = :src"), {"src": src_id})
 
-        # Move edition-level data
-        for tbl in ("annotations", "marginalia", "user_editions", "edition_contributors",
-                     "kobo_book_states", "kobo_bookmarks", "kobo_synced_books"):
+        # All edition-level tables to migrate
+        _EDITION_TABLES = (
+            "annotations", "marginalia", "user_editions", "edition_contributors",
+            "kobo_book_states", "kobo_bookmarks", "kobo_synced_books",
+            "kobo_content_map", "loans",
+        )
+
+        for tbl in _EDITION_TABLES:
             await db.execute(
                 text(f"UPDATE OR IGNORE {tbl} SET edition_id = :primary WHERE edition_id = :src"),
                 {"primary": primary_id, "src": src_id},
@@ -190,9 +209,8 @@ async def _consolidate_editions(db: AsyncSession, primary_id: int, source_ids: l
             {"primary": primary_id, "src": src_id},
         )
 
-        # Clean up any remaining references
-        for tbl in ("annotations", "marginalia", "read_progress", "user_editions",
-                     "edition_contributors", "kobo_book_states", "kobo_bookmarks", "kobo_synced_books"):
+        # Clean up any remaining references that couldn't be moved
+        for tbl in (*_EDITION_TABLES, "read_progress"):
             await db.execute(text(f"DELETE FROM {tbl} WHERE edition_id = :src"), {"src": src_id})
 
         # Delete source edition
@@ -439,20 +457,25 @@ async def _run_bulk_consolidation(
                     continue
 
                 await _consolidate_editions(db, primary_id, source_ids)
-
-                # Re-index FTS for primary
-                result = await db.execute(
-                    select(Book).options(*_book_options()).where(Book.id == primary_id)
-                )
-                primary = result.unique().scalar_one_or_none()
-                if primary:
-                    await search_service.index_book(db, primary, [a.name for a in primary.authors])
-
                 await db.commit()
-                consolidated += 1
+
+            # Re-index FTS in a separate session (non-fatal if it fails)
+            try:
+                async with _session_factory() as db:
+                    result = await db.execute(
+                        select(Book).options(*_book_options()).where(Book.id == primary_id)
+                    )
+                    primary = result.unique().scalar_one_or_none()
+                    if primary:
+                        await search_service.index_book(db, primary, [a.name for a in primary.authors])
+                        await db.commit()
+            except Exception as fts_exc:
+                logger.debug("FTS re-index failed for %d: %s", primary_id, fts_exc)
+
+            consolidated += 1
 
         except Exception as exc:
-            logger.warning("Bulk consolidation failed for primary %d: %s", primary_id, exc)
+            logger.warning("Bulk consolidation failed for primary %d: %s", primary_id, exc, exc_info=True)
             failed += 1
 
         done += 1
