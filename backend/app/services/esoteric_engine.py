@@ -1174,6 +1174,233 @@ class MelzerClusterDetector:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Module 8: Contradiction Network
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ContradictionNetwork:
+    """Build a graph of all contradictions with clustering and typing."""
+
+    def build_network(self, findings: list[Finding]) -> dict:
+        """Analyze contradiction findings to build a network."""
+        contradictions = [f for f in findings if "contradiction" in f.technique]
+        if not contradictions:
+            return {"nodes": [], "edges": [], "clusters": []}
+
+        # Group by topic (extract from evidence)
+        topic_contradictions = defaultdict(list)
+        for c in contradictions:
+            # Use technique + first 30 chars as topic key
+            topic = c.evidence[:30] if c.evidence else "unknown"
+            topic_contradictions[topic].append(c)
+
+        # Build nodes and edges
+        nodes = []
+        edges = []
+        for i, c in enumerate(contradictions[:30]):
+            nodes.append({
+                "id": i,
+                "section": c.section,
+                "score": round(c.score, 2),
+                "deliberateness": round(c.deliberateness, 2),
+            })
+
+        # Connect contradictions that share sections or topics
+        for i in range(len(nodes)):
+            for j in range(i + 1, len(nodes)):
+                if contradictions[i].section == contradictions[j].section:
+                    edges.append({"source": i, "target": j, "type": "same_section"})
+
+        # Identify clusters (topics with 3+ contradictions)
+        clusters = [
+            {
+                "topic": topic[:50],
+                "count": len(cs),
+                "avg_deliberateness": round(sum(c.deliberateness for c in cs) / len(cs), 2),
+                "significance": "HIGH" if len(cs) >= 4 else "MEDIUM" if len(cs) >= 2 else "LOW",
+            }
+            for topic, cs in topic_contradictions.items()
+            if len(cs) >= 2
+        ]
+        clusters.sort(key=lambda c: c["count"], reverse=True)
+
+        return {
+            "total_contradictions": len(contradictions),
+            "nodes": nodes,
+            "edges": edges,
+            "clusters": clusters[:10],
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Module 9: Authorial Hints Detector
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class AuthorialHints:
+    """Detect when the author discusses OTHER writers' esoteric practices."""
+
+    HINT_PATTERNS = re.compile(
+        r'(?:(?:he|she|the author|this writer|they) (?:wrote|speaks?|communicat(?:es?|ed)|'
+        r'express(?:es?|ed)|conceal(?:s|ed)|hid(?:es?|den)?|disguis(?:es?|ed)) '
+        r'(?:between the lines|esoterically|with circumspection|with caution|indirectly|'
+        r'in a (?:veiled|hidden|indirect|subtle) (?:manner|way|fashion))|'
+        r'(?:the (?:true|real|hidden|secret|deeper|esoteric) (?:meaning|teaching|doctrine|view|opinion))|'
+        r'(?:what (?:he|she|the author) (?:really|actually|truly) (?:meant|thought|believed))|'
+        r'(?:(?:wrote|writing|write) (?:with|under) (?:caution|circumspection|constraint))|'
+        r'(?:(?:addressed|meant for|intended for) (?:the few|a select|careful|attentive) (?:readers?|audience)))',
+        re.I
+    )
+
+    def analyze(self, text: str, sections: list[Section], weights: ScoringWeights) -> list[Finding]:
+        findings = []
+        for m in self.HINT_PATTERNS.finditer(text):
+            start = max(0, m.start() - 100)
+            end = min(len(text), m.end() + 150)
+            findings.append(Finding(
+                technique="explicit_esotericism_claim",
+                score=weights.explicit_esotericism_claim * 0.6,
+                section="",
+                evidence=text[start:end][:250],
+                explanation=f"Authorial hint: '{m.group(0)[:60]}...' — discussing another's esotericism may signal the author's own practice.",
+                deliberateness=0.7,
+            ))
+        return findings[:10]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Module 10: Heatmap Generator
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class HeatmapGenerator:
+    """Generate passage-level esotericism likelihood heatmap."""
+
+    def generate(self, text: str, findings: list[Finding], sections: list[Section]) -> list[dict]:
+        """Create a section-by-section heatmap of esotericism intensity."""
+        section_scores = {}
+        for sec in sections:
+            section_scores[sec.label] = {
+                "label": sec.label,
+                "index": sec.index,
+                "word_count": len(re.findall(r'\w+', sec.text)),
+                "total_score": 0.0,
+                "finding_count": 0,
+                "techniques": set(),
+                "max_deliberateness": 0.0,
+            }
+
+        for f in findings:
+            key = f.section if f.section in section_scores else None
+            if not key:
+                # Try to match by content
+                for sec_label, sec_data in section_scores.items():
+                    if f.evidence and f.evidence[:30] in text:
+                        idx = text.find(f.evidence[:30])
+                        for sec in sections:
+                            if sec.start_char <= idx < sec.end_char:
+                                key = sec.label
+                                break
+                    break
+
+            if key and key in section_scores:
+                section_scores[key]["total_score"] += f.score
+                section_scores[key]["finding_count"] += 1
+                section_scores[key]["techniques"].add(f.technique)
+                section_scores[key]["max_deliberateness"] = max(
+                    section_scores[key]["max_deliberateness"], f.deliberateness
+                )
+
+        # Normalize and create heatmap
+        max_score = max((s["total_score"] for s in section_scores.values()), default=1)
+        heatmap = []
+        for label, data in section_scores.items():
+            intensity = data["total_score"] / max_score if max_score > 0 else 0
+            heatmap.append({
+                "section": label,
+                "index": data["index"],
+                "intensity": round(intensity, 3),
+                "total_score": round(data["total_score"], 2),
+                "finding_count": data["finding_count"],
+                "technique_count": len(data["techniques"]),
+                "max_deliberateness": round(data["max_deliberateness"], 2),
+                "heat_level": "HIGH" if intensity > 0.7 else "MEDIUM" if intensity > 0.3 else "LOW",
+            })
+
+        heatmap.sort(key=lambda h: h["index"])
+        return heatmap
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Module 11: Custom Pattern Detector
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CustomPatterns:
+    """User-defined pattern detection."""
+
+    def analyze(
+        self,
+        text: str,
+        sections: list[Section],
+        custom_keywords: list[str] = None,
+        custom_phrases: list[str] = None,
+        custom_regex: list[str] = None,
+    ) -> list[Finding]:
+        findings = []
+
+        if custom_keywords:
+            text_lower = text.lower()
+            for kw in custom_keywords:
+                count = text_lower.count(kw.lower())
+                if count > 0:
+                    # Find first occurrence with context
+                    idx = text_lower.find(kw.lower())
+                    start = max(0, idx - 80)
+                    end = min(len(text), idx + len(kw) + 80)
+                    findings.append(Finding(
+                        technique="anomalous_detail",
+                        score=2.0 + (count * 0.5),
+                        section="Custom",
+                        evidence=text[start:end],
+                        explanation=f"Custom keyword '{kw}' found {count} times.",
+                        deliberateness=0.3,
+                    ))
+
+        if custom_phrases:
+            text_lower = text.lower()
+            for phrase in custom_phrases:
+                if phrase.lower() in text_lower:
+                    idx = text_lower.find(phrase.lower())
+                    start = max(0, idx - 50)
+                    end = min(len(text), idx + len(phrase) + 100)
+                    findings.append(Finding(
+                        technique="anomalous_detail",
+                        score=3.0,
+                        section="Custom",
+                        evidence=text[start:end],
+                        explanation=f"Custom phrase '{phrase}' found.",
+                        deliberateness=0.5,
+                    ))
+
+        if custom_regex:
+            for pattern_str in custom_regex:
+                try:
+                    pat = re.compile(pattern_str, re.I)
+                    for m in pat.finditer(text):
+                        start = max(0, m.start() - 50)
+                        end = min(len(text), m.end() + 100)
+                        findings.append(Finding(
+                            technique="anomalous_detail",
+                            score=3.0,
+                            section="Custom",
+                            evidence=text[start:end][:200],
+                            explanation=f"Custom pattern match: '{m.group(0)[:50]}'",
+                            deliberateness=0.5,
+                        ))
+                except re.error:
+                    pass
+
+        return findings[:20]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Main Engine
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1188,6 +1415,10 @@ class EsotericAnalyzer:
         self.structure = AdvancedStructure()
         self.comparative = ComparativeBaseline()
         self.cluster_detector = MelzerClusterDetector()
+        self.contradiction_network = ContradictionNetwork()
+        self.authorial_hints = AuthorialHints()
+        self.heatmap = HeatmapGenerator()
+        self.custom = CustomPatterns()
 
     def analyze(
         self,
@@ -1243,6 +1474,11 @@ class EsotericAnalyzer:
         all_findings.extend(struct_findings)
         module_scores["advanced_structure"] = sum(f.score for f in struct_findings)
 
+        # Authorial Hints (discussing other writers' esotericism)
+        hint_findings = self.authorial_hints.analyze(text, sections, w)
+        all_findings.extend(hint_findings)
+        module_scores["authorial_hints"] = sum(f.score for f in hint_findings)
+
         # Find clusters
         clusters = self.cluster_detector.find_clusters(all_findings, sections)
 
@@ -1254,6 +1490,12 @@ class EsotericAnalyzer:
         # Rank passages by finding density
         ranked = self._rank_passages(all_findings)
 
+        # Build contradiction network
+        contradiction_net = self.contradiction_network.build_network(all_findings)
+
+        # Generate heatmap
+        heatmap_data = self.heatmap.generate(text, all_findings, sections)
+
         # Structural summary
         structural = {
             "section_count": len(sections),
@@ -1263,6 +1505,8 @@ class EsotericAnalyzer:
             "avg_deliberateness": round(
                 sum(f.deliberateness for f in all_findings) / max(len(all_findings), 1), 2
             ),
+            "contradiction_network": contradiction_net,
+            "heatmap": heatmap_data,
         }
 
         return EsotericReport(
@@ -1313,7 +1557,21 @@ def run_esoteric_analysis_v2(
     text: str,
     metadata: Optional[TextMetadata] = None,
     weights: Optional[ScoringWeights] = None,
+    custom_keywords: Optional[list[str]] = None,
+    custom_phrases: Optional[list[str]] = None,
 ) -> dict:
     """Run the v2 esoteric analysis engine. Returns dict for JSON serialization."""
     report = _engine.analyze(text, metadata, weights)
+
+    # Run custom patterns if provided
+    if custom_keywords or custom_phrases:
+        sections = segment_text(text)
+        custom_findings = _engine.custom.analyze(
+            text, sections,
+            custom_keywords=custom_keywords,
+            custom_phrases=custom_phrases,
+        )
+        report.findings.extend(custom_findings)
+        report.module_scores["custom"] = sum(f.score for f in custom_findings)
+
     return report.to_dict()
