@@ -303,9 +303,33 @@ async def _extract_epub_markdown(path: Path) -> str:
 
             return f'{text}\n\n'
 
+        def convert_small(self, el, text, convert_as_inline=False, parent_tags=None):
+            """Preserve text inside <small> tags — often used for chapter titles."""
+            return text.strip() if text else ''
+
         def convert_sup(self, el, text, convert_as_inline=False, parent_tags=None):
+            """Preserve footnote numbers as [N]."""
             text = text.strip()
+            if text and text.isdigit():
+                return f'[{text}]'
             return f'<sup>{text}</sup>' if text else ''
+
+        def convert_sub(self, el, text, convert_as_inline=False, parent_tags=None):
+            text = text.strip()
+            return text if text else ''
+
+        def convert_span(self, el, text, convert_as_inline=False, parent_tags=None):
+            """Handle spans — preserve text, detect heading classes."""
+            text = text.strip() if text else ''
+            if not text:
+                return ''
+            classes = el.get('class', [])
+            if isinstance(classes, str):
+                classes = classes.split()
+            # Some EPUBs use spans with heading classes
+            if any('chapter' in c.lower() or 'title' in c.lower() for c in classes):
+                return f'**{text}**'
+            return text
 
     book = epub.read_epub(str(path), options={"ignore_ncx": True})
     content_parts = []
@@ -349,12 +373,43 @@ async def _extract_epub_plain(path: Path) -> str:
         def __init__(self):
             super().__init__()
             self.parts: list[str] = []
+            self._in_heading = False
+            self._in_sup = False
+            self._heading_level = 0
+
+        def handle_starttag(self, tag, attrs):
+            tag_lower = tag.lower()
+            if tag_lower in ('h1', 'h2', 'h3', 'h4', 'h5', 'h6'):
+                self._in_heading = True
+                self._heading_level = int(tag_lower[1])
+                self.parts.append('\n\n' + '#' * self._heading_level + ' ')
+            elif tag_lower == 'sup':
+                self._in_sup = True
+                self.parts.append('[')
+            elif tag_lower == 'p':
+                self.parts.append('\n\n')
+            elif tag_lower == 'br':
+                self.parts.append('\n')
+
+        def handle_endtag(self, tag):
+            tag_lower = tag.lower()
+            if tag_lower in ('h1', 'h2', 'h3', 'h4', 'h5', 'h6'):
+                self._in_heading = False
+                self.parts.append('\n\n')
+            elif tag_lower == 'sup':
+                self._in_sup = True
+                self.parts.append(']')
+                self._in_sup = False
 
         def handle_data(self, data: str):
             self.parts.append(data)
 
         def get_text(self) -> str:
-            return " ".join(self.parts)
+            text = "".join(self.parts)
+            # Clean up excessive whitespace but preserve paragraph breaks
+            text = re.sub(r'\n{3,}', '\n\n', text)
+            text = re.sub(r' +', ' ', text)
+            return text.strip()
 
     book = epub.read_epub(str(path), options={"ignore_ncx": True})
     text_parts = []
