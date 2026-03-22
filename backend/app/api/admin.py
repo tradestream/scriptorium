@@ -724,6 +724,133 @@ async def _run_filename_extract(job_id: str, edition_ids: list[int], min_confide
     await update_job(job_id, status=final_status, done=done, failed=failed, applied=applied, skipped=skipped, current="")
 
 
+# ── LLM Metadata Extraction ──────────────────────────────────────────────────
+
+@router.post("/llm-metadata/bulk")
+async def start_bulk_llm_metadata(
+    library_id: Optional[int] = None,
+    background_tasks: BackgroundTasks = None,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(_require_admin),
+):
+    """Use LLM to extract metadata from book text for editions missing key fields.
+
+    Targets editions that have extractable files (EPUB/PDF) but are missing
+    title, authors, or description after all other extraction methods have been tried.
+    """
+    from sqlalchemy import select, or_
+    from app.models.edition import Edition, EditionFile
+    from app.models.work import Work
+
+    stmt = (
+        select(Edition)
+        .join(Edition.work)
+        .where(Edition.files.any(
+            or_(EditionFile.format.ilike("epub"), EditionFile.format.ilike("pdf"))
+        ))
+        .where(
+            or_(
+                Work.description.is_(None),
+                Work.description == "",
+                ~Work.authors.any(),
+            )
+        )
+    )
+    if library_id:
+        stmt = stmt.where(Edition.library_id == library_id)
+
+    result = await db.execute(stmt)
+    edition_ids = [e.id for e in result.unique().scalars().all()]
+
+    job_id, _ = await create_job("llm_metadata", len(edition_ids), {
+        "found_title": 0, "found_authors": 0, "found_description": 0,
+        "found_publisher": 0, "found_isbn": 0,
+    })
+    background_tasks.add_task(_run_bulk_llm_metadata, job_id, edition_ids)
+    return {"job_id": job_id, "total": len(edition_ids)}
+
+
+@router.get("/llm-metadata/bulk/active")
+async def get_active_llm_metadata_job(
+    _admin: User = Depends(_require_admin),
+):
+    """Return active LLM metadata extraction job."""
+    result = await get_active_job("llm_metadata")
+    if result:
+        job_id, job = result
+        return {"job_id": job_id, **job}
+    return None
+
+
+@router.get("/llm-metadata/bulk/{job_id}")
+async def get_llm_metadata_job(
+    job_id: str,
+    _admin: User = Depends(_require_admin),
+):
+    """Poll LLM metadata extraction job status."""
+    job = await get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"job_id": job_id, **job}
+
+
+async def _run_bulk_llm_metadata(job_id: str, edition_ids: list[int]) -> None:
+    """Background task: extract metadata via LLM for each edition."""
+    from app.services.llm_metadata import extract_llm_metadata_for_edition
+
+    await update_job(job_id, status="running")
+    total = len(edition_ids)
+    done = 0
+    failed = 0
+    found_title = 0
+    found_authors = 0
+    found_description = 0
+    found_publisher = 0
+    found_isbn = 0
+
+    for edition_id in edition_ids:
+        if done % 5 == 0 and await get_job_status(job_id) == "cancelled":
+            break
+
+        try:
+            found = await extract_llm_metadata_for_edition(edition_id)
+            if found.get("title"):
+                found_title += 1
+            if found.get("authors"):
+                found_authors += 1
+            if found.get("description"):
+                found_description += 1
+            if found.get("publisher"):
+                found_publisher += 1
+            if found.get("isbn"):
+                found_isbn += 1
+        except Exception as exc:
+            logger.warning("LLM metadata extraction failed for edition %d: %s", edition_id, exc)
+            failed += 1
+
+        done += 1
+
+        if done % 5 == 0 or done == total:
+            await update_job(
+                job_id, done=done, failed=failed,
+                found_title=found_title, found_authors=found_authors,
+                found_description=found_description, found_publisher=found_publisher,
+                found_isbn=found_isbn,
+                current=f"{done}/{total}",
+            )
+
+        # LLM calls are rate-limited; brief pause between items
+        await asyncio.sleep(1.0)
+
+    final_status = "done" if await get_job_status(job_id) != "cancelled" else "cancelled"
+    await update_job(
+        job_id, status=final_status, done=done, failed=failed,
+        found_title=found_title, found_authors=found_authors,
+        found_description=found_description, found_publisher=found_publisher,
+        found_isbn=found_isbn, current="",
+    )
+
+
 # ── Embedded Metadata Extraction (OPF / ComicInfo.xml) ───────────────────────
 
 @router.post("/embedded-metadata/bulk")

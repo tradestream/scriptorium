@@ -652,6 +652,19 @@ export async function mergeLanguages(sourceValues: string[], targetValue: string
   return fetchAPI('/metadata/languages/merge', { method: 'POST', body: JSON.stringify({ source_values: sourceValues, target_value: targetValue }) });
 }
 
+// ── LLM Metadata Extraction ──────────────────────────────────────────────────
+
+export async function startBulkLlmMetadata(libraryId?: number): Promise<{ job_id: string; total: number }> {
+  const qs = libraryId ? `?library_id=${libraryId}` : '';
+  return fetchAPI(`/admin/llm-metadata/bulk${qs}`, { method: 'POST' });
+}
+export async function getActiveBulkLlmMetadataJob(): Promise<Record<string, unknown> | null> {
+  return fetchAPI('/admin/llm-metadata/bulk/active');
+}
+export async function getBulkLlmMetadataJob(jobId: string): Promise<Record<string, unknown>> {
+  return fetchAPI(`/admin/llm-metadata/bulk/${jobId}`);
+}
+
 // ── Embedded Metadata Extraction ─────────────────────────────────────────────
 
 export async function startBulkEmbeddedMetadata(libraryId?: number): Promise<{ job_id: string; total: number }> {
