@@ -841,6 +841,7 @@ async def _run_bulk_esoteric(
     import json
     from app.models.analysis import ComputationalAnalysis, AnalysisTemplate
     from app.services.esoteric import run_full_esoteric_analysis, EsotericAnalysisConfig
+    from app.services.esoteric_engine import run_esoteric_analysis_v2
     from app.services.text_extraction import extract_text_from_book
     from app.services.analysis import run_analysis
     from app.models.edition import Edition
@@ -872,8 +873,11 @@ async def _run_bulk_esoteric(
                     done += 1
                     continue
 
+                # Run both v1 (16 individual tools) and v2 (unified engine with scoring)
                 config = EsotericAnalysisConfig()
-                results = run_full_esoteric_analysis(text, config)
+                v1_results = run_full_esoteric_analysis(text, config)
+                v2_results = run_esoteric_analysis_v2(text)
+                results = {**v1_results, "engine_v2": v2_results}
 
                 record = ComputationalAnalysis(
                     book_id=edition_id,

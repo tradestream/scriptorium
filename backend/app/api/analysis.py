@@ -457,6 +457,10 @@ async def run_computational_analysis(
             from app.services.esoteric import detect_hedging_language
             r = detect_hedging_language(text, config.delimiter_pattern, config.context_window)
             results = r.to_dict()
+        elif request.analysis_type == "engine_v2":
+            from app.services.esoteric_engine import run_esoteric_analysis_v2, TextMetadata
+            meta = TextMetadata()
+            results = run_esoteric_analysis_v2(text, meta)
         elif request.analysis_type == "self_reference":
             from app.services.esoteric import detect_self_reference
             r = detect_self_reference(text, config.delimiter_pattern, config.context_window)
