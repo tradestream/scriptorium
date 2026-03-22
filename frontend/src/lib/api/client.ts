@@ -652,6 +652,31 @@ export async function mergeLanguages(sourceValues: string[], targetValue: string
   return fetchAPI('/metadata/languages/merge', { method: 'POST', body: JSON.stringify({ source_values: sourceValues, target_value: targetValue }) });
 }
 
+// ── Bulk Esoteric Analysis ───────────────────────────────────────────────────
+
+export async function startBulkEsotericAnalysis(opts: {
+  library_id?: number;
+  run_computational?: boolean;
+  run_llm?: boolean;
+  llm_template_ids?: number[];
+} = {}): Promise<Record<string, unknown>> {
+  return fetchAPI('/admin/esoteric/bulk', {
+    method: 'POST',
+    body: JSON.stringify({
+      library_id: opts.library_id,
+      run_computational: opts.run_computational ?? true,
+      run_llm: opts.run_llm ?? false,
+      llm_template_ids: opts.llm_template_ids ?? [],
+    }),
+  });
+}
+export async function getActiveBulkEsotericJob(): Promise<Record<string, unknown> | null> {
+  return fetchAPI('/admin/esoteric/bulk/active');
+}
+export async function getBulkEsotericJob(jobId: string): Promise<Record<string, unknown>> {
+  return fetchAPI(`/admin/esoteric/bulk/${jobId}`);
+}
+
 // ── LLM Metadata Extraction ──────────────────────────────────────────────────
 
 export async function startBulkLlmMetadata(libraryId?: number): Promise<{ job_id: string; total: number }> {

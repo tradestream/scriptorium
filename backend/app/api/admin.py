@@ -724,6 +724,231 @@ async def _run_filename_extract(job_id: str, edition_ids: list[int], min_confide
     await update_job(job_id, status=final_status, done=done, failed=failed, applied=applied, skipped=skipped, current="")
 
 
+# ── Bulk Esoteric Analysis Pipeline ──────────────────────────────────────────
+
+class BulkEsotericRequest(BaseModel):
+    library_id: Optional[int] = None
+    run_computational: bool = True
+    run_llm: bool = False
+    llm_template_ids: list[int] = []  # Empty = all builtin templates
+
+
+@router.post("/esoteric/bulk")
+async def start_bulk_esoteric_analysis(
+    request: BulkEsotericRequest,
+    background_tasks: BackgroundTasks = None,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(_require_admin),
+):
+    """Run esoteric analysis pipeline on all esoteric-enabled books.
+
+    Two phases:
+    - Computational: Runs all 16 pattern-detection tools (fast, no API cost)
+    - LLM: Runs selected templates through the configured LLM (slow, costs tokens)
+
+    Books that already have a 'full' computational analysis are skipped.
+    """
+    from sqlalchemy import select, and_
+    from app.models.edition import Edition
+    from app.models.work import Work
+    from app.models.analysis import ComputationalAnalysis
+
+    # Find esoteric-enabled editions with extractable files
+    stmt = (
+        select(Edition.id)
+        .join(Edition.work)
+        .where(Work.esoteric_enabled == True)
+        .where(Edition.files.any())
+    )
+    if request.library_id:
+        stmt = stmt.where(Edition.library_id == request.library_id)
+
+    result = await db.execute(stmt)
+    all_ids = [r[0] for r in result.all()]
+
+    # Skip editions that already have a full computational analysis
+    if request.run_computational:
+        already_done = set()
+        done_result = await db.execute(
+            select(ComputationalAnalysis.book_id)
+            .where(
+                ComputationalAnalysis.analysis_type == "full",
+                ComputationalAnalysis.status == "completed",
+                ComputationalAnalysis.book_id.in_(all_ids),
+            )
+        )
+        already_done = {r[0] for r in done_result.all()}
+        computational_ids = [eid for eid in all_ids if eid not in already_done]
+    else:
+        computational_ids = []
+
+    total = len(computational_ids)
+    if request.run_llm:
+        total += len(all_ids)  # LLM runs on all, not just unskipped
+
+    job_id, _ = await create_job("bulk_esoteric", total, {
+        "computational_done": 0,
+        "computational_total": len(computational_ids),
+        "computational_skipped": len(already_done) if request.run_computational else 0,
+        "llm_done": 0,
+        "llm_total": len(all_ids) if request.run_llm else 0,
+    })
+
+    background_tasks.add_task(
+        _run_bulk_esoteric, job_id, computational_ids,
+        all_ids if request.run_llm else [],
+        request.llm_template_ids,
+    )
+
+    return {
+        "job_id": job_id,
+        "total_books": len(all_ids),
+        "computational_to_run": len(computational_ids),
+        "computational_skipped": len(all_ids) - len(computational_ids),
+        "llm_to_run": len(all_ids) if request.run_llm else 0,
+    }
+
+
+@router.get("/esoteric/bulk/active")
+async def get_active_esoteric_job(
+    _admin: User = Depends(_require_admin),
+):
+    result = await get_active_job("bulk_esoteric")
+    if result:
+        job_id, job = result
+        return {"job_id": job_id, **job}
+    return None
+
+
+@router.get("/esoteric/bulk/{job_id}")
+async def get_esoteric_job(
+    job_id: str,
+    _admin: User = Depends(_require_admin),
+):
+    job = await get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"job_id": job_id, **job}
+
+
+async def _run_bulk_esoteric(
+    job_id: str,
+    computational_ids: list[int],
+    llm_ids: list[int],
+    llm_template_ids: list[int],
+) -> None:
+    """Background task: run esoteric analysis pipeline."""
+    import json
+    from app.models.analysis import ComputationalAnalysis, AnalysisTemplate
+    from app.services.esoteric import run_full_esoteric_analysis, EsotericAnalysisConfig
+    from app.services.text_extraction import extract_text_from_book
+    from app.services.analysis import run_analysis
+    from app.models.edition import Edition
+    from sqlalchemy import select
+
+    await update_job(job_id, status="running")
+    done = 0
+    failed = 0
+    comp_done = 0
+    llm_done = 0
+
+    # Phase 1: Computational analysis
+    for edition_id in computational_ids:
+        if done % 10 == 0 and await get_job_status(job_id) == "cancelled":
+            break
+
+        try:
+            async with _session_factory() as db:
+                stmt = select(Edition).where(Edition.id == edition_id)
+                result = await db.execute(stmt)
+                book = result.scalar_one_or_none()
+                if not book:
+                    failed += 1
+                    done += 1
+                    continue
+
+                text = await extract_text_from_book(book, db)
+                if not text or len(text.strip()) < 200:
+                    done += 1
+                    continue
+
+                config = EsotericAnalysisConfig()
+                results = run_full_esoteric_analysis(text, config)
+
+                record = ComputationalAnalysis(
+                    book_id=edition_id,
+                    analysis_type="full",
+                    config_json=json.dumps({"keywords": config.keywords}),
+                    results_json=json.dumps(results, default=str),
+                    status="completed",
+                )
+                db.add(record)
+                await db.commit()
+                comp_done += 1
+
+        except Exception as exc:
+            logger.warning("Bulk esoteric computational failed for %d: %s", edition_id, exc)
+            failed += 1
+
+        done += 1
+        if done % 10 == 0:
+            await update_job(
+                job_id, done=done, failed=failed,
+                computational_done=comp_done,
+                current=f"Computational {comp_done}/{len(computational_ids)}",
+            )
+
+        await asyncio.sleep(0.1)
+
+    # Phase 2: LLM analysis (if requested)
+    if llm_ids:
+        # Get templates
+        async with _session_factory() as db:
+            if llm_template_ids:
+                stmt = select(AnalysisTemplate).where(AnalysisTemplate.id.in_(llm_template_ids))
+            else:
+                stmt = select(AnalysisTemplate).where(AnalysisTemplate.is_builtin == True)
+            result = await db.execute(stmt)
+            templates = result.scalars().all()
+            template_list = [(t.id, t.name) for t in templates]
+
+        for edition_id in llm_ids:
+            if await get_job_status(job_id) == "cancelled":
+                break
+
+            for tmpl_id, tmpl_name in template_list:
+                try:
+                    async with _session_factory() as db:
+                        await run_analysis(
+                            book_id=edition_id,
+                            db=db,
+                            template_id=tmpl_id,
+                            title=tmpl_name,
+                        )
+                except Exception as exc:
+                    logger.warning("Bulk esoteric LLM failed for %d template %s: %s",
+                                   edition_id, tmpl_name, exc)
+                    failed += 1
+
+                # Rate limit for LLM
+                await asyncio.sleep(2.0)
+
+            llm_done += 1
+            done += 1
+            if llm_done % 5 == 0:
+                await update_job(
+                    job_id, done=done, failed=failed,
+                    computational_done=comp_done, llm_done=llm_done,
+                    current=f"LLM {llm_done}/{len(llm_ids)}",
+                )
+
+    final_status = "done" if await get_job_status(job_id) != "cancelled" else "cancelled"
+    await update_job(
+        job_id, status=final_status, done=done, failed=failed,
+        computational_done=comp_done, llm_done=llm_done, current="",
+    )
+
+
 # ── LLM Metadata Extraction ──────────────────────────────────────────────────
 
 @router.post("/llm-metadata/bulk")
