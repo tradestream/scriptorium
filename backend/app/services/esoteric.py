@@ -619,6 +619,118 @@ def detect_repetition_with_variation(
 
 
 # ─────────────────────────────────────────────────────
+# Tool 6: Audience Differentiation Detector
+# ─────────────────────────────────────────────────────
+
+# Markers indicating the author addresses different audiences
+# Based on Melzer's "few vs. many" distinction (Ch. 4, pp. 116-118)
+ELITE_MARKERS = {
+    "the wise", "the few", "those who understand", "the careful reader",
+    "the attentive", "the philosophic", "the learned", "men of understanding",
+    "those who know", "the discerning", "for few readers", "the initiated",
+    "the intelligent", "gentle reader", "the serious reader",
+}
+
+MASS_MARKERS = {
+    "the many", "the multitude", "the vulgar", "the common", "the people",
+    "the masses", "the populace", "the mob", "the herd", "the crowd",
+    "the ignorant", "most readers", "the public", "ordinary men",
+    "common opinion", "the unlearned",
+}
+
+
+@dataclass
+class AudienceResult:
+    """Result from the Audience Differentiation Detector."""
+    elite_references: list[dict]    # [{marker, section, context}]
+    mass_references: list[dict]     # [{marker, section, context}]
+    differentiation_score: float    # 0-1 how strongly the text differentiates audiences
+
+    def to_dict(self) -> dict:
+        return {
+            "type": "audience_differentiation",
+            "elite_references": self.elite_references,
+            "mass_references": self.mass_references,
+            "differentiation_score": self.differentiation_score,
+            "elite_count": len(self.elite_references),
+            "mass_count": len(self.mass_references),
+        }
+
+
+def detect_audience_differentiation(
+    text: str,
+    delimiter_pattern: Optional[str] = None,
+    context_window: int = 150,
+) -> AudienceResult:
+    """Detect markers of audience differentiation — the 'few vs. many' distinction.
+
+    Esoteric writers frequently signal that they address different audiences:
+    'the wise' or 'the few' vs. 'the many' or 'the vulgar.' The presence of
+    such markers is a strong indicator of esoteric intent.
+
+    Args:
+        text: The full text
+        delimiter_pattern: Section boundary regex
+        context_window: Characters of context around each marker
+    """
+    sections = segment_text(text, delimiter_pattern)
+    text_lower = text.lower()
+
+    elite_refs = []
+    mass_refs = []
+
+    for section in sections:
+        section_lower = section.text.lower()
+        for marker in ELITE_MARKERS:
+            pos = 0
+            while True:
+                idx = section_lower.find(marker, pos)
+                if idx == -1:
+                    break
+                start = max(0, idx - context_window)
+                end = min(len(section.text), idx + len(marker) + context_window)
+                elite_refs.append({
+                    "marker": marker,
+                    "section": section.label,
+                    "context": section.text[start:end].strip(),
+                })
+                pos = idx + len(marker)
+
+        for marker in MASS_MARKERS:
+            pos = 0
+            while True:
+                idx = section_lower.find(marker, pos)
+                if idx == -1:
+                    break
+                start = max(0, idx - context_window)
+                end = min(len(section.text), idx + len(marker) + context_window)
+                mass_refs.append({
+                    "marker": marker,
+                    "section": section.label,
+                    "context": section.text[start:end].strip(),
+                })
+                pos = idx + len(marker)
+
+    # Score: higher when both elite and mass markers are present (differentiation)
+    total = len(elite_refs) + len(mass_refs)
+    if total == 0:
+        score = 0.0
+    elif len(elite_refs) == 0 or len(mass_refs) == 0:
+        score = 0.2  # One-sided — weak differentiation
+    else:
+        # Balance: strongest when both sides are represented
+        balance = min(len(elite_refs), len(mass_refs)) / max(len(elite_refs), len(mass_refs))
+        density = min(total / 20, 1.0)  # Normalize by ~20 references
+        score = round(balance * 0.6 + density * 0.4, 3)
+
+    return AudienceResult(
+        elite_references=elite_refs[:20],
+        mass_references=mass_refs[:20],
+        differentiation_score=score,
+    )
+
+
+# ─────────────────────────────────────────────────────
 # Orchestrator: Run all tools
 # ─────────────────────────────────────────────────────
 
@@ -644,7 +756,7 @@ def run_full_esoteric_analysis(
     text: str,
     config: Optional[EsotericAnalysisConfig] = None,
 ) -> dict:
-    """Run all five computational esoteric analysis tools and return combined results."""
+    """Run all six computational esoteric analysis tools and return combined results."""
     if config is None:
         config = EsotericAnalysisConfig()
 
@@ -714,5 +826,17 @@ def run_full_esoteric_analysis(
     except Exception as e:
         logger.error(f"Repetition with Variation failed: {e}")
         results["repetition_variation"] = {"error": str(e)}
+
+    # 6. Audience Differentiation
+    try:
+        audience_result = detect_audience_differentiation(
+            text=text,
+            delimiter_pattern=config.delimiter_pattern,
+            context_window=config.context_window,
+        )
+        results["audience_differentiation"] = audience_result.to_dict()
+    except Exception as e:
+        logger.error(f"Audience Differentiation failed: {e}")
+        results["audience_differentiation"] = {"error": str(e)}
 
     return results
