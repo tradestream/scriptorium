@@ -107,23 +107,29 @@ def segment_text(text: str, delimiter_pattern: Optional[str] = None) -> list[Sec
     """Split a text into sections (books, chapters, cantos, etc.).
 
     Auto-detects common structural markers if no delimiter is provided.
+    Uses markdown heading detection as a fallback (from epub2md pipeline).
     """
     if delimiter_pattern:
         pattern = delimiter_pattern
     else:
         # Try common delimiters in order of specificity
         patterns = [
-            r'(?i)^(book\s+\w+)',           # Book I, Book 1, BOOK ONE
-            r'(?i)^(chapter\s+\w+)',         # Chapter 1, Chapter One
-            r'(?i)^(canto\s+\w+)',           # Canto I
-            r'(?i)^(part\s+\w+)',            # Part 1, Part One
-            r'(?i)^(act\s+\w+)',             # Act I (plays)
-            r'(?i)^(section\s+\w+)',         # Section 1
+            r'(?i)^(book\s+[IVXLCDM\d]+\b[^\n]*)',    # Book I, Book 1, BOOK ONE, Book I: Title
+            r'(?i)^(chapter\s+[IVXLCDM\d]+\b[^\n]*)',  # Chapter 1, Chapter One: Title
+            r'(?i)^(canto\s+[IVXLCDM\d]+\b[^\n]*)',    # Canto I
+            r'(?i)^(part\s+[IVXLCDM\d]+\b[^\n]*)',     # Part 1, Part One
+            r'(?i)^(act\s+[IVXLCDM\d]+\b[^\n]*)',      # Act I (plays)
+            r'(?i)^(section\s+[IVXLCDM\d]+\b[^\n]*)',  # Section 1
+            r'^(#{1,3}\s+.+)',                           # Markdown headings (from epub2md output)
+            r'(?i)^(discourse\s+[IVXLCDM\d]+\b[^\n]*)', # Discourse I (Machiavelli)
+            r'(?i)^(letter\s+[IVXLCDM\d]+\b[^\n]*)',    # Letter I (epistles)
+            r'(?i)^(dialogue\s+[IVXLCDM\d]+\b[^\n]*)',  # Dialogue I
         ]
 
         pattern = None
         for p in patterns:
-            if re.search(p, text, re.MULTILINE):
+            matches = re.findall(p, text, re.MULTILINE)
+            if len(matches) >= 2:  # Need at least 2 sections to be useful
                 pattern = p
                 break
 
@@ -132,27 +138,35 @@ def segment_text(text: str, delimiter_pattern: Optional[str] = None) -> list[Sec
         splits = re.split(f'({pattern})', text, flags=re.MULTILINE)
         sections = []
         idx = 0
-        i = 1  # Skip preamble (splits[0])
-        while i < len(splits) - 1:
-            label = splits[i].strip()
-            content = splits[i + 1] if i + 1 < len(splits) else ""
-            sections.append(SectionText(label=label, text=content.strip(), index=idx))
+        # Include preamble if substantial
+        preamble = splits[0].strip() if splits else ""
+        if preamble and len(preamble) > 200:
+            sections.append(SectionText(label="Preamble", text=preamble, index=idx))
             idx += 1
+
+        i = 1
+        while i < len(splits) - 1:
+            label = splits[i].strip().lstrip('#').strip()
+            content = splits[i + 1] if i + 1 < len(splits) else ""
+            if content.strip():
+                sections.append(SectionText(label=label, text=content.strip(), index=idx))
+                idx += 1
             i += 2
         return sections if sections else [SectionText(label="Full Text", text=text, index=0)]
 
-    # Fallback: split into roughly equal chunks
+    # Fallback: split by paragraph density into ~10 sections
     lines = text.split('\n')
     chunk_size = max(50, len(lines) // 10)
     sections = []
     for i in range(0, len(lines), chunk_size):
         chunk = '\n'.join(lines[i:i + chunk_size])
-        sections.append(SectionText(
-            label=f"Section {len(sections) + 1}",
-            text=chunk,
-            index=len(sections),
-        ))
-    return sections
+        if chunk.strip():
+            sections.append(SectionText(
+                label=f"Section {len(sections) + 1}",
+                text=chunk,
+                index=len(sections),
+            ))
+    return sections or [SectionText(label="Full Text", text=text, index=0)]
 
 
 # ─────────────────────────────────────────────────────
@@ -388,21 +402,43 @@ def locate_centers(
 # ─────────────────────────────────────────────────────
 
 # Default word lists for surface piety vs. philosophical subversion
+# Expanded from epub2md Xenophon/Nietzsche/Strauss analysis projects
 DEFAULT_PIOUS_WORDS = {
-    "god", "gods", "divine", "sacred", "holy", "pious", "prayer", "sacrifice",
-    "temple", "altar", "fate", "destiny", "heaven", "olympus", "blessed",
-    "reverent", "worship", "offering", "obey", "obedience", "duty",
-    "righteous", "orthodox", "tradition", "custom", "law", "order",
-    "authority", "king", "throne", "honor", "glory", "noble",
+    # Religious/divine
+    "god", "gods", "divine", "sacred", "holy", "pious", "piety", "prayer",
+    "sacrifice", "temple", "altar", "fate", "destiny", "heaven", "olympus",
+    "blessed", "reverent", "worship", "offering", "providence", "miracle",
+    "prophet", "revelation", "faith", "salvation", "soul", "spirit",
+    # Authority/tradition
+    "obey", "obedience", "duty", "righteous", "orthodox", "tradition",
+    "custom", "law", "order", "authority", "king", "throne", "honor",
+    "glory", "noble", "citizen", "patriot", "loyal", "allegiance",
+    "ancestor", "elder", "master", "servant", "humble",
+    # Moral convention
+    "virtue", "moral", "good", "evil", "sin", "shame", "modesty",
+    "temperance", "courage", "prudence", "just", "unjust",
+    "gentleman", "decent", "proper", "fitting",
 }
 
 DEFAULT_SUBVERSIVE_WORDS = {
+    # Deception/concealment
     "clever", "cunning", "trick", "deceive", "lie", "false", "disguise",
-    "hidden", "secret", "know", "knowledge", "wisdom", "question",
-    "doubt", "challenge", "rebel", "defy", "escape", "freedom",
+    "hidden", "secret", "conceal", "pretend", "mask", "veil", "cover",
+    "stratagem", "device", "contrive", "artful", "shrewd",
+    # Philosophy/inquiry
+    "know", "knowledge", "wisdom", "question", "doubt", "examine",
     "reason", "think", "mind", "nature", "truth", "real", "actual",
-    "appear", "seem", "surface", "mask", "pretend", "craft", "skill",
+    "inquiry", "investigate", "discover", "understand", "contemplate",
+    "philosophy", "philosopher", "science", "theory", "hypothesis",
+    # Freedom/power
+    "challenge", "rebel", "defy", "escape", "freedom", "liberty",
     "self", "choose", "will", "power", "mortal", "human",
+    "individual", "independent", "autonomous", "sovereign",
+    # Appearance vs. reality
+    "appear", "seem", "surface", "opinion", "reputation", "image",
+    "illusion", "phantom", "shadow", "cave", "light", "darkness",
+    # Craft/skill
+    "craft", "skill", "art", "techne", "method", "practice", "experience",
 }
 
 
@@ -491,6 +527,98 @@ def analyze_exoteric_esoteric_ratio(
 
 
 # ─────────────────────────────────────────────────────
+# Tool 5: Repetition with Variation Detector
+# ─────────────────────────────────────────────────────
+
+@dataclass
+class RepetitionResult:
+    """Result from the Repetition with Variation Detector."""
+    repeated_phrases: list[dict]  # [{phrase, occurrences: [{section, context, variation}]}]
+
+    def to_dict(self) -> dict:
+        return {
+            "type": "repetition_variation",
+            "repeated_phrases": self.repeated_phrases,
+        }
+
+
+def detect_repetition_with_variation(
+    text: str,
+    keywords: list[str],
+    delimiter_pattern: Optional[str] = None,
+    context_window: int = 120,
+) -> RepetitionResult:
+    """Detect phrases containing tracked keywords that repeat with subtle changes.
+
+    Strauss observed that when an author repeats a formulation but changes
+    a word or two, the variation is often the key to the esoteric meaning.
+    This tool finds sentences containing tracked keywords and groups them
+    to highlight variations across sections.
+
+    Args:
+        text: The full text
+        keywords: Terms to track for repetition
+        delimiter_pattern: Section boundary regex
+        context_window: Characters of context around each occurrence
+    """
+    sections = segment_text(text, delimiter_pattern)
+    keyword_set = {k.lower() for k in keywords}
+
+    # Collect all sentences containing keywords, grouped by keyword
+    keyword_contexts: dict[str, list[dict]] = defaultdict(list)
+
+    for section in sections:
+        sentences = re.split(r'(?<=[.!?])\s+', section.text)
+        for sentence in sentences:
+            sentence_lower = sentence.lower()
+            for kw in keyword_set:
+                if kw in sentence_lower.split():
+                    # Extract a normalized "shape" for comparison
+                    # Remove the keyword to see what varies around it
+                    keyword_contexts[kw].append({
+                        "section": section.label,
+                        "sentence": sentence.strip()[:context_window * 2],
+                        "words": set(re.findall(r'\w+', sentence_lower)) - keyword_set,
+                    })
+
+    # Find keywords with multiple occurrences where context varies
+    repeated = []
+    for kw, contexts in keyword_contexts.items():
+        if len(contexts) < 3:
+            continue
+
+        # Group by similarity — find pairs where most words overlap but some differ
+        occurrences = []
+        for ctx in contexts:
+            occurrences.append({
+                "section": ctx["section"],
+                "context": ctx["sentence"],
+            })
+
+        # Calculate variation: which words appear in some but not all occurrences
+        all_words = Counter()
+        for ctx in contexts:
+            all_words.update(ctx["words"])
+
+        # Words that appear in some but not all — these are the "variations"
+        total = len(contexts)
+        varying_words = [w for w, count in all_words.items()
+                        if 2 <= count < total and len(w) > 3]
+
+        if varying_words:
+            repeated.append({
+                "keyword": kw,
+                "occurrence_count": len(occurrences),
+                "varying_words": varying_words[:10],
+                "occurrences": occurrences[:8],  # Limit for UI
+            })
+
+    repeated.sort(key=lambda r: r["occurrence_count"], reverse=True)
+
+    return RepetitionResult(repeated_phrases=repeated[:15])
+
+
+# ─────────────────────────────────────────────────────
 # Orchestrator: Run all tools
 # ─────────────────────────────────────────────────────
 
@@ -499,7 +627,9 @@ class EsotericAnalysisConfig:
     """Configuration for running esoteric computational analysis."""
     keywords: list[str] = field(default_factory=lambda: [
         "justice", "truth", "god", "gods", "fate", "piety", "wisdom",
-        "nature", "law", "virtue", "death", "freedom",
+        "nature", "law", "virtue", "death", "freedom", "courage",
+        "knowledge", "opinion", "philosophy", "soul", "reason",
+        "noble", "beautiful", "good", "evil", "pleasure", "pain",
     ])
     entities: list[str] = field(default_factory=lambda: [])
     pious_words: Optional[set[str]] = None
@@ -514,7 +644,7 @@ def run_full_esoteric_analysis(
     text: str,
     config: Optional[EsotericAnalysisConfig] = None,
 ) -> dict:
-    """Run all four computational esoteric analysis tools and return combined results."""
+    """Run all five computational esoteric analysis tools and return combined results."""
     if config is None:
         config = EsotericAnalysisConfig()
 
@@ -571,5 +701,18 @@ def run_full_esoteric_analysis(
     except Exception as e:
         logger.error(f"Exoteric/Esoteric Ratio failed: {e}")
         results["exoteric_esoteric_ratio"] = {"error": str(e)}
+
+    # 5. Repetition with Variation
+    try:
+        repetition_result = detect_repetition_with_variation(
+            text=text,
+            keywords=config.keywords,
+            delimiter_pattern=config.delimiter_pattern,
+            context_window=config.context_window,
+        )
+        results["repetition_variation"] = repetition_result.to_dict()
+    except Exception as e:
+        logger.error(f"Repetition with Variation failed: {e}")
+        results["repetition_variation"] = {"error": str(e)}
 
     return results

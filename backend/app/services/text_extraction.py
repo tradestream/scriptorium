@@ -377,13 +377,47 @@ _PAGE_ARTIFACT_RE = re.compile(
     r'|-\s*\d+\s*-'                    # - 42 -
     r'|[ivxlcdm]+'                     # roman numerals
     r'|\[\s*[ivxlcdm]+\s*\]'          # [ xi ]
+    r'|[ivxlcdm]+\s*\]'               # Roman with trailing bracket
+    r'|\[\s*[ivxlcdm]+'               # Roman with leading bracket
+    r'|\[\s*\d+'                       # Partial bracket number: [ 123
+    r'|\d+\s*\]'                       # Partial bracket number: 123 ]
     r')\s*$',
     re.IGNORECASE,
 )
 
+# Common typographic ligature mappings (from epub2md)
+_LIGATURE_MAP = {
+    '\ufb01': 'fi', '\ufb02': 'fl', '\ufb00': 'ff',
+    '\ufb03': 'ffi', '\ufb04': 'ffl', '\ufb05': 'st', '\ufb06': 'st',
+}
+
 
 def _is_page_artifact(line: str) -> bool:
     return bool(_PAGE_ARTIFACT_RE.match(line.strip()))
+
+
+def normalize_ligatures(text: str) -> str:
+    """Fix ligature characters and broken ligature rendering from PDFs."""
+    for lig, repl in _LIGATURE_MAP.items():
+        text = text.replace(lig, repl)
+    # Fix broken ligature rendering: "fi rst" -> "first", "eff ect" -> "effect"
+    for pattern, fix in [
+        (r'\bffi\s+([a-z])', r'ffi\1'),
+        (r'\bffl\s+([a-z])', r'ffl\1'),
+        (r'\bff\s+([a-z])', r'ff\1'),
+        (r'\bfi\s+([a-z])', r'fi\1'),
+        (r'\bfl\s+([a-z])', r'fl\1'),
+        (r'(\w)fi\s+([a-z])', r'\1fi\2'),
+        (r'(\w)fl\s+([a-z])', r'\1fl\2'),
+        (r'(\w)ff\s+([a-z])', r'\1ff\2'),
+    ]:
+        text = re.sub(pattern, fix, text)
+    return text
+
+
+def fix_hyphenated_linebreaks(text: str) -> str:
+    """Join words split across lines by hyphens: 'word-\\nnext' -> 'wordnext'."""
+    return re.sub(r'(\w)-\s*\n\s*(\w)', r'\1\2', text)
 
 
 async def _extract_pdf_pdfplumber(path: Path) -> str:
@@ -474,7 +508,10 @@ async def _extract_pdf_pdfplumber(path: Path) -> str:
             paragraph_lines.append(stripped)
 
     flush_paragraph()
-    return "\n\n".join(result_parts)
+    text = "\n\n".join(result_parts)
+    text = normalize_ligatures(text)
+    text = fix_hyphenated_linebreaks(text)
+    return text
 
 
 async def _extract_pdf_text(path: Path) -> str:
