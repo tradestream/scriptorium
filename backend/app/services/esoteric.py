@@ -858,7 +858,95 @@ class EsotericAnalysisConfig:
 
 
 # ─────────────────────────────────────────────────────
-# Tool 8: Structural Obscurity Detector
+# Tool 8: Parenthetical & Footnote Extractor
+# ─────────────────────────────────────────────────────
+
+@dataclass
+class ParentheticalResult:
+    """Result from the Parenthetical & Footnote Extractor."""
+    parentheticals: list[dict]  # [{content, section, type}]
+    footnote_markers: list[dict]  # [{marker, section, context}]
+
+    def to_dict(self) -> dict:
+        return {
+            "type": "parenthetical_footnote",
+            "parentheticals": self.parentheticals,
+            "footnote_markers": self.footnote_markers,
+            "total_parentheticals": len(self.parentheticals),
+            "total_footnotes": len(self.footnote_markers),
+        }
+
+
+def extract_parentheticals(
+    text: str,
+    delimiter_pattern: Optional[str] = None,
+) -> ParentheticalResult:
+    """Extract parenthetical remarks and footnote references.
+
+    Per Strauss (via Lampert): esoteric writers frequently hide their most
+    important insights in footnotes, parenthetical asides, and subordinate
+    clauses. Strauss 'relegates to a central footnote a central matter.'
+    This tool extracts all such material for focused analysis.
+    """
+    sections = segment_text(text, delimiter_pattern)
+
+    parentheticals = []
+    footnote_markers = []
+
+    # Patterns for parenthetical content
+    paren_pattern = re.compile(r'\(([^)]{10,300})\)')  # content in parens, 10-300 chars
+    bracket_pattern = re.compile(r'\[([^\]]{10,300})\]')  # content in brackets
+    dash_pattern = re.compile(r'(?:—|--)\s*([^—\n]{10,200})\s*(?:—|--)')  # em-dash asides
+    footnote_pattern = re.compile(r'(?:[\.\,\;\:]\s*)(\d{1,3})(?:\s|$|\.|,)')  # superscript-like numbers
+
+    for section in sections:
+        # Parenthetical content
+        for m in paren_pattern.finditer(section.text):
+            content = m.group(1).strip()
+            if not content[0].isdigit():  # Skip pure citations like "(1952)"
+                parentheticals.append({
+                    "content": content,
+                    "section": section.label,
+                    "type": "parenthesis",
+                })
+
+        # Bracket content
+        for m in bracket_pattern.finditer(section.text):
+            content = m.group(1).strip()
+            if not content[0].isdigit():
+                parentheticals.append({
+                    "content": content,
+                    "section": section.label,
+                    "type": "bracket",
+                })
+
+        # Em-dash asides
+        for m in dash_pattern.finditer(section.text):
+            parentheticals.append({
+                "content": m.group(1).strip(),
+                "section": section.label,
+                "type": "em_dash_aside",
+            })
+
+        # Footnote markers (superscript numbers after punctuation)
+        for m in footnote_pattern.finditer(section.text):
+            num = m.group(1)
+            start = max(0, m.start() - 100)
+            context = section.text[start:m.end()].strip()
+            footnote_markers.append({
+                "marker": num,
+                "section": section.label,
+                "context": context,
+            })
+
+    return ParentheticalResult(
+        parentheticals=parentheticals[:40],
+        footnote_markers=footnote_markers[:30],
+    )
+
+
+# ─────────────────────────────────────────────────────
+# Tool 9: Structural Obscurity Detector
 # ─────────────────────────────────────────────────────
 
 @dataclass
@@ -1064,7 +1152,7 @@ def run_full_esoteric_analysis(
     text: str,
     config: Optional[EsotericAnalysisConfig] = None,
 ) -> dict:
-    """Run all nine computational esoteric analysis tools and return combined results."""
+    """Run all ten computational esoteric analysis tools and return combined results."""
     if config is None:
         config = EsotericAnalysisConfig()
 
@@ -1170,6 +1258,17 @@ def run_full_esoteric_analysis(
     except Exception as e:
         logger.error(f"Disreputable Mouthpiece Detector failed: {e}")
         results["disreputable_mouthpiece"] = {"error": str(e)}
+
+    # 8. Parenthetical & Footnote Extraction
+    try:
+        paren_result = extract_parentheticals(
+            text=text,
+            delimiter_pattern=config.delimiter_pattern,
+        )
+        results["parenthetical_footnote"] = paren_result.to_dict()
+    except Exception as e:
+        logger.error(f"Parenthetical Extractor failed: {e}")
+        results["parenthetical_footnote"] = {"error": str(e)}
 
     # 9. Structural Obscurity
     try:

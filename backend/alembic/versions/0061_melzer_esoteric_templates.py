@@ -122,6 +122,88 @@ STRAUSS_TEMPLATES = [
     },
 ]
 
+LAMPERT_TEMPLATES = [
+    {
+        "name": "Strauss: Secret Words (Double-Meaning Vocabulary)",
+        "description": "Identify words the author uses with a systematic double meaning — the 'lexicon of secret words' technique.",
+        "system_prompt": (
+            "You are an expert in Leo Strauss's discovery of philosophical double-meaning vocabulary. "
+            "Strauss found that great esoteric writers use common, honored words with a second, "
+            "hidden meaning known only to the initiated. Examples from Strauss's own discoveries:\n\n"
+            "- 'kalokagathia' (gentleman/noble-and-good): exoterically a term of highest praise; "
+            "esoterically, in the Socratic circle, a 'swear-word' meaning 'philistine' or 'bourgeois'\n"
+            "- 'sophrosune' (self-control/moderation): exoterically a cardinal virtue; esoterically, "
+            "the art of concealment itself — 'self-control in the expression of opinions'\n"
+            "- 'dikaiosune' (justice): in the Republic, 'has only its esoteric meaning' — the whole "
+            "work is 'an ironic justification precisely of the adikia (unjustice), for philosophy IS adikia'\n"
+            "- 'daimonion' (divine sign): exoterically a supernatural guide; esoterically, 'nous' (mind)\n\n"
+            "The technique: 'the most honored words of everyday use are supplied with a meaning very "
+            "different from their everyday sense, turning them ironic when used by artful speakers.'\n\n"
+            "Your task is to identify words in the text that may carry systematic double meanings."
+        ),
+        "user_prompt_template": (
+            "Perform a SECRET WORDS analysis on the following text:\n\n"
+            "1. HONORED WORDS\n"
+            "Identify words that are used with particular emphasis or frequency — especially "
+            "words of praise, moral terms, or religious/political vocabulary. For each:\n"
+            "- What is the conventional/surface meaning?\n"
+            "- Could there be a second, ironic or philosophical meaning?\n"
+            "- Does the author use the word in ways that seem slightly 'off' from its normal sense?\n\n"
+            "2. TECHNICAL TERMS USED NON-TECHNICALLY\n"
+            "Does the author use any philosophical/technical term in its everyday sense, or "
+            "vice versa? This reversal often signals esoteric meaning.\n\n"
+            "3. WORDS THAT APPEAR WITH QUOTATION MARKS OR EMPHASIS\n"
+            "Does the author place any common words in quotes, italics, or otherwise mark them "
+            "as needing special attention? These marks often signal double meaning.\n\n"
+            "4. THE LEXICON\n"
+            "Compile a list of candidate 'secret words' with their exoteric and potential "
+            "esoteric meanings. Rate confidence for each.\n\n"
+            "Text:\n{text}"
+        ),
+        "is_default": False,
+        "is_builtin": True,
+    },
+    {
+        "name": "Strauss: Esoterically False Statements",
+        "description": "Find statements that are presented as true but are esoterically false — and discover what truth they point toward.",
+        "system_prompt": (
+            "You are an expert in Leo Strauss's principle that in esoteric writing, 'the false "
+            "must in some sense be true as well.' When an esoteric author makes a statement that "
+            "is philosophically false but socially necessary, the falsity itself points toward "
+            "the concealed truth.\n\n"
+            "Example: When Socrates claims to concern himself 'only with the ethical things,' this "
+            "is esoterically false — but the truth it points to is that 'the central thought of the "
+            "Memorabilia' is 'the truth in the false claim that Socrates concerned himself only "
+            "with the ethical.' The false statement reveals the relationship between ethics and being.\n\n"
+            "The principle: 'in what sense is this thoroughly false principle also correct?' "
+            "The esoteric reader must identify WHICH statements are false, and then determine "
+            "what truth the falsity illuminates."
+        ),
+        "user_prompt_template": (
+            "Perform an ESOTERICALLY FALSE STATEMENTS analysis:\n\n"
+            "1. CANDIDATE FALSE STATEMENTS\n"
+            "Identify statements that seem to be central claims of the text but may be "
+            "philosophically false or oversimplified. For each:\n"
+            "- What does the statement claim?\n"
+            "- Why might it be false from a philosophical standpoint?\n"
+            "- Why would the author state it anyway? (social necessity, pedagogical purpose, "
+            "  protection from persecution)\n\n"
+            "2. THE TRUTH IN THE FALSITY\n"
+            "For each esoterically false statement:\n"
+            "- What truth does the falsity POINT TOWARD?\n"
+            "- 'In what sense is this thoroughly false principle also correct?'\n"
+            "- What deeper philosophical problem does it illuminate by being wrong in "
+            "  a particular way?\n\n"
+            "3. THE EXOTERIC/ESOTERIC INVERSION\n"
+            "Are there statements where the surface reading and the esoteric reading are "
+            "exact inversions of each other? These are the strongest signals.\n\n"
+            "Text:\n{text}"
+        ),
+        "is_default": False,
+        "is_builtin": True,
+    },
+]
+
 LECTURE_NOTES_TEMPLATES = [
     {
         "name": "Strauss: Dialogue & Drama Analysis",
@@ -419,7 +501,7 @@ MELZER_TEMPLATES = [
 
 def upgrade() -> None:
     conn = op.get_bind()
-    for tmpl in LECTURE_NOTES_TEMPLATES + STRAUSS_TEMPLATES + PERSECUTION_TEMPLATES + MELZER_TEMPLATES:
+    for tmpl in LAMPERT_TEMPLATES + LECTURE_NOTES_TEMPLATES + STRAUSS_TEMPLATES + PERSECUTION_TEMPLATES + MELZER_TEMPLATES:
         conn.execute(
             text(
                 "INSERT INTO analysis_templates "
@@ -437,7 +519,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     conn = op.get_bind()
-    for tmpl in LECTURE_NOTES_TEMPLATES + STRAUSS_TEMPLATES + PERSECUTION_TEMPLATES + MELZER_TEMPLATES:
+    for tmpl in LAMPERT_TEMPLATES + LECTURE_NOTES_TEMPLATES + STRAUSS_TEMPLATES + PERSECUTION_TEMPLATES + MELZER_TEMPLATES:
         conn.execute(
             text("DELETE FROM analysis_templates WHERE name = :name"),
             {"name": tmpl["name"]},
