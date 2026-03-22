@@ -150,48 +150,129 @@ async def consolidate_duplicates(
     if not primary:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Primary book not found")
 
+    primary_work_id = primary.work_id
+
     for src_id in data.source_ids:
         if src_id == data.primary_id:
             continue
 
+        # Load source edition to get its work_id
+        src_result = await db.execute(select(Book).where(Book.id == src_id))
+        src_edition = src_result.scalar_one_or_none()
+        if not src_edition:
+            continue
+        src_work_id = src_edition.work_id
+
+        # Move work-level data if different works
+        if src_work_id and primary_work_id and src_work_id != primary_work_id:
+            # Shelf assignments
+            await db.execute(
+                text("UPDATE OR IGNORE shelf_books SET work_id = :primary WHERE work_id = :src"),
+                {"primary": primary_work_id, "src": src_work_id},
+            )
+            await db.execute(text("DELETE FROM shelf_books WHERE work_id = :src"), {"src": src_work_id})
+            # Collection assignments
+            await db.execute(
+                text("UPDATE OR IGNORE collection_books SET work_id = :primary WHERE work_id = :src"),
+                {"primary": primary_work_id, "src": src_work_id},
+            )
+            await db.execute(text("DELETE FROM collection_books WHERE work_id = :src"), {"src": src_work_id})
+            # Read sessions
+            await db.execute(
+                text("UPDATE OR IGNORE read_sessions SET work_id = :primary WHERE work_id = :src"),
+                {"primary": primary_work_id, "src": src_work_id},
+            )
+            await db.execute(text("DELETE FROM read_sessions WHERE work_id = :src"), {"src": src_work_id})
+
+        # Move files (skip if same format already exists on primary)
+        await db.execute(
+            text(
+                "UPDATE OR IGNORE edition_files SET edition_id = :primary WHERE edition_id = :src"
+            ),
+            {"primary": data.primary_id, "src": src_id},
+        )
+        # Delete any remaining files that couldn't be moved (duplicate hash/path)
+        await db.execute(
+            text("DELETE FROM edition_files WHERE edition_id = :src"),
+            {"src": src_id},
+        )
+
         # Move annotations
         await db.execute(
-            text("UPDATE annotations SET book_id = :primary WHERE book_id = :src"),
+            text("UPDATE OR IGNORE annotations SET edition_id = :primary WHERE edition_id = :src"),
             {"primary": data.primary_id, "src": src_id},
         )
-        # Move read sessions
+        # Move marginalia
         await db.execute(
-            text("UPDATE read_sessions SET book_id = :primary WHERE book_id = :src"),
+            text("UPDATE OR IGNORE marginalia SET edition_id = :primary WHERE edition_id = :src"),
             {"primary": data.primary_id, "src": src_id},
         )
-        # Move read progress — skip if primary already has one
+        # Move read progress — skip if primary already has one for the same user
         await db.execute(
             text(
-                "UPDATE read_progress SET book_id = :primary WHERE book_id = :src "
-                "AND NOT EXISTS (SELECT 1 FROM read_progress WHERE book_id = :primary AND user_id = read_progress.user_id)"
+                "UPDATE OR IGNORE read_progress SET edition_id = :primary WHERE edition_id = :src "
+                "AND NOT EXISTS (SELECT 1 FROM read_progress rp2 WHERE rp2.edition_id = :primary AND rp2.user_id = read_progress.user_id)"
             ),
             {"primary": data.primary_id, "src": src_id},
         )
-        # Shelf assignments — skip duplicates
+        # Move user editions — skip duplicates
         await db.execute(
             text(
-                "UPDATE OR IGNORE shelf_books SET book_id = :primary WHERE book_id = :src"
+                "UPDATE OR IGNORE user_editions SET edition_id = :primary WHERE edition_id = :src"
             ),
             {"primary": data.primary_id, "src": src_id},
         )
-        # Collection assignments — skip duplicates
+        # Move edition contributors
         await db.execute(
             text(
-                "UPDATE OR IGNORE collection_books SET book_id = :primary WHERE book_id = :src"
+                "UPDATE OR IGNORE edition_contributors SET edition_id = :primary WHERE edition_id = :src"
+            ),
+            {"primary": data.primary_id, "src": src_id},
+        )
+        # Move Kobo state
+        await db.execute(
+            text(
+                "UPDATE OR IGNORE kobo_book_states SET edition_id = :primary WHERE edition_id = :src"
+            ),
+            {"primary": data.primary_id, "src": src_id},
+        )
+        # Move Kobo bookmarks
+        await db.execute(
+            text(
+                "UPDATE OR IGNORE kobo_bookmarks SET edition_id = :primary WHERE edition_id = :src"
+            ),
+            {"primary": data.primary_id, "src": src_id},
+        )
+        # Move Kobo synced books
+        await db.execute(
+            text(
+                "UPDATE OR IGNORE kobo_synced_books SET edition_id = :primary WHERE edition_id = :src"
             ),
             {"primary": data.primary_id, "src": src_id},
         )
 
-        # Delete source book (cascades files, authors, tags, series, FTS via trigger)
+        # Clean up any remaining references that couldn't be moved (duplicates)
+        for tbl in ("annotations", "marginalia", "read_progress", "user_editions",
+                     "edition_contributors", "kobo_book_states", "kobo_bookmarks", "kobo_synced_books"):
+            await db.execute(text(f"DELETE FROM {tbl} WHERE edition_id = :src"), {"src": src_id})
+
+        # Delete source edition
         await db.execute(
-            text("DELETE FROM books WHERE id = :src"),
+            text("DELETE FROM editions WHERE id = :src"),
             {"src": src_id},
         )
+
+        # Delete orphaned work if it has no more editions
+        if src_work_id and src_work_id != primary_work_id:
+            orphan_check = await db.execute(
+                text("SELECT COUNT(*) FROM editions WHERE work_id = :wid"),
+                {"wid": src_work_id},
+            )
+            if orphan_check.scalar() == 0:
+                # Clean up work associations
+                for assoc in ("work_authors", "work_tags", "work_series", "work_contributors"):
+                    await db.execute(text(f"DELETE FROM {assoc} WHERE work_id = :wid"), {"wid": src_work_id})
+                await db.execute(text("DELETE FROM works WHERE id = :wid"), {"wid": src_work_id})
 
     await db.commit()
 
