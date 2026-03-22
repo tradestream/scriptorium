@@ -5,7 +5,7 @@
   import { Card, CardContent, CardHeader, CardTitle } from "$lib/components/ui/card";
   import { Progress } from "$lib/components/ui/progress";
   import { Separator } from "$lib/components/ui/separator";
-  import { BookOpen, Download, Pencil, X, Sparkles, ChevronDown, ChevronLeft, ChevronRight, Send, BookMarked, Check, Layers, Plus, Highlighter, MessageSquare, Bookmark, Trash2, CalendarCheck, Lightbulb, Package, Headphones, ScanSearch, MapPin, Quote } from "lucide-svelte";
+  import { BookOpen, Download, Pencil, X, Sparkles, ChevronDown, ChevronLeft, ChevronRight, Send, BookMarked, Check, Layers, Plus, Highlighter, MessageSquare, Bookmark, Trash2, CalendarCheck, Lightbulb, Package, Headphones, ScanSearch, MapPin, Quote, Globe } from "lucide-svelte";
   import BookAnalysis from "$lib/components/BookAnalysis.svelte";
   import Marginalia from "$lib/components/Marginalia.svelte";
   import EsotericAnalysis from "$lib/components/EsotericAnalysis.svelte";
@@ -65,6 +65,9 @@
   let enriching = $state(false);
   let enrichError = $state('');
   let enrichSuccess = $state('');
+  let showUrlEnrich = $state(false);
+  let urlEnrichInput = $state('');
+  let urlEnriching = $state(false);
   let providers = $state<EnrichmentProvider[]>([]);
   let selectedProvider = $state('');
   let showProviders = $state(false);
@@ -283,6 +286,24 @@
       extractIdsMsg = err instanceof Error ? err.message : 'Extraction failed';
     } finally {
       extractingIds = false;
+    }
+  }
+
+  async function handleUrlEnrich() {
+    if (!book || !urlEnrichInput.trim()) return;
+    urlEnriching = true;
+    enrichError = '';
+    enrichSuccess = '';
+    try {
+      const { enrichBookFromUrl } = await import('$lib/api/client');
+      book = await enrichBookFromUrl(book.id, urlEnrichInput.trim());
+      enrichSuccess = 'Metadata updated from URL';
+      showUrlEnrich = false;
+      urlEnrichInput = '';
+    } catch (err) {
+      enrichError = err instanceof Error ? err.message : 'URL enrichment failed';
+    } finally {
+      urlEnriching = false;
     }
   }
 
@@ -749,6 +770,33 @@
                 <ScanSearch class="mr-1.5 h-3.5 w-3.5" />
                 {extractingIds ? 'Scanning…' : 'Extract IDs'}
               </Button>
+              <div class="relative">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onclick={() => showUrlEnrich = !showUrlEnrich}
+                  disabled={urlEnriching}
+                  title="Enrich from a web page URL (Goodreads, Amazon, publisher site)"
+                >
+                  <Globe class="mr-1.5 h-3.5 w-3.5" />
+                  {urlEnriching ? 'Fetching…' : 'From URL'}
+                </Button>
+                {#if showUrlEnrich}
+                  <div class="fixed inset-0 z-40" onclick={() => showUrlEnrich = false}></div>
+                  <div class="absolute right-0 top-full z-50 mt-1 w-80 rounded-md border bg-popover p-3 shadow-md space-y-2">
+                    <p class="text-xs text-muted-foreground">Paste a Goodreads, Amazon, or publisher page URL to extract metadata</p>
+                    <input
+                      bind:value={urlEnrichInput}
+                      placeholder="https://..."
+                      class="w-full rounded border bg-background px-2 py-1.5 text-sm outline-none focus:ring-1 focus:ring-ring"
+                      onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleUrlEnrich(); } }}
+                    />
+                    <Button size="sm" class="w-full" onclick={handleUrlEnrich} disabled={!urlEnrichInput.trim() || urlEnriching}>
+                      {urlEnriching ? 'Extracting…' : 'Extract & Apply'}
+                    </Button>
+                  </div>
+                {/if}
+              </div>
               <div class="relative">
                 <Button
                   variant="outline"

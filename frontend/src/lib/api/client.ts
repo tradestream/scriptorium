@@ -313,6 +313,14 @@ export async function enrichBook(bookId: number | string, provider?: string): Pr
   return fetchAPI(`/books/${bookId}/enrich${qs}`, { method: 'POST' });
 }
 
+export async function extractFromUrl(url: string): Promise<Record<string, unknown>> {
+  return fetchAPI('/books/extract-from-url', { method: 'POST', body: JSON.stringify({ url }) });
+}
+
+export async function enrichBookFromUrl(bookId: number | string, url: string): Promise<Book> {
+  return fetchAPI(`/books/${bookId}/enrich-from-url`, { method: 'POST', body: JSON.stringify({ url }) });
+}
+
 export interface EnrichStreamEvent {
   provider: string;
   status: 'ok' | 'error' | 'skipped';

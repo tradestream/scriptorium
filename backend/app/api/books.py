@@ -875,6 +875,110 @@ async def get_enrichment_proposals(
     ]
 
 
+class UrlExtractRequest(BaseModel):
+    url: str
+
+
+@router.post("/extract-from-url")
+async def extract_metadata_from_url(
+    data: UrlExtractRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Extract Open Graph / Dublin Core metadata from a web page.
+
+    Useful for previewing metadata before applying it to a book.
+    Works with publisher pages, Goodreads, Amazon, etc.
+    """
+    from app.services.opengraph import extract_from_url
+    return await extract_from_url(data.url)
+
+
+@router.post("/{book_id}/enrich-from-url", response_model=BookRead)
+async def enrich_book_from_url(
+    book_id: int,
+    data: UrlExtractRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Enrich a book's metadata from a web page URL (Open Graph extraction).
+
+    Fills in empty fields only. Also downloads cover image if available.
+    """
+    if not current_user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+
+    from app.services.opengraph import extract_from_url
+    from app.services.covers import cover_service
+
+    stmt = select(Edition).where(Edition.id == book_id).options(*_edition_options())
+    result = await db.execute(stmt)
+    edition = result.unique().scalar_one_or_none()
+    if not edition:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+
+    work = edition.work
+    meta = await extract_from_url(data.url)
+
+    # Apply metadata to empty fields only
+    if meta.get("title") and not work.title:
+        work.title = meta["title"]
+    if meta.get("description") and not work.description:
+        work.description = meta["description"]
+    if meta.get("isbn") and not edition.isbn:
+        from app.utils.isbn import normalize
+        isbn13, isbn10 = normalize(meta["isbn"])
+        edition.isbn = isbn13
+        edition.isbn_10 = isbn10
+    if meta.get("publisher") and not edition.publisher:
+        edition.publisher = meta["publisher"]
+    if meta.get("language") and not edition.language:
+        edition.language = meta["language"]
+    if meta.get("published_date") and not edition.published_date:
+        edition.published_date = meta["published_date"]
+
+    # Add authors if none exist
+    if meta.get("authors") and not work.authors:
+        for aname in meta["authors"]:
+            existing = await db.execute(select(Author).where(Author.name == aname))
+            author = existing.scalar_one_or_none()
+            if not author:
+                author = Author(name=aname)
+                db.add(author)
+                await db.flush()
+            work.authors.append(author)
+
+    # Download cover if available and book has none
+    if meta.get("image_url") and not edition.cover_hash:
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+                resp = await client.get(meta["image_url"])
+                if resp.status_code == 200 and len(resp.content) > 1000:
+                    cover_hash, cover_format, cover_color = await cover_service.save_cover(
+                        resp.content, edition.uuid
+                    )
+                    if cover_hash:
+                        edition.cover_hash = cover_hash
+                        edition.cover_format = cover_format
+                        edition.cover_color = cover_color
+        except Exception:
+            pass  # Cover download is non-critical
+
+    await db.commit()
+
+    # Re-fetch for response
+    result = await db.execute(
+        select(Edition).where(Edition.id == book_id).options(*_edition_options())
+    )
+    edition = result.unique().scalar_one()
+
+    from app.services.search import search_service
+    await search_service.index_work(db, work, [a.name for a in work.authors])
+    await db.commit()
+
+    return BookRead.model_validate(edition)
+
+
 @router.post("/{book_id}/enrich", response_model=BookRead)
 async def enrich_book_metadata(
     book_id: int,
