@@ -354,6 +354,13 @@ TEMPLATES = [
 def upgrade() -> None:
     conn = op.get_bind()
     for tmpl in TEMPLATES:
+        # Skip if already exists (idempotent for re-runs)
+        exists = conn.execute(
+            text("SELECT 1 FROM analysis_templates WHERE name = :name"),
+            {"name": tmpl["name"]},
+        ).fetchone()
+        if exists:
+            continue
         conn.execute(
             text(
                 "INSERT INTO analysis_templates "
