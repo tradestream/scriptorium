@@ -69,6 +69,11 @@ class Edition(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
 
+    @property
+    def reading_status(self) -> None:
+        """Stub for BookRead schema — actual value is injected by the list endpoint."""
+        return None
+
     # ── Relationships ─────────────────────────────────────────────────────────
     work: Mapped["Work"] = relationship("Work", back_populates="editions")
     library: Mapped["Library"] = relationship("Library", back_populates="editions")

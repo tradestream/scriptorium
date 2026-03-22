@@ -196,12 +196,6 @@ class BookRead(BookBase):
     content_warnings: Optional[dict] = None
     reading_status: Optional[str] = None  # want_to_read | reading | completed | abandoned (set by API, not ORM)
 
-    @field_validator('reading_status', mode='before')
-    @classmethod
-    def default_reading_status(cls, v):
-        # reading_status is not an ORM column — it's injected by the API layer
-        return v if isinstance(v, str) else None
-
     @field_validator('content_warnings', mode='before')
     @classmethod
     def parse_content_warnings(cls, v):
