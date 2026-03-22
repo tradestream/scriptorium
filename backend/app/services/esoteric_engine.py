@@ -598,7 +598,424 @@ class NumericalStructure:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Module 4: Melzer Cluster Detector
+# Module 4: Melzer Fourteen Modes
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class MelzerTaxonomy:
+    """Detection for Melzer's fourteen modes of esoteric communication."""
+
+    # Mode 5: Shocking/blasphemous statements
+    ORTHODOX_VIOLATIONS = re.compile(
+        r'(?:god (?:is dead|does not exist|cannot)|no (?:god|providence|afterlife|soul|immortality)|'
+        r'religion is (?:false|superstition|invention|useful fiction)|'
+        r'all (?:morality|virtue|religion) is (?:merely|nothing but|convention)|'
+        r'there is no (?:natural (?:law|right)|moral order|divine (?:law|providence)))',
+        re.I
+    )
+
+    # Mode 7: Form/content mismatch indicators
+    GRAND_STYLE_MARKERS = re.compile(r'(?:O\s+[A-Z]|alas|behold|lo\b|hark|verily|forsooth|indeed)', re.I)
+    CASUAL_MARKERS = re.compile(r'(?:by the way|incidentally|in passing|as an aside|parenthetically|to digress)', re.I)
+
+    # Mode 9: Emphasis inversion — "by the way" framing of important claims
+    UNDEREMPHASIS = re.compile(
+        r'(?:by the way|incidentally|in passing|as (?:a |an )?(?:aside|afterthought)|'
+        r'(?:this|it) (?:may|might) (?:seem|appear) (?:trivial|unimportant|minor)|'
+        r'(?:a |this |one )?(?:small|minor|trivial|trifling) (?:point|matter|detail|observation))',
+        re.I
+    )
+
+    # Mode 8: Dramatic/narrative irony markers
+    IRONY_MARKERS = re.compile(
+        r'(?:of course|naturally|obviously|needless to say|it goes without saying|'
+        r'everyone knows|who (?:could|would) (?:doubt|deny)|'
+        r'as (?:everyone|all) (?:agree|know)s?|'
+        r'it is (?:well known|universally (?:admitted|acknowledged)))',
+        re.I
+    )
+
+    def analyze(self, text: str, sections: list[Section], weights: ScoringWeights) -> list[Finding]:
+        findings = []
+        findings.extend(self._shocking_statements(text, sections, weights))
+        findings.extend(self._form_content_mismatch(text, sections, weights))
+        findings.extend(self._emphasis_inversion(text, sections, weights))
+        findings.extend(self._irony_markers(text, sections, weights))
+        findings.extend(self._incomplete_argumentation(text, sections, weights))
+        findings.extend(self._conspicuous_omission(text, sections, weights))
+        findings.extend(self._anomalous_details(text, sections, weights))
+        return findings
+
+    def _shocking_statements(self, text: str, sections: list[Section], weights: ScoringWeights) -> list[Finding]:
+        """Mode 5: Statements contradicting religious/political orthodoxy."""
+        findings = []
+        for m in self.ORTHODOX_VIOLATIONS.finditer(text):
+            start = max(0, m.start() - 150)
+            end = min(len(text), m.end() + 150)
+            findings.append(Finding(
+                technique="shocking_statement",
+                score=weights.shocking_statement * 0.7,
+                section="",
+                evidence=text[start:end],
+                explanation=f"Potentially shocking claim: '{m.group(0)}' — contradicts orthodox views.",
+                deliberateness=0.7,
+            ))
+        return findings[:10]
+
+    def _form_content_mismatch(self, text: str, sections: list[Section], weights: ScoringWeights) -> list[Finding]:
+        """Mode 7: Trivial content in grand style, or profound content in casual style."""
+        findings = []
+        for sec in sections:
+            grand = len(self.GRAND_STYLE_MARKERS.findall(sec.text))
+            casual = len(self.CASUAL_MARKERS.findall(sec.text))
+            words = len(re.findall(r'\w+', sec.text))
+            if words < 50:
+                continue
+
+            # Check for casual framing of important-looking content
+            if casual > 0:
+                # Find what's said "in passing"
+                for m in self.CASUAL_MARKERS.finditer(sec.text):
+                    end = sec.text.find('.', m.end())
+                    if end == -1:
+                        end = min(len(sec.text), m.end() + 200)
+                    passage = sec.text[m.start():end+1].strip()
+                    findings.append(Finding(
+                        technique="form_content_mismatch",
+                        score=weights.form_content_mismatch * 0.6,
+                        section=sec.label,
+                        evidence=passage[:200],
+                        explanation=f"Important content introduced casually with '{m.group(0)}' — possible emphasis inversion.",
+                        deliberateness=0.6,
+                    ))
+
+        return findings[:10]
+
+    def _emphasis_inversion(self, text: str, sections: list[Section], weights: ScoringWeights) -> list[Finding]:
+        """Mode 9: Important claims framed as trivial, minor points treated extensively."""
+        findings = []
+        for m in self.UNDEREMPHASIS.finditer(text):
+            start = m.start()
+            end = text.find('.', m.end())
+            if end == -1:
+                end = min(len(text), m.end() + 200)
+            passage = text[start:end+1].strip()
+
+            findings.append(Finding(
+                technique="emphasis_inversion",
+                score=weights.emphasis_inversion * 0.5,
+                section="",
+                evidence=passage[:200],
+                explanation=f"Underemphasis marker '{m.group(0)}' — important claim may be disguised as minor.",
+                deliberateness=0.6,
+            ))
+        return findings[:10]
+
+    def _irony_markers(self, text: str, sections: list[Section], weights: ScoringWeights) -> list[Finding]:
+        """Mode 8: Ironic assertions disguised as common knowledge."""
+        findings = []
+        for m in self.IRONY_MARKERS.finditer(text):
+            start = max(0, m.start() - 50)
+            end = text.find('.', m.end())
+            if end == -1:
+                end = min(len(text), m.end() + 200)
+            passage = text[start:end+1].strip()
+
+            findings.append(Finding(
+                technique="dramatic_irony",
+                score=weights.dramatic_irony * 0.4,
+                section="",
+                evidence=passage[:200],
+                explanation=f"Irony marker '{m.group(0)}' — what's presented as obvious may be the opposite.",
+                deliberateness=0.4,
+            ))
+        return findings[:15]
+
+    def _incomplete_argumentation(self, text: str, sections: list[Section], weights: ScoringWeights) -> list[Finding]:
+        """Mode 3: Missing premises, unsupported conclusions, asymmetric treatment."""
+        findings = []
+        sentences = get_sentences(text)
+
+        # Find conclusions without premises
+        CONCLUSION_MARKERS = re.compile(r'\b(?:therefore|thus|hence|consequently|it follows|we must conclude|accordingly)\b', re.I)
+        PREMISE_MARKERS = re.compile(r'\b(?:because|since|for|given that|inasmuch as|insofar as)\b', re.I)
+
+        for i, sent in enumerate(sentences):
+            if CONCLUSION_MARKERS.search(sent):
+                # Check if nearby sentences provide premises
+                nearby = ' '.join(sentences[max(0,i-3):i])
+                has_premise = bool(PREMISE_MARKERS.search(nearby))
+                if not has_premise:
+                    findings.append(Finding(
+                        technique="logical_incompleteness",
+                        score=weights.logical_incompleteness * 0.4,
+                        section=f"Sentence {i+1}",
+                        evidence=sent[:200],
+                        explanation="Conclusion without explicit premise — reader must supply the missing step.",
+                        deliberateness=0.4,
+                    ))
+
+        return findings[:10]
+
+    def _conspicuous_omission(self, text: str, sections: list[Section], weights: ScoringWeights) -> list[Finding]:
+        """Mode 6: Topics introduced then abandoned, questions raised but unanswered."""
+        findings = []
+        sentences = get_sentences(text)
+
+        QUESTION_PATTERNS = re.compile(r'[^.]*\?\s*$')
+        questions = [(i, s) for i, s in enumerate(sentences) if QUESTION_PATTERNS.match(s)]
+
+        for qi, (idx, question) in enumerate(questions):
+            # Check if the next few sentences attempt to answer
+            answer_region = ' '.join(sentences[idx+1:idx+4]) if idx+1 < len(sentences) else ""
+            # Crude check: does the answer region address the question's keywords?
+            q_words = set(re.findall(r'\w+', question.lower())) - {'the', 'a', 'is', 'are', 'was', 'what', 'why', 'how', 'do', 'does', 'did', 'this', 'that', 'it'}
+            a_words = set(re.findall(r'\w+', answer_region.lower()))
+            overlap = len(q_words & a_words) / max(len(q_words), 1)
+
+            if overlap < 0.2 and len(q_words) > 3:
+                findings.append(Finding(
+                    technique="conspicuous_omission",
+                    score=weights.conspicuous_omission * 0.5,
+                    section=f"Sentence {idx+1}",
+                    evidence=question[:200],
+                    explanation="Question raised but not clearly answered — possible strategic omission.",
+                    deliberateness=0.4,
+                ))
+
+        return findings[:10]
+
+    def _anomalous_details(self, text: str, sections: list[Section], weights: ScoringWeights) -> list[Finding]:
+        """Mode 12: Irrelevant-seeming details, unusual specificity, odd examples."""
+        findings = []
+
+        # Look for very specific numbers/dates/names that seem out of place
+        SPECIFIC_DETAIL = re.compile(
+            r'(?:exactly|precisely)\s+\d+|'
+            r'(?:on|at|in)\s+(?:the\s+)?(?:year|day|page|line|chapter|verse|section)\s+\d+|'
+            r'(?:footnote|note|cf\.)\s+\d+',
+            re.I
+        )
+
+        for m in SPECIFIC_DETAIL.finditer(text):
+            start = max(0, m.start() - 100)
+            end = min(len(text), m.end() + 100)
+            findings.append(Finding(
+                technique="anomalous_detail",
+                score=weights.anomalous_detail * 0.3,
+                section="",
+                evidence=text[start:end],
+                explanation=f"Unusually specific detail: '{m.group(0)}' — may be a coded reference.",
+                deliberateness=0.3,
+            ))
+
+        return findings[:10]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Module 5: Advanced Structural Analysis
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class AdvancedStructure:
+    """Chiasmus, musical proportions, section organization analysis."""
+
+    MUSICAL_RATIOS = {
+        "octave (2:1)": 2.0,
+        "fifth (3:2)": 1.5,
+        "fourth (4:3)": 1.333,
+        "major third (5:4)": 1.25,
+        "golden ratio": 1.618,
+    }
+
+    def analyze(self, text: str, sections: list[Section], weights: ScoringWeights) -> list[Finding]:
+        findings = []
+        findings.extend(self._chiasmus_detection(text, sections, weights))
+        findings.extend(self._proportional_analysis(sections, weights))
+        findings.extend(self._section_organization(sections, weights))
+        findings.extend(self._first_last_analysis(text, sections, weights))
+        findings.extend(self._epigraph_extraction(text, weights))
+        return findings
+
+    def _chiasmus_detection(self, text: str, sections: list[Section], weights: ScoringWeights) -> list[Finding]:
+        """Detect ABCBA ring patterns at section level."""
+        findings = []
+        if len(sections) < 5:
+            return findings
+
+        # Compare section pairs from outside in
+        n = len(sections)
+        ring_scores = []
+        for i in range(n // 2):
+            outer = sections[i]
+            mirror = sections[n - 1 - i]
+
+            outer_words = set(re.findall(r'\w+', outer.text.lower())) - {'the', 'a', 'an', 'and', 'or', 'is', 'of', 'in', 'to', 'was', 'that', 'it'}
+            mirror_words = set(re.findall(r'\w+', mirror.text.lower())) - {'the', 'a', 'an', 'and', 'or', 'is', 'of', 'in', 'to', 'was', 'that', 'it'}
+
+            if outer_words:
+                overlap = len(outer_words & mirror_words) / len(outer_words)
+                ring_scores.append((outer.label, mirror.label, overlap))
+
+        avg_ring = sum(s[2] for s in ring_scores) / max(len(ring_scores), 1)
+        if avg_ring > 0.25 and len(ring_scores) >= 2:
+            top_pairs = sorted(ring_scores, key=lambda x: x[2], reverse=True)[:3]
+            pair_desc = "; ".join(f"{a}<->{b} ({o:.0%})" for a, b, o in top_pairs)
+            findings.append(Finding(
+                technique="numerical_pattern",
+                score=weights.numerical_pattern * avg_ring,
+                section="Ring structure",
+                evidence=f"Mirror pairs: {pair_desc}",
+                explanation=f"Ring/chiastic composition detected (avg overlap {avg_ring:.0%}). Center section may contain the key teaching.",
+                deliberateness=avg_ring * 0.8,
+            ))
+
+        return findings
+
+    def _proportional_analysis(self, sections: list[Section], weights: ScoringWeights) -> list[Finding]:
+        """Check section length ratios against musical/golden proportions."""
+        findings = []
+        if len(sections) < 2:
+            return findings
+
+        sizes = [len(s.text) for s in sections]
+        for i in range(len(sizes)):
+            for j in range(i + 1, min(i + 4, len(sizes))):
+                if sizes[j] == 0:
+                    continue
+                ratio = sizes[i] / sizes[j]
+                if ratio < 1:
+                    ratio = 1 / ratio
+
+                for name, target in self.MUSICAL_RATIOS.items():
+                    if abs(ratio - target) < 0.05:
+                        findings.append(Finding(
+                            technique="numerical_pattern",
+                            score=weights.numerical_pattern * 0.3,
+                            section=f"{sections[i].label} / {sections[j].label}",
+                            evidence=f"Ratio {ratio:.3f} ≈ {name} ({target})",
+                            explanation=f"Section lengths approximate {name} — may indicate deliberate proportioning.",
+                            deliberateness=0.3,
+                        ))
+
+        return findings[:5]
+
+    def _section_organization(self, sections: list[Section], weights: ScoringWeights) -> list[Finding]:
+        """Analyze whether divisions seem organic or schematic."""
+        findings = []
+        if len(sections) < 3:
+            return findings
+
+        sizes = [len(s.text) for s in sections]
+        avg = sum(sizes) / len(sizes)
+        std = (sum((s - avg) ** 2 for s in sizes) / len(sizes)) ** 0.5
+        cv = std / avg if avg > 0 else 0
+
+        if cv < 0.2:
+            findings.append(Finding(
+                technique="strategic_obscurity",
+                score=weights.strategic_obscurity * 0.4,
+                section="Structure",
+                evidence=f"Section size CV = {cv:.2f} (very uniform)",
+                explanation="Sections are unusually uniform in length — may indicate schematic rather than organic division.",
+                deliberateness=0.4,
+            ))
+        elif cv > 0.8:
+            findings.append(Finding(
+                technique="strategic_obscurity",
+                score=weights.strategic_obscurity * 0.5,
+                section="Structure",
+                evidence=f"Section size CV = {cv:.2f} (very uneven)",
+                explanation="Wildly uneven sections — important content may be hidden in unexpectedly short or long sections.",
+                deliberateness=0.5,
+            ))
+
+        return findings
+
+    def _first_last_analysis(self, text: str, sections: list[Section], weights: ScoringWeights) -> list[Finding]:
+        """Analyze first and last words/sentences for significance."""
+        findings = []
+        words = re.findall(r'\w+', text)
+        if not words:
+            return findings
+
+        first_word = words[0]
+        last_word = words[-1]
+        sentences = get_sentences(text)
+
+        if first_word.lower() == last_word.lower():
+            findings.append(Finding(
+                technique="numerical_pattern",
+                score=weights.numerical_pattern * 0.8,
+                section="Opening/Closing",
+                evidence=f"Text begins and ends with '{first_word}'",
+                explanation="Identical first and last word — strong ring composition signal.",
+                deliberateness=0.8,
+            ))
+
+        if sentences:
+            findings.append(Finding(
+                technique="anomalous_detail",
+                score=weights.anomalous_detail * 0.2,
+                section="Paratext",
+                evidence=f"First: '{sentences[0][:100]}...' | Last: '{sentences[-1][:100]}...'",
+                explanation="First and last sentences — almost always significant per Strauss.",
+                deliberateness=0.3,
+            ))
+
+        return findings
+
+    def _epigraph_extraction(self, text: str, weights: ScoringWeights) -> list[Finding]:
+        """Extract epigraphs from the opening of the text."""
+        findings = []
+        # Look for quoted text with attribution in first 3000 chars
+        pattern = re.compile(
+            r'["\u201c]([^"\u201d]{20,500})["\u201d]\s*(?:—|--|-)\s*([A-Z][^\n]{3,80})',
+        )
+        for m in pattern.finditer(text[:3000]):
+            findings.append(Finding(
+                technique="anomalous_detail",
+                score=weights.anomalous_detail * 0.5,
+                section="Epigraph",
+                evidence=f'"{m.group(1)[:150]}..." — {m.group(2)}',
+                explanation="Epigraph — chosen with extreme care, often contains the key to the whole work.",
+                deliberateness=0.6,
+            ))
+        return findings[:3]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Module 6: Comparative Baseline
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ComparativeBaseline:
+    """Compare a text's metrics against a baseline to detect deviations."""
+
+    def score_deviations(self, report: 'EsotericReport', baseline_scores: Optional[dict] = None) -> list[Finding]:
+        """If we have baseline metrics from the author's other works, flag deviations."""
+        if not baseline_scores:
+            return []
+
+        findings = []
+        for module, score in report.module_scores.items():
+            if module in baseline_scores:
+                baseline = baseline_scores[module]
+                if baseline > 0:
+                    deviation = (score - baseline) / baseline
+                    if abs(deviation) > 0.5:
+                        direction = "higher" if deviation > 0 else "lower"
+                        findings.append(Finding(
+                            technique="anomalous_detail",
+                            score=abs(deviation) * 5,
+                            section="Comparative",
+                            evidence=f"{module}: {score:.1f} vs baseline {baseline:.1f}",
+                            explanation=f"This text scores {abs(deviation):.0%} {direction} than the author's typical on {module}.",
+                            deliberateness=min(abs(deviation), 1.0),
+                        ))
+
+        return findings
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Module 7: Melzer Cluster Detector
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class MelzerClusterDetector:
@@ -640,6 +1057,9 @@ class EsotericAnalyzer:
         self.strauss = StraussCore()
         self.language = LanguageAnalysis()
         self.numerical = NumericalStructure()
+        self.melzer = MelzerTaxonomy()
+        self.structure = AdvancedStructure()
+        self.comparative = ComparativeBaseline()
         self.cluster_detector = MelzerClusterDetector()
 
     def analyze(
@@ -685,6 +1105,16 @@ class EsotericAnalyzer:
         num_findings = self.numerical.analyze(text, sections, w)
         all_findings.extend(num_findings)
         module_scores["numerical"] = sum(f.score for f in num_findings)
+
+        # Melzer Taxonomy (14 modes)
+        melzer_findings = self.melzer.analyze(text, sections, w)
+        all_findings.extend(melzer_findings)
+        module_scores["melzer_taxonomy"] = sum(f.score for f in melzer_findings)
+
+        # Advanced Structure (chiasmus, proportions, organization)
+        struct_findings = self.structure.analyze(text, sections, w)
+        all_findings.extend(struct_findings)
+        module_scores["advanced_structure"] = sum(f.score for f in struct_findings)
 
         # Find clusters
         clusters = self.cluster_detector.find_clusters(all_findings, sections)
