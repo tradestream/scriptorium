@@ -3,7 +3,7 @@
   import GroupedBooks from "$lib/components/GroupedBooks.svelte";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
-  import { LayoutGrid, List, Search, RefreshCw, ArrowUpDown, Layers, CheckSquare, X, ScanSearch, Sparkles, FileType, BookMarked } from "lucide-svelte";
+  import { LayoutGrid, List, Search, RefreshCw, ArrowUpDown, Layers, CheckSquare, X, ScanSearch, Sparkles, FileType, BookMarked, Tags } from "lucide-svelte";
   import * as api from "$lib/api/client";
   import type { Book } from "$lib/types/index";
   import type { PageData } from './$types';
@@ -242,6 +242,32 @@
       showBulkShelfPicker = false;
     }
   }
+
+  // Bulk metadata editing
+  let showBulkEdit = $state(false);
+  let bulkEditField = $state<'language' | 'publisher' | 'tag' | 'author'>('language');
+  let bulkEditValue = $state('');
+
+  async function applyBulkEdit() {
+    if (selectedIds.size === 0 || !bulkEditValue.trim()) return;
+    bulkActionRunning = true;
+    bulkMsg = 'Applying...';
+    try {
+      const updates: Record<string, unknown> = {};
+      if (bulkEditField === 'language') updates.language = bulkEditValue.trim();
+      else if (bulkEditField === 'publisher') updates.publisher = bulkEditValue.trim();
+      else if (bulkEditField === 'tag') { updates.tag_names = [bulkEditValue.trim()]; updates.merge_tags = true; }
+      else if (bulkEditField === 'author') { updates.author_names = [bulkEditValue.trim()]; updates.merge_authors = true; }
+      const r = await api.bulkEditBooks([...selectedIds], updates);
+      bulkMsg = `Updated ${r.updated} books${r.failed ? `, ${r.failed} failed` : ''}`;
+    } catch (e) {
+      bulkMsg = e instanceof Error ? e.message : 'Failed';
+    } finally {
+      bulkActionRunning = false;
+      showBulkEdit = false;
+      bulkEditValue = '';
+    }
+  }
 </script>
 
 <div class="flex h-full flex-col">
@@ -393,7 +419,7 @@
           <Button
             variant="outline"
             size="sm"
-            onclick={() => { showBulkShelfPicker = !showBulkShelfPicker; if (showBulkShelfPicker) loadBulkShelves(); }}
+            onclick={() => { showBulkShelfPicker = !showBulkShelfPicker; showBulkEdit = false; if (showBulkShelfPicker) loadBulkShelves(); }}
             disabled={selectedIds.size === 0 || bulkActionRunning}
           >
             <BookMarked class="mr-1.5 h-3.5 w-3.5" />
@@ -411,6 +437,38 @@
               {#if bulkShelves.length === 0}
                 <p class="px-3 py-1.5 text-xs text-muted-foreground">No shelves</p>
               {/if}
+            </div>
+          {/if}
+        </div>
+        <div class="relative">
+          <Button
+            variant="outline"
+            size="sm"
+            onclick={() => { showBulkEdit = !showBulkEdit; showBulkShelfPicker = false; }}
+            disabled={selectedIds.size === 0 || bulkActionRunning}
+          >
+            <Tags class="mr-1.5 h-3.5 w-3.5" />
+            Set Field
+          </Button>
+          {#if showBulkEdit}
+            <div class="fixed inset-0 z-40" onclick={() => showBulkEdit = false}></div>
+            <div class="absolute right-0 top-full z-50 mt-1 w-64 rounded-md border bg-popover p-3 shadow-md space-y-2">
+              <select bind:value={bulkEditField}
+                class="w-full rounded border bg-background px-2 py-1.5 text-sm outline-none focus:ring-1 focus:ring-ring">
+                <option value="language">Language</option>
+                <option value="publisher">Publisher</option>
+                <option value="tag">Add Tag</option>
+                <option value="author">Add Author</option>
+              </select>
+              <input
+                bind:value={bulkEditValue}
+                placeholder={bulkEditField === 'language' ? 'English' : bulkEditField === 'publisher' ? 'Publisher name' : bulkEditField === 'tag' ? 'Tag name' : 'Author name'}
+                class="w-full rounded border bg-background px-2 py-1.5 text-sm outline-none focus:ring-1 focus:ring-ring"
+                onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); applyBulkEdit(); } }}
+              />
+              <Button size="sm" class="w-full" onclick={applyBulkEdit} disabled={!bulkEditValue.trim()}>
+                Apply to {selectedIds.size} books
+              </Button>
             </div>
           {/if}
         </div>
