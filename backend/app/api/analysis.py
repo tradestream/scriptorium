@@ -455,6 +455,14 @@ async def run_computational_analysis(
             from app.services.esoteric import detect_hedging_language
             r = detect_hedging_language(text, config.delimiter_pattern, config.context_window)
             results = r.to_dict()
+        elif request.analysis_type == "conditional_language":
+            from app.services.esoteric import detect_conditional_language
+            r = detect_conditional_language(text, config.delimiter_pattern, config.context_window)
+            results = r.to_dict()
+        elif request.analysis_type == "emphasis_quotation":
+            from app.services.esoteric import extract_emphasis_markers
+            r = extract_emphasis_markers(text, config.delimiter_pattern)
+            results = r.to_dict()
         elif request.analysis_type == "first_last_words":
             from app.services.esoteric import extract_first_last_words
             r = extract_first_last_words(text, config.delimiter_pattern)

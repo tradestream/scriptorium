@@ -858,7 +858,164 @@ class EsotericAnalysisConfig:
 
 
 # ─────────────────────────────────────────────────────
-# Tool 8: First/Last Word Extractor (Notarikon)
+# Tool 8: Conditional Language Detector
+# ─────────────────────────────────────────────────────
+
+CONDITIONAL_PATTERNS = [
+    re.compile(r'\bif\b\s+(?:it\s+(?:is|be)\s+true\s+that|the|we|one|this|that|there)', re.I),
+    re.compile(r'\bgranted\s+that\b', re.I),
+    re.compile(r'\bsupposing\s+that\b', re.I),
+    re.compile(r'\bassuming\s+that\b', re.I),
+    re.compile(r'\bwere\s+(?:it|one|we)\s+to\b', re.I),
+    re.compile(r'\bshould\s+(?:it|this|one)\s+(?:be|prove)\b', re.I),
+    re.compile(r'\bprovided\s+(?:that|only)\b', re.I),
+    re.compile(r'\bon\s+(?:the\s+)?(?:condition|assumption|hypothesis)\s+that\b', re.I),
+    re.compile(r'\bif\s+(?:and\s+only\s+if|indeed)\b', re.I),
+]
+
+
+@dataclass
+class ConditionalResult:
+    """Result from the Conditional Language Detector."""
+    conditionals: list[dict]  # [{pattern, section, sentence}]
+    density: float
+    sections_by_density: list[dict]
+
+    def to_dict(self) -> dict:
+        return {
+            "type": "conditional_language",
+            "conditionals": self.conditionals,
+            "density": self.density,
+            "sections_by_density": self.sections_by_density,
+            "total": len(self.conditionals),
+        }
+
+
+def detect_conditional_language(
+    text: str,
+    delimiter_pattern: Optional[str] = None,
+    context_window: int = 200,
+) -> ConditionalResult:
+    """Detect conditional/hypothetical framing of central claims.
+
+    Distinct from hedging ('perhaps'/'it seems'): conditional framing uses
+    'if/granted that/supposing' to make a claim technically hypothetical
+    while communicating it to the careful reader as the author's true view.
+
+    Per Frazer: Strauss's 'There is a necessary conflict between philosophy
+    and politics IF the element of society necessarily is opinion' — the
+    italicized 'if' is the esoteric signal.
+    """
+    sections = segment_text(text, delimiter_pattern)
+    all_conds = []
+    section_stats = []
+    total_words = 0
+
+    for section in sections:
+        section_words = len(re.findall(r'\w+', section.text))
+        total_words += section_words
+        count = 0
+
+        for pat in CONDITIONAL_PATTERNS:
+            for m in pat.finditer(section.text):
+                # Get the full sentence
+                start = max(0, section.text.rfind('.', 0, m.start()) + 1)
+                end = section.text.find('.', m.end())
+                if end == -1:
+                    end = min(len(section.text), m.start() + context_window)
+                else:
+                    end += 1
+
+                all_conds.append({
+                    "pattern": m.group(0),
+                    "section": section.label,
+                    "sentence": section.text[start:end].strip()[:context_window * 2],
+                })
+                count += 1
+
+        density = round(count / section_words * 1000, 2) if section_words > 0 else 0
+        section_stats.append({"section": section.label, "density": density, "count": count})
+
+    overall = round(len(all_conds) / total_words * 1000, 2) if total_words > 0 else 0
+    section_stats.sort(key=lambda s: s["density"], reverse=True)
+
+    return ConditionalResult(
+        conditionals=all_conds[:40],
+        density=overall,
+        sections_by_density=section_stats,
+    )
+
+
+# ─────────────────────────────────────────────────────
+# Tool 9: Emphasis & Quotation Mark Extractor
+# ─────────────────────────────────────────────────────
+
+@dataclass
+class EmphasisResult:
+    """Result from the Emphasis Extractor."""
+    quoted_words: list[dict]  # [{word, section, context}]
+    emphasized_words: list[dict]  # [{word, section, type}]
+
+    def to_dict(self) -> dict:
+        return {
+            "type": "emphasis_quotation",
+            "quoted_words": self.quoted_words,
+            "emphasized_words": self.emphasized_words,
+            "total_quoted": len(self.quoted_words),
+            "total_emphasized": len(self.emphasized_words),
+        }
+
+
+def extract_emphasis_markers(
+    text: str,
+    delimiter_pattern: Optional[str] = None,
+) -> EmphasisResult:
+    """Extract words/phrases in quotation marks, italics, or other emphasis.
+
+    Per the 'Secret Words' principle: when an author puts common words in
+    quotes or italics, these marks signal double meaning. The marked word
+    is being used in a sense different from its everyday meaning.
+    """
+    sections = segment_text(text, delimiter_pattern)
+
+    quoted = []
+    emphasized = []
+
+    # Scare quotes / single-word quotation marks (not full sentences)
+    scare_quote = re.compile(r'["\u201c]([^"\u201d]{1,50})["\u201d]')
+    # Markdown italic/bold
+    md_emphasis = re.compile(r'(?:\*\*|__)(.+?)(?:\*\*|__)')
+    md_italic = re.compile(r'(?:\*|_)(.+?)(?:\*|_)')
+
+    for section in sections:
+        for m in scare_quote.finditer(section.text):
+            content = m.group(1).strip()
+            # Skip if it's a full sentence (dialogue) — only interested in individual words/short phrases
+            if len(content.split()) <= 5 and not content.endswith(('.', '!', '?')):
+                start = max(0, m.start() - 80)
+                end = min(len(section.text), m.end() + 80)
+                quoted.append({
+                    "word": content,
+                    "section": section.label,
+                    "context": section.text[start:end].strip(),
+                })
+
+        for m in md_emphasis.finditer(section.text):
+            emphasized.append({"word": m.group(1).strip(), "section": section.label, "type": "bold"})
+
+        for m in md_italic.finditer(section.text):
+            content = m.group(1).strip()
+            if len(content.split()) <= 5:
+                emphasized.append({"word": content, "section": section.label, "type": "italic"})
+
+    return EmphasisResult(
+        quoted_words=quoted[:40],
+        emphasized_words=emphasized[:30],
+    )
+
+
+# ─────────────────────────────────────────────────────
+# Tool 10: First/Last Word Extractor (Notarikon)
 # ─────────────────────────────────────────────────────
 
 @dataclass
@@ -1227,7 +1384,7 @@ def run_full_esoteric_analysis(
     text: str,
     config: Optional[EsotericAnalysisConfig] = None,
 ) -> dict:
-    """Run all eleven computational esoteric analysis tools and return combined results."""
+    """Run all thirteen computational esoteric analysis tools and return combined results."""
     if config is None:
         config = EsotericAnalysisConfig()
 
@@ -1334,7 +1491,30 @@ def run_full_esoteric_analysis(
         logger.error(f"Disreputable Mouthpiece Detector failed: {e}")
         results["disreputable_mouthpiece"] = {"error": str(e)}
 
-    # 8. First/Last Word Extraction
+    # Conditional Language
+    try:
+        cond_result = detect_conditional_language(
+            text=text,
+            delimiter_pattern=config.delimiter_pattern,
+            context_window=config.context_window,
+        )
+        results["conditional_language"] = cond_result.to_dict()
+    except Exception as e:
+        logger.error(f"Conditional Language Detector failed: {e}")
+        results["conditional_language"] = {"error": str(e)}
+
+    # Emphasis & Quotation Marks
+    try:
+        emphasis_result = extract_emphasis_markers(
+            text=text,
+            delimiter_pattern=config.delimiter_pattern,
+        )
+        results["emphasis_quotation"] = emphasis_result.to_dict()
+    except Exception as e:
+        logger.error(f"Emphasis Extractor failed: {e}")
+        results["emphasis_quotation"] = {"error": str(e)}
+
+    # First/Last Word Extraction
     try:
         firstlast_result = extract_first_last_words(
             text=text,
