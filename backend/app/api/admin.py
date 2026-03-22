@@ -20,15 +20,9 @@ from app.models.user import User
 
 from .auth import get_current_user
 
-logger = logging.getLogger(__name__)
+from app.services.background_jobs import create_job, get_job, get_active_job, update_job, get_job_status
 
-# ── In-memory job stores ──────────────────────────────────────────────────────
-# { job_id: { status, total, done, failed, current, started_at, error } }
-_bulk_jobs: dict[str, dict] = {}
-_markdown_jobs: dict[str, dict] = {}
-_identifier_jobs: dict[str, dict] = {}
-_cover_upgrade_jobs: dict[str, dict] = {}
-_filename_extract_jobs: dict[str, dict] = {}
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin")
 
@@ -271,19 +265,10 @@ async def start_bulk_enrich(
     result = await db.execute(stmt)
     editions = result.unique().scalars().all()
 
-    job_id = str(_uuid.uuid4())
-    _bulk_jobs[job_id] = {
-        "status": "queued",
-        "total": len(editions),
-        "done": 0,
-        "failed": 0,
-        "current": "",
-        "started_at": datetime.utcnow().isoformat(),
-        "error": None,
-    }
-
     # Collect IDs only — the background task opens its own session
     edition_ids = [e.id for e in editions]
+
+    job_id, _ = await create_job("bulk_enrich", len(editions), {"error": None})
     background_tasks.add_task(_run_bulk_enrich, job_id, edition_ids, opts.force, opts.provider)
 
     return {"job_id": job_id, "total": len(editions)}
@@ -294,9 +279,10 @@ async def get_active_enrich_job(
     _admin: User = Depends(_require_admin),
 ):
     """Return the currently running/queued bulk enrichment job, if any."""
-    for job_id, job in _bulk_jobs.items():
-        if job["status"] in ("running", "queued"):
-            return {"job_id": job_id, **job}
+    result = await get_active_job("bulk_enrich")
+    if result:
+        job_id, job = result
+        return {"job_id": job_id, **job}
     return None
 
 
@@ -306,7 +292,7 @@ async def get_bulk_enrich_job(
     _admin: User = Depends(_require_admin),
 ):
     """Poll the status of a bulk-enrichment job."""
-    job = _bulk_jobs.get(job_id)
+    job = await get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return {"job_id": job_id, **job}
@@ -318,11 +304,11 @@ async def cancel_bulk_enrich_job(
     _admin: User = Depends(_require_admin),
 ):
     """Mark a bulk-enrichment job as cancelled (best-effort)."""
-    job = _bulk_jobs.get(job_id)
+    job = await get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     if job["status"] == "running":
-        job["status"] = "cancelled"
+        await update_job(job_id, status="cancelled")
 
 
 async def _run_bulk_enrich(
@@ -342,13 +328,14 @@ async def _run_bulk_enrich(
     from sqlalchemy import select
     from sqlalchemy.orm import joinedload
 
-    job = _bulk_jobs[job_id]
-    job["status"] = "running"
+    await update_job(job_id, status="running")
     total = len(edition_ids)
+    done = 0
+    failed = 0
 
     async with _session_factory() as db:
         for i, edition_id in enumerate(edition_ids):
-            if job.get("status") == "cancelled":
+            if await get_job_status(job_id) == "cancelled":
                 break
 
             # Reload edition fresh each iteration
@@ -360,11 +347,11 @@ async def _run_bulk_enrich(
             result = await db.execute(stmt)
             edition = result.unique().scalar_one_or_none()
             if not edition:
-                job["failed"] += 1
+                failed += 1
                 continue
 
             work = edition.work
-            job["current"] = work.title
+            current_title = work.title
 
             try:
                 author_names = [a.name for a in work.authors]
@@ -391,23 +378,24 @@ async def _run_bulk_enrich(
 
             except Exception as exc:
                 logger.warning("Bulk enrich failed for edition %s: %s", edition_id, exc)
-                job["failed"] += 1
+                failed += 1
                 await db.rollback()
 
-            job["done"] += 1
+            done += 1
+            await update_job(job_id, done=done, failed=failed, current=current_title)
 
             # Broadcast progress every 5 books or on last
-            if job["done"] % 5 == 0 or job["done"] == total:
+            if done % 5 == 0 or done == total:
                 await broadcaster.enrich_progress(
-                    job_id, job["done"], total, work.title, "running"
+                    job_id, done, total, current_title, "running"
                 )
 
             # Brief yield to not starve other tasks
             await asyncio.sleep(0.05)
 
-    job["status"] = "done" if job.get("status") != "cancelled" else "cancelled"
-    job["current"] = ""
-    await broadcaster.enrich_progress(job_id, job["done"], total, "", job["status"])
+    final_status = "done" if await get_job_status(job_id) != "cancelled" else "cancelled"
+    await update_job(job_id, status=final_status, current="")
+    await broadcaster.enrich_progress(job_id, done, total, "", final_status)
 
 
 # ── Bulk Markdown Generation ──────────────────────────────────────────────────
@@ -442,17 +430,7 @@ async def start_bulk_markdown(
             continue
         edition_ids.append(ed.id)
 
-    job_id = str(_uuid.uuid4())
-    _markdown_jobs[job_id] = {
-        "status": "queued",
-        "total": len(edition_ids),
-        "done": 0,
-        "failed": 0,
-        "skipped": 0,
-        "current": "",
-        "started_at": datetime.utcnow().isoformat(),
-    }
-
+    job_id, _ = await create_job("markdown", len(edition_ids), {"skipped": 0})
     background_tasks.add_task(_run_bulk_markdown, job_id, edition_ids)
     return {"job_id": job_id, "total": len(edition_ids)}
 
@@ -462,9 +440,10 @@ async def get_active_markdown_job(
     _admin: User = Depends(_require_admin),
 ):
     """Return the currently running/queued markdown generation job, if any."""
-    for job_id, job in _markdown_jobs.items():
-        if job["status"] in ("running", "queued"):
-            return {"job_id": job_id, **job}
+    result = await get_active_job("markdown")
+    if result:
+        job_id, job = result
+        return {"job_id": job_id, **job}
     return None
 
 
@@ -474,7 +453,7 @@ async def get_bulk_markdown_job(
     _admin: User = Depends(_require_admin),
 ):
     """Poll the status of a bulk markdown generation job."""
-    job = _markdown_jobs.get(job_id)
+    job = await get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return {"job_id": job_id, **job}
@@ -488,45 +467,48 @@ async def _run_bulk_markdown(job_id: str, edition_ids: list[int]) -> None:
     from app.models.edition import Edition
     from sqlalchemy import select
 
-    job = _markdown_jobs[job_id]
-    job["status"] = "running"
+    await update_job(job_id, status="running")
     total = len(edition_ids)
+    done = 0
+    failed = 0
+    skipped = 0
+    current_title = ""
 
     async with _session_factory() as db:
         for edition_id in edition_ids:
-            if job.get("status") == "cancelled":
+            if await get_job_status(job_id) == "cancelled":
                 break
 
             # Get title for progress display
             result = await db.execute(select(Edition).where(Edition.id == edition_id))
             edition = result.scalar_one_or_none()
             if edition:
-                job["current"] = edition.title
+                current_title = edition.title
 
             try:
                 md = await generate_markdown(edition_id)
                 if md is None:
-                    job["skipped"] += 1
-                    job["done"] += 1
-                else:
-                    job["done"] += 1
+                    skipped += 1
+                done += 1
             except Exception as exc:
                 logger.warning("Markdown generation failed for edition %d: %s", edition_id, exc)
-                job["failed"] += 1
-                job["done"] += 1
+                failed += 1
+                done += 1
 
-            if job["done"] % 10 == 0 or job["done"] == total:
+            await update_job(job_id, done=done, failed=failed, skipped=skipped, current=current_title)
+
+            if done % 10 == 0 or done == total:
                 try:
                     await broadcaster.enrich_progress(
-                        job_id, job["done"], total, job["current"], "running"
+                        job_id, done, total, current_title, "running"
                     )
                 except Exception:
                     pass
 
             await asyncio.sleep(0.05)
 
-    job["status"] = "done" if job.get("status") != "cancelled" else "cancelled"
-    job["current"] = ""
+    final_status = "done" if await get_job_status(job_id) != "cancelled" else "cancelled"
+    await update_job(job_id, status=final_status, current="")
 
 
 # ── Bulk Identifier Extraction ───────────────────────────────────────────────
@@ -546,17 +528,7 @@ async def start_batch_identifier_extraction(
 
     Accepts an array of edition IDs. Returns a job_id for polling.
     """
-    job_id = str(_uuid.uuid4())
-    _identifier_jobs[job_id] = {
-        "status": "queued",
-        "total": len(req.edition_ids),
-        "done": 0,
-        "found_isbn": 0,
-        "found_doi": 0,
-        "failed": 0,
-        "current": "",
-        "started_at": datetime.utcnow().isoformat(),
-    }
+    job_id, _ = await create_job("identifiers", len(req.edition_ids), {"found_isbn": 0, "found_doi": 0})
     background_tasks.add_task(_run_bulk_identifiers, job_id, req.edition_ids)
     return {"job_id": job_id, "total": len(req.edition_ids)}
 
@@ -593,18 +565,7 @@ async def start_bulk_identifier_extraction(
     editions = result.unique().scalars().all()
     edition_ids = [e.id for e in editions]
 
-    job_id = str(_uuid.uuid4())
-    _identifier_jobs[job_id] = {
-        "status": "queued",
-        "total": len(edition_ids),
-        "done": 0,
-        "found_isbn": 0,
-        "found_doi": 0,
-        "failed": 0,
-        "current": "",
-        "started_at": datetime.utcnow().isoformat(),
-    }
-
+    job_id, _ = await create_job("identifiers", len(edition_ids), {"found_isbn": 0, "found_doi": 0})
     background_tasks.add_task(_run_bulk_identifiers, job_id, edition_ids)
     return {"job_id": job_id, "total": len(edition_ids)}
 
@@ -614,9 +575,10 @@ async def get_active_identifier_job(
     _admin: User = Depends(_require_admin),
 ):
     """Return the currently running/queued identifier extraction job, if any."""
-    for job_id, job in _identifier_jobs.items():
-        if job["status"] in ("running", "queued"):
-            return {"job_id": job_id, **job}
+    result = await get_active_job("identifiers")
+    if result:
+        job_id, job = result
+        return {"job_id": job_id, **job}
     return None
 
 
@@ -626,7 +588,7 @@ async def get_bulk_identifier_job(
     _admin: User = Depends(_require_admin),
 ):
     """Poll the status of a bulk identifier extraction job."""
-    job = _identifier_jobs.get(job_id)
+    job = await get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return {"job_id": job_id, **job}
@@ -636,31 +598,35 @@ async def _run_bulk_identifiers(job_id: str, edition_ids: list[int]) -> None:
     """Background task: extract identifiers for each edition."""
     from app.services.identifier_extraction import extract_identifiers_for_edition
 
-    job = _identifier_jobs[job_id]
-    job["status"] = "running"
+    await update_job(job_id, status="running")
     total = len(edition_ids)
+    done = 0
+    failed = 0
+    found_isbn = 0
+    found_doi = 0
 
     for edition_id in edition_ids:
-        if job.get("status") == "cancelled":
+        if await get_job_status(job_id) == "cancelled":
             break
 
         try:
             ids = await extract_identifiers_for_edition(edition_id)
             if ids.get("isbn_13"):
-                job["found_isbn"] += 1
+                found_isbn += 1
             if ids.get("doi"):
-                job["found_doi"] += 1
+                found_doi += 1
         except Exception as exc:
             logger.warning("Identifier extraction failed for edition %d: %s", edition_id, exc)
-            job["failed"] += 1
+            failed += 1
 
-        job["done"] += 1
+        done += 1
+        await update_job(job_id, done=done, failed=failed, found_isbn=found_isbn, found_doi=found_doi)
 
-        if job["done"] % 10 == 0 or job["done"] == total:
+        if done % 10 == 0 or done == total:
             try:
                 from app.services.events import broadcaster
                 await broadcaster.enrich_progress(
-                    job_id, job["done"], total, "", "running"
+                    job_id, done, total, "", "running"
                 )
             except Exception:
                 pass
@@ -668,8 +634,8 @@ async def _run_bulk_identifiers(job_id: str, edition_ids: list[int]) -> None:
         # Throttle to keep the API responsive during heavy PDF/EPUB parsing
         await asyncio.sleep(2.0)
 
-    job["status"] = "done" if job.get("status") != "cancelled" else "cancelled"
-    job["current"] = ""
+    final_status = "done" if await get_job_status(job_id) != "cancelled" else "cancelled"
+    await update_job(job_id, status=final_status, current="")
 
 
 # ── Filename Metadata Extraction ──────────────────────────────────────────────
@@ -707,17 +673,7 @@ async def start_bulk_filename_extract(
     result = await db.execute(stmt)
     edition_ids = [e.id for e in result.unique().scalars().all()]
 
-    job_id = str(_uuid.uuid4())
-    _filename_extract_jobs[job_id] = {
-        "status": "queued",
-        "total": len(edition_ids),
-        "done": 0,
-        "applied": 0,
-        "skipped": 0,
-        "failed": 0,
-        "current": "",
-        "started_at": datetime.utcnow().isoformat(),
-    }
+    job_id, _ = await create_job("filename_extract", len(edition_ids), {"applied": 0, "skipped": 0})
     background_tasks.add_task(_run_filename_extract, job_id, edition_ids, min_confidence)
     return {"job_id": job_id, "total": len(edition_ids)}
 
@@ -728,7 +684,7 @@ async def get_filename_extract_job(
     _admin: User = Depends(_require_admin),
 ):
     """Poll filename extraction job status."""
-    job = _filename_extract_jobs.get(job_id)
+    job = await get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return {"job_id": job_id, **job}
@@ -737,25 +693,33 @@ async def get_filename_extract_job(
 async def _run_filename_extract(job_id: str, edition_ids: list[int], min_confidence: str) -> None:
     from app.services.filename_metadata import extract_and_apply
 
-    job = _filename_extract_jobs[job_id]
-    job["status"] = "running"
+    await update_job(job_id, status="running")
+    done = 0
+    failed = 0
+    applied = 0
+    skipped = 0
 
     for edition_id in edition_ids:
-        if job.get("status") == "cancelled":
+        if done % 50 == 0 and await get_job_status(job_id) == "cancelled":
             break
         try:
             result = await extract_and_apply(edition_id, min_confidence)
             if result.get("status") == "applied":
-                job["applied"] += 1
+                applied += 1
             else:
-                job["skipped"] += 1
+                skipped += 1
         except Exception:
-            job["failed"] += 1
-        job["done"] += 1
+            failed += 1
+        done += 1
+
+        # Batch DB updates every 50 items for this tight loop
+        if done % 50 == 0:
+            await update_job(job_id, done=done, failed=failed, applied=applied, skipped=skipped)
+
         await asyncio.sleep(0.02)
 
-    job["status"] = "done" if job.get("status") != "cancelled" else "cancelled"
-    job["current"] = ""
+    final_status = "done" if await get_job_status(job_id) != "cancelled" else "cancelled"
+    await update_job(job_id, status=final_status, done=done, failed=failed, applied=applied, skipped=skipped, current="")
 
 
 # ── Cover Quality & Upgrade ──────────────────────────────────────────────────
@@ -781,17 +745,7 @@ async def start_cover_upgrade(
     low = await find_low_quality_covers(library_id)
     edition_ids = [item["edition_id"] for item in low]
 
-    job_id = str(_uuid.uuid4())
-    _cover_upgrade_jobs[job_id] = {
-        "status": "queued",
-        "total": len(edition_ids),
-        "done": 0,
-        "upgraded": 0,
-        "no_match": 0,
-        "failed": 0,
-        "current": "",
-        "started_at": datetime.utcnow().isoformat(),
-    }
+    job_id, _ = await create_job("cover_upgrade", len(edition_ids), {"upgraded": 0, "no_match": 0})
     background_tasks.add_task(_run_cover_upgrade, job_id, edition_ids)
     return {"job_id": job_id, "total": len(edition_ids)}
 
@@ -802,7 +756,7 @@ async def get_cover_upgrade_job(
     _admin: User = Depends(_require_admin),
 ):
     """Poll cover upgrade job status."""
-    job = _cover_upgrade_jobs.get(job_id)
+    job = await get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return {"job_id": job_id, **job}
@@ -812,36 +766,37 @@ async def _run_cover_upgrade(job_id: str, edition_ids: list[int]) -> None:
     """Background task: upgrade low-quality covers via iTunes."""
     from app.services.cover_quality import upgrade_cover
 
-    job = _cover_upgrade_jobs[job_id]
-    job["status"] = "running"
+    await update_job(job_id, status="running")
+    done = 0
+    failed = 0
+    upgraded = 0
+    no_match = 0
 
     for edition_id in edition_ids:
-        if job.get("status") == "cancelled":
+        if await get_job_status(job_id) == "cancelled":
             break
 
         result = await upgrade_cover(edition_id)
-        status = result.get("status", "failed")
-        if status == "upgraded":
-            job["upgraded"] += 1
-        elif status == "no_match":
-            job["no_match"] += 1
+        result_status = result.get("status", "failed")
+        if result_status == "upgraded":
+            upgraded += 1
+        elif result_status == "no_match":
+            no_match += 1
         else:
-            job["failed"] += 1
+            failed += 1
 
-        job["done"] += 1
-        job["current"] = result.get("itunes_title") or result.get("title") or ""
+        done += 1
+        current_title = result.get("itunes_title") or result.get("title") or ""
+        await update_job(job_id, done=done, failed=failed, upgraded=upgraded, no_match=no_match, current=current_title)
 
         # iTunes rate limiting (~20 req/min)
         await asyncio.sleep(3)
 
-    job["status"] = "done" if job.get("status") != "cancelled" else "cancelled"
-    job["current"] = ""
+    final_status = "done" if await get_job_status(job_id) != "cancelled" else "cancelled"
+    await update_job(job_id, status=final_status, current="")
 
 
 # ── Bulk cover fetch (for books with no cover) ────────────────────────────────
-
-_cover_fetch_jobs: dict[str, dict] = {}
-
 
 @router.post("/covers/fetch")
 async def start_cover_fetch(
@@ -867,17 +822,7 @@ async def start_cover_fetch(
     result = await db.execute(stmt)
     edition_ids = [r[0] for r in result.all()]
 
-    job_id = str(_uuid.uuid4())
-    _cover_fetch_jobs[job_id] = {
-        "status": "queued",
-        "total": len(edition_ids),
-        "done": 0,
-        "found": 0,
-        "not_found": 0,
-        "failed": 0,
-        "current": "",
-        "started_at": datetime.utcnow().isoformat(),
-    }
+    job_id, _ = await create_job("cover_fetch", len(edition_ids), {"found": 0, "not_found": 0})
     background_tasks.add_task(_run_cover_fetch, job_id, edition_ids)
     return {"job_id": job_id, "total": len(edition_ids)}
 
@@ -888,7 +833,7 @@ async def get_cover_fetch_job(
     _admin: User = Depends(_require_admin),
 ):
     """Poll cover fetch job status."""
-    job = _cover_fetch_jobs.get(job_id)
+    job = await get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return {"job_id": job_id, **job}
@@ -904,11 +849,15 @@ async def _run_cover_fetch(job_id: str, edition_ids: list[int]) -> None:
     from app.services.covers import cover_service
     from app.services.metadata_enrichment import enrichment_service
 
-    job = _cover_fetch_jobs[job_id]
-    job["status"] = "running"
+    await update_job(job_id, status="running")
+    done = 0
+    failed = 0
+    found = 0
+    not_found = 0
+    current_title = ""
 
     for edition_id in edition_ids:
-        if job.get("status") == "cancelled":
+        if await get_job_status(job_id) == "cancelled":
             break
 
         try:
@@ -921,18 +870,18 @@ async def _run_cover_fetch(job_id: str, edition_ids: list[int]) -> None:
                 )
                 edition = result.unique().scalar_one_or_none()
                 if not edition or edition.cover_hash:
-                    job["done"] += 1
+                    done += 1
+                    await update_job(job_id, done=done)
                     continue
 
                 work = edition.work
-                title = work.title if work else f"Edition {edition_id}"
+                current_title = work.title if work else f"Edition {edition_id}"
                 isbn = edition.isbn
                 book_uuid = edition.uuid
-                job["current"] = title
                 author_names = [a.name for a in work.authors] if work else []
 
             # Do network I/O outside the DB session
-            enriched = await enrichment_service.enrich(title, author_names, isbn)
+            enriched = await enrichment_service.enrich(current_title, author_names, isbn)
 
             cover_url = enriched.get("cover_url") if enriched else None
             if cover_url:
@@ -950,24 +899,25 @@ async def _run_cover_fetch(job_id: str, edition_ids: list[int]) -> None:
                                     edition.cover_format = cover_format
                                     edition.cover_color = cover_color
                                     await db.commit()
-                            job["found"] += 1
+                            found += 1
                         else:
-                            job["not_found"] += 1
+                            not_found += 1
                     else:
-                        job["not_found"] += 1
+                        not_found += 1
             else:
-                job["not_found"] += 1
+                not_found += 1
 
         except Exception as exc:
             logger.warning("Cover fetch failed for edition %d: %s", edition_id, exc)
-            job["failed"] += 1
+            failed += 1
 
-        job["done"] += 1
+        done += 1
+        await update_job(job_id, done=done, failed=failed, found=found, not_found=not_found, current=current_title)
         # Rate limit — ~1 req/sec to be polite to APIs
         await asyncio.sleep(1)
 
-    job["status"] = "done" if job.get("status") != "cancelled" else "cancelled"
-    job["current"] = ""
+    final_status = "done" if await get_job_status(job_id) != "cancelled" else "cancelled"
+    await update_job(job_id, status=final_status, current="")
 
 
 # ── Audit Log ──────────────────────────────────────────────────────────────────

@@ -1,20 +1,15 @@
 """AudiobookShelf integration endpoints."""
 
-import uuid as _uuid
-from datetime import datetime
-
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from app.config import get_settings
 from app.models.user import User
+from app.services.background_jobs import create_job, get_job, update_job, get_job_status
 
 from .auth import get_current_user
 
 router = APIRouter(prefix="/audiobookshelf")
-
-# In-memory job tracking for background cover sync
-_cover_sync_jobs: dict[str, dict] = {}
 
 
 class ImportRequest(BaseModel):
@@ -143,15 +138,7 @@ async def abs_sync_covers(
             eq = eq.where(Edition.cover_hash.is_(None))
         total = (await db.execute(eq)).scalar() or 0
 
-    job_id = str(_uuid.uuid4())
-    _cover_sync_jobs[job_id] = {
-        "status": "queued",
-        "total": total,
-        "done": 0,
-        "failed": 0,
-        "started_at": datetime.utcnow().isoformat(),
-    }
-
+    job_id, _ = await create_job("cover_sync", total)
     background_tasks.add_task(_run_cover_sync, job_id, overwrite)
     return {"job_id": job_id, "total": total}
 
@@ -162,7 +149,7 @@ async def get_cover_sync_job(
     current_user: User = Depends(get_current_user),
 ):
     """Poll the status of a cover-sync job."""
-    job = _cover_sync_jobs.get(job_id)
+    job = await get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return {"job_id": job_id, **job}
@@ -176,13 +163,15 @@ async def _run_cover_sync(job_id: str, overwrite: bool) -> None:
     from app.services.audiobookshelf import _get_client, _fetch_abs_cover
     from app.services import covers as cover_service
 
-    job = _cover_sync_jobs[job_id]
-    job["status"] = "running"
+    await update_job(job_id, status="running")
 
     client = _get_client()
     if not client:
-        job["status"] = "failed"
+        await update_job(job_id, status="failed")
         return
+
+    done = 0
+    failed = 0
 
     factory = get_session_factory()
     async with factory() as db:
@@ -192,24 +181,29 @@ async def _run_cover_sync(job_id: str, overwrite: bool) -> None:
         editions = (await db.execute(eq)).scalars().all()
 
         for edition in editions:
-            if job["status"] == "cancelled":
+            if await get_job_status(job_id) == "cancelled":
                 break
             cover_bytes = await _fetch_abs_cover(client, edition.abs_item_id)
             if not cover_bytes:
-                job["failed"] += 1
-                job["done"] += 1
+                failed += 1
+                done += 1
+                await update_job(job_id, done=done, failed=failed)
                 continue
             h, fmt, *_ = await cover_service.save_cover(cover_bytes, edition.uuid)
             if h:
                 edition.cover_hash = h
                 edition.cover_format = fmt
             else:
-                job["failed"] += 1
-            job["done"] += 1
+                failed += 1
+            done += 1
+            await update_job(job_id, done=done, failed=failed)
 
         await db.commit()
 
-    job["status"] = "completed" if job["status"] == "running" else job["status"]
+    final_status = await get_job_status(job_id)
+    if final_status == "running":
+        await update_job(job_id, status="completed")
+    # else keep cancelled/failed status
 
 
 @router.post("/link")

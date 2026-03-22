@@ -20,6 +20,7 @@ from app.models.notebook import Notebook, NotebookEntry
 from app.models.location import Location
 from app.models.article import Article, ArticleTag, ArticleHighlight
 from app.models.system import SystemSettings
+from app.models.background_job import BackgroundJob
 
 __all__ = [
     "Base",
@@ -76,4 +77,5 @@ __all__ = [
     "ArticleTag",
     "ArticleHighlight",
     "SystemSettings",
+    "BackgroundJob",
 ]
