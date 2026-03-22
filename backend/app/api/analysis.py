@@ -308,7 +308,7 @@ import json
 
 class ComputationalAnalysisRequest(BaseModel):
     """Request to run computational esoteric analysis."""
-    analysis_type: str = "full"  # full, loud_silence, contradiction, center, exoteric_esoteric, repetition_variation, audience_differentiation, hedging_language
+    analysis_type: str = "full"  # full, loud_silence, contradiction, center, exoteric_esoteric, repetition_variation, audience_differentiation, hedging_language, disreputable_mouthpiece
     keywords: list[str] = []
     entities: list[str] = []
     pious_words: list[str] = []
@@ -454,6 +454,10 @@ async def run_computational_analysis(
         elif request.analysis_type == "hedging_language":
             from app.services.esoteric import detect_hedging_language
             r = detect_hedging_language(text, config.delimiter_pattern, config.context_window)
+            results = r.to_dict()
+        elif request.analysis_type == "disreputable_mouthpiece":
+            from app.services.esoteric import detect_disreputable_mouthpieces
+            r = detect_disreputable_mouthpieces(text, config.delimiter_pattern, config.context_window)
             results = r.to_dict()
         else:
             raise HTTPException(status_code=400, detail=f"Unknown analysis type: {request.analysis_type}")

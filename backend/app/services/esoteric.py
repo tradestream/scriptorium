@@ -857,11 +857,109 @@ class EsotericAnalysisConfig:
     center_window_lines: int = 25
 
 
+# ─────────────────────────────────────────────────────
+# Tool 8: Disreputable Mouthpiece Detector
+# ─────────────────────────────────────────────────────
+
+# Characters through whom an author may voice forbidden truths (per Strauss)
+DISREPUTABLE_TYPES = {
+    "devil", "demon", "satan", "mephistopheles", "lucifer",
+    "madman", "fool", "jester", "buffoon", "clown",
+    "sophist", "atheist", "heretic", "infidel", "libertine",
+    "drunkard", "drunk", "epicurean", "hedonist",
+    "beggar", "slave", "foreigner", "stranger", "barbarian",
+    "old woman", "nurse", "servant",
+    "tyrant", "despot",
+}
+
+# Speech attribution patterns
+SPEECH_PATTERNS = [
+    re.compile(r'(?:said|says|remarked|declared|asserted|replied|answered|asked|cried|whispered|observed|noted)\s+(?:the\s+)?(\w+)', re.I),
+    re.compile(r'(?:according to|as\s+\w+\s+(?:the\s+)?(\w+)\s+(?:says|said|put it|observed|remarked))', re.I),
+    re.compile(r'"[^"]+"\s*(?:said|says|cried)\s+(?:the\s+)?(\w+)', re.I),
+]
+
+
+@dataclass
+class MouthpieceResult:
+    """Result from the Disreputable Mouthpiece Detector."""
+    speakers: list[dict]  # [{speaker, type, context, count}]
+    disreputable_speech: list[dict]  # [{speaker, context, section}]
+
+    def to_dict(self) -> dict:
+        return {
+            "type": "disreputable_mouthpiece",
+            "speakers": self.speakers,
+            "disreputable_speech": self.disreputable_speech,
+        }
+
+
+def detect_disreputable_mouthpieces(
+    text: str,
+    delimiter_pattern: Optional[str] = None,
+    context_window: int = 200,
+) -> MouthpieceResult:
+    """Detect when disreputable characters are given speech or used to voice views.
+
+    Per Strauss: 'some great writers might have stated certain important truths quite
+    openly by using as mouthpiece some disreputable character: they would thus show
+    how much they disapproved of pronouncing the truths in question. There would then
+    be good reason for our finding in the greatest literature of the past so many
+    interesting devils, madmen, beggars, sophists, drunkards, epicureans and buffoons.'
+    """
+    sections = segment_text(text, delimiter_pattern)
+    text_lower = text.lower()
+
+    # Find mentions of disreputable character types
+    disreputable_refs = []
+    speaker_counts = Counter()
+
+    for section in sections:
+        section_lower = section.text.lower()
+        for dtype in DISREPUTABLE_TYPES:
+            pos = 0
+            while True:
+                idx = section_lower.find(dtype, pos)
+                if idx == -1:
+                    break
+                # Check if this is in a speech context
+                start = max(0, idx - context_window)
+                end = min(len(section.text), idx + len(dtype) + context_window)
+                context = section.text[start:end].strip()
+
+                # Check for speech indicators near the mention
+                speech_nearby = any(w in context.lower() for w in
+                    ['said', 'says', 'replied', 'declared', 'asked', 'answered',
+                     'observed', 'remarked', 'argued', 'claimed', 'maintained',
+                     '"', '\u201c', '\u201d'])
+
+                if speech_nearby:
+                    disreputable_refs.append({
+                        "speaker": dtype,
+                        "section": section.label,
+                        "context": context[:context_window * 2],
+                    })
+                speaker_counts[dtype] += 1
+                pos = idx + len(dtype)
+
+    # Build speaker summary
+    speakers = [
+        {"speaker": s, "count": c}
+        for s, c in speaker_counts.most_common()
+        if c > 0
+    ]
+
+    return MouthpieceResult(
+        speakers=speakers[:15],
+        disreputable_speech=disreputable_refs[:20],
+    )
+
+
 def run_full_esoteric_analysis(
     text: str,
     config: Optional[EsotericAnalysisConfig] = None,
 ) -> dict:
-    """Run all seven computational esoteric analysis tools and return combined results."""
+    """Run all eight computational esoteric analysis tools and return combined results."""
     if config is None:
         config = EsotericAnalysisConfig()
 
@@ -955,5 +1053,17 @@ def run_full_esoteric_analysis(
     except Exception as e:
         logger.error(f"Hedging Language Detector failed: {e}")
         results["hedging_language"] = {"error": str(e)}
+
+    # 8. Disreputable Mouthpiece
+    try:
+        mouthpiece_result = detect_disreputable_mouthpieces(
+            text=text,
+            delimiter_pattern=config.delimiter_pattern,
+            context_window=config.context_window,
+        )
+        results["disreputable_mouthpiece"] = mouthpiece_result.to_dict()
+    except Exception as e:
+        logger.error(f"Disreputable Mouthpiece Detector failed: {e}")
+        results["disreputable_mouthpiece"] = {"error": str(e)}
 
     return results

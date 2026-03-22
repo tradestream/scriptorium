@@ -122,6 +122,104 @@ STRAUSS_TEMPLATES = [
     },
 ]
 
+PERSECUTION_TEMPLATES = [
+    {
+        "name": "Strauss: Persecution Reading (Full Method)",
+        "description": "The complete method from 'Persecution and the Art of Writing' — Strauss's definitive rules for reading between the lines.",
+        "system_prompt": (
+            "You are applying Leo Strauss's complete method from 'Persecution and the Art of Writing' (1952). "
+            "Strauss provides precise rules:\n\n"
+            "NEGATIVE CRITERION: The book must have been composed in an era of persecution — when political, "
+            "religious, or intellectual orthodoxy was enforced by law or custom.\n\n"
+            "POSITIVE CRITERION: If an able writer with a clear mind and perfect knowledge of the orthodox view "
+            "contradicts surreptitiously and as it were in passing one of its necessary presuppositions or "
+            "consequences which he explicitly recognizes and maintains everywhere else, we can reasonably "
+            "suspect he was opposed to the orthodox system as such.\n\n"
+            "KEY PRINCIPLES:\n"
+            "- The real opinion of an author is NOT necessarily identical with that which he expresses "
+            "in the largest number of passages.\n"
+            "- Views of characters in a drama/dialogue must NOT be identified with the author's views "
+            "without proof.\n"
+            "- If a master of writing commits blunders that would shame a high-school boy, assume they are intentional.\n"
+            "- Contradictions too deliberate to be accidental point to the hidden teaching.\n"
+            "- The author may use disreputable characters (devils, madmen, sophists, drunkards) to state truths "
+            "he dare not state in his own name.\n"
+            "- 'Obtrusively enigmatic features' serve as 'awakening stumbling blocks' for potential philosophers: "
+            "obscurity of plan, contradictions, pseudonyms, inexact repetitions, strange expressions."
+        ),
+        "user_prompt_template": (
+            "Apply Strauss's complete method from 'Persecution and the Art of Writing' to this text:\n\n"
+            "1. PERSECUTION CONTEXT\n"
+            "What orthodoxy (political, religious, intellectual) was enforced when this was written? "
+            "What consequences did the author face for dissent?\n\n"
+            "2. THE ORTHODOX SURFACE\n"
+            "What orthodox views does the author explicitly maintain throughout most of the text? "
+            "Which statements affirm the reigning pieties?\n\n"
+            "3. THE SURREPTITIOUS CONTRADICTION\n"
+            "Where does the author 'surreptitiously and as it were in passing' contradict a necessary "
+            "presupposition of the orthodox view? Quote the passage precisely.\n\n"
+            "4. DISREPUTABLE MOUTHPIECES\n"
+            "Does the author use any disreputable characters (madmen, sophists, devils, foreigners, "
+            "fools) to state views he cannot state in his own name? Which character speaks the "
+            "author's truth?\n\n"
+            "5. OBTRUSIVELY ENIGMATIC FEATURES\n"
+            "Identify the 'stumbling blocks' meant to awaken careful readers:\n"
+            "- Obscurity of plan (is the structure deliberately confusing?)\n"
+            "- Contradictions (between parts, or with known facts)\n"
+            "- Inexact repetitions (a passage repeated with significant changes)\n"
+            "- Strange expressions (unusual word choices that invite reflection)\n"
+            "- Pseudonyms or attributed speech\n\n"
+            "6. THE HIDDEN TEACHING\n"
+            "Based on the above, what is the philosophic truth the author communicates only between "
+            "the lines? Who is meant to discover it?\n\n"
+            "Text:\n{text}"
+        ),
+        "is_default": False,
+        "is_builtin": True,
+    },
+    {
+        "name": "Strauss: Premodern vs. Modern Esotericism",
+        "description": "Determine whether the text's esotericism is premodern (permanent concealment) or modern (temporary, aimed at eventual enlightenment).",
+        "system_prompt": (
+            "You are an expert in Leo Strauss's distinction between two fundamentally different types "
+            "of esoteric writers:\n\n"
+            "PREMODERN (Classical/Medieval): These authors believe the gulf between 'the wise' and "
+            "'the vulgar' is permanent and natural. Philosophy is essentially a privilege of the few. "
+            "They conceal their views not temporarily but for all time. Their exoteric teachings are "
+            "'noble lies' or 'likely tales.' They write for potential philosophers who must be 'led "
+            "step by step from popular views to the truth.' They see no possibility of universal "
+            "enlightenment.\n\n"
+            "MODERN (Enlightenment): These authors believe persecution is accidental, an outcome of "
+            "faulty political construction. They look forward to universal education and 'the republic "
+            "of universal light.' They conceal their views only enough to protect themselves, not to "
+            "protect society from truth. Their goal is to enlighten ever more people. It is "
+            "'comparatively easy to read between the lines of their books.'\n\n"
+            "This distinction is crucial because the two types require entirely different reading strategies."
+        ),
+        "user_prompt_template": (
+            "Analyze whether this text exhibits PREMODERN or MODERN esotericism:\n\n"
+            "1. ATTITUDE TOWARD 'THE MANY'\n"
+            "Does the author believe the gap between wise and vulgar is permanent or temporary? "
+            "Does the text suggest universal enlightenment is possible?\n\n"
+            "2. PURPOSE OF CONCEALMENT\n"
+            "Is concealment aimed at:\n"
+            "a) Permanently protecting society from dangerous truths (premodern)\n"
+            "b) Temporarily protecting the author until society is ready (modern)\n\n"
+            "3. LEVEL OF CONCEALMENT\n"
+            "How deeply hidden is the esoteric teaching?\n"
+            "- Easy to detect with moderate care (modern)\n"
+            "- Requires long, careful study to detect (premodern)\n\n"
+            "4. ATTITUDE TOWARD 'NOBLE LIES'\n"
+            "Does the author treat exoteric statements as permanently necessary social supports, "
+            "or as temporary expedients to be eventually replaced by truth?\n\n"
+            "5. CLASSIFICATION: Premodern, Modern, or Mixed? Explain.\n\n"
+            "Text:\n{text}"
+        ),
+        "is_default": False,
+        "is_builtin": True,
+    },
+]
+
 MELZER_TEMPLATES = [
     {
         "name": "Melzer: Four Forms Classification",
@@ -229,7 +327,7 @@ MELZER_TEMPLATES = [
 
 def upgrade() -> None:
     conn = op.get_bind()
-    for tmpl in STRAUSS_TEMPLATES + MELZER_TEMPLATES:
+    for tmpl in STRAUSS_TEMPLATES + PERSECUTION_TEMPLATES + MELZER_TEMPLATES:
         conn.execute(
             text(
                 "INSERT INTO analysis_templates "
@@ -247,7 +345,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     conn = op.get_bind()
-    for tmpl in STRAUSS_TEMPLATES + MELZER_TEMPLATES:
+    for tmpl in STRAUSS_TEMPLATES + PERSECUTION_TEMPLATES + MELZER_TEMPLATES:
         conn.execute(
             text("DELETE FROM analysis_templates WHERE name = :name"),
             {"name": tmpl["name"]},
