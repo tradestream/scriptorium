@@ -219,11 +219,16 @@ def build_analysis_epub(
                 content_html = _esc(content).replace("\n\n", "</p><p>").replace("\n", "<br/>")
                 content_html = f"<p>{content_html}</p>"
 
+                model = analysis.get("model_used", "")
+                model_line = f'<p class="metric">Model: {_esc(model)}</p>' if model else ""
+
                 page = f"""<?xml version="1.0" encoding="UTF-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head><title>{_esc(title)}</title><link rel="stylesheet" href="style.css"/></head>
 <body>
 <h1>{_esc(title)}</h1>
+{model_line}
+<hr/>
 {content_html}
 </body></html>"""
                 fname = f"ch_{file_idx}.xhtml"

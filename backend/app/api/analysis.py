@@ -594,7 +594,7 @@ async def export_esoteric_epub(
         .order_by(BookAnalysis.created_at.desc())
     )
     llm_analyses = [
-        {"title": a.title, "content": a.content}
+        {"title": a.title, "content": a.content, "model_used": a.model_used}
         for a in llm_result.scalars().all()
         if a.content
     ]
