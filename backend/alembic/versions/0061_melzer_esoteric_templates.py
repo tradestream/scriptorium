@@ -122,6 +122,82 @@ STRAUSS_TEMPLATES = [
     },
 ]
 
+INTERTEXTUAL_TEMPLATES = [
+    {
+        "name": "Strauss: Paratext Analysis",
+        "description": "Analyze prefaces, dedications, epigraphs, and other paratextual elements — where esoteric signals are often strongest.",
+        "system_prompt": (
+            "You are an expert in analyzing paratextual elements of philosophical works. "
+            "Prefaces, dedications, epigraphs, and opening/closing remarks are often the most "
+            "revealing sites for esoteric signals. Strauss frequently notes:\n\n"
+            "- Dedications may reveal the author's true audience or allegiance\n"
+            "- Epigraphs are chosen with extreme care and often contain the key to the whole work\n"
+            "- Prefaces may state the esoteric purpose openly, disguised as conventional modesty\n"
+            "- The very first and very last sentences of a work are almost always significant\n"
+            "- Changes between editions in paratextual matter reveal what the author reconsidered\n\n"
+            "Analyze all paratextual elements as potential esoteric signals."
+        ),
+        "user_prompt_template": (
+            "Perform a PARATEXT ANALYSIS on the following text:\n\n"
+            "1. OPENING ELEMENTS\n"
+            "- Analyze the title: does it have a double meaning or ironic sense?\n"
+            "- Dedication: who is it addressed to and why? What does this imply?\n"
+            "- Epigraph(s): why were these quotations chosen? Do they comment on or "
+            "  subvert the main text?\n"
+            "- Preface/Introduction: what does the author say about their own method "
+            "  or purpose? Is there a disclaimer that is itself a signal?\n\n"
+            "2. FIRST AND LAST SENTENCES\n"
+            "- Quote and analyze the very first sentence of the work\n"
+            "- Quote and analyze the very last sentence\n"
+            "- What is the relationship between them? Do they form a ring?\n\n"
+            "3. FIRST AND LAST WORDS OF SECTIONS\n"
+            "- Do the opening and closing words of chapters/sections form a pattern?\n"
+            "- Strauss noted that the Apology ends with 'theos' and the Laws begins "
+            "  with 'theos' — connecting the two works esoterically\n\n"
+            "4. CHAPTER/SECTION TITLES\n"
+            "- Do the titles taken together tell a story different from the text?\n"
+            "- Are any titles ironic or misleading?\n\n"
+            "Text:\n{text}"
+        ),
+        "is_default": False,
+        "is_builtin": True,
+    },
+    {
+        "name": "Strauss: Source Transformation Tracker",
+        "description": "Analyze how the author modifies quotations and citations from their originals — modifications reveal esoteric intent.",
+        "system_prompt": (
+            "You are an expert in detecting how esoteric writers modify their sources. "
+            "When an author quotes or paraphrases another writer, the modifications they "
+            "make — additions, omissions, rewordings — are often deliberate esoteric signals.\n\n"
+            "Strauss demonstrated this technique repeatedly:\n"
+            "- Maimonides quotes Scripture but alters key words\n"
+            "- Halevi misquotes philosophers in revealing ways\n"
+            "- Montesquieu's 'quotations' from ancient sources contain additions\n\n"
+            "The principle: when a careful author misquotes, the misquotation IS the message."
+        ),
+        "user_prompt_template": (
+            "Perform a SOURCE TRANSFORMATION analysis:\n\n"
+            "1. IDENTIFY ALL QUOTATIONS AND CITATIONS\n"
+            "List every quotation, paraphrase, or citation of another author/text.\n\n"
+            "2. CHECK FOR MODIFICATIONS\n"
+            "For each citation you can verify or assess:\n"
+            "- Is it accurate or has it been altered?\n"
+            "- What words were changed, added, or omitted?\n"
+            "- Is the context of the original preserved or distorted?\n\n"
+            "3. UNCITED IDEAS\n"
+            "Are there ideas in the text that clearly derive from another source "
+            "but are presented without attribution? Why might the author hide the source?\n\n"
+            "4. PATTERN OF CITATION\n"
+            "- Which sources are cited frequently vs. rarely?\n"
+            "- Are dangerous sources cited cautiously (via intermediaries)?\n"
+            "- Does the author ever cite an authority only to disagree in a footnote?\n\n"
+            "Text:\n{text}"
+        ),
+        "is_default": False,
+        "is_builtin": True,
+    },
+]
+
 LAMPERT_TEMPLATES = [
     {
         "name": "Strauss: Secret Words (Double-Meaning Vocabulary)",
@@ -501,7 +577,7 @@ MELZER_TEMPLATES = [
 
 def upgrade() -> None:
     conn = op.get_bind()
-    for tmpl in LAMPERT_TEMPLATES + LECTURE_NOTES_TEMPLATES + STRAUSS_TEMPLATES + PERSECUTION_TEMPLATES + MELZER_TEMPLATES:
+    for tmpl in INTERTEXTUAL_TEMPLATES + LAMPERT_TEMPLATES + LECTURE_NOTES_TEMPLATES + STRAUSS_TEMPLATES + PERSECUTION_TEMPLATES + MELZER_TEMPLATES:
         conn.execute(
             text(
                 "INSERT INTO analysis_templates "
@@ -519,7 +595,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     conn = op.get_bind()
-    for tmpl in LAMPERT_TEMPLATES + LECTURE_NOTES_TEMPLATES + STRAUSS_TEMPLATES + PERSECUTION_TEMPLATES + MELZER_TEMPLATES:
+    for tmpl in INTERTEXTUAL_TEMPLATES + LAMPERT_TEMPLATES + LECTURE_NOTES_TEMPLATES + STRAUSS_TEMPLATES + PERSECUTION_TEMPLATES + MELZER_TEMPLATES:
         conn.execute(
             text("DELETE FROM analysis_templates WHERE name = :name"),
             {"name": tmpl["name"]},

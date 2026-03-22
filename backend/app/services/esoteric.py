@@ -858,7 +858,82 @@ class EsotericAnalysisConfig:
 
 
 # ─────────────────────────────────────────────────────
-# Tool 8: Parenthetical & Footnote Extractor
+# Tool 8: First/Last Word Extractor (Notarikon)
+# ─────────────────────────────────────────────────────
+
+@dataclass
+class FirstLastResult:
+    """Result from the First/Last Word Extractor."""
+    section_boundaries: list[dict]  # [{section, first_word, last_word, first_sentence, last_sentence}]
+    overall_first_sentence: str
+    overall_last_sentence: str
+    opening_closing_words: dict  # {first_word, last_word} of entire text
+
+    def to_dict(self) -> dict:
+        return {
+            "type": "first_last_words",
+            "section_boundaries": self.section_boundaries,
+            "overall_first_sentence": self.overall_first_sentence,
+            "overall_last_sentence": self.overall_last_sentence,
+            "opening_closing_words": self.opening_closing_words,
+        }
+
+
+def extract_first_last_words(
+    text: str,
+    delimiter_pattern: Optional[str] = None,
+) -> FirstLastResult:
+    """Extract first and last words/sentences of each section.
+
+    Per Strauss: the first and last words of a work and its sections are
+    almost always significant. The Apology ends with 'theos' and the Laws
+    begins with 'theos' — connecting the works esoterically. Some authors
+    encode messages in opening/closing positions (a form of notarikon).
+    """
+    sections = segment_text(text, delimiter_pattern)
+
+    # Get overall first/last sentence
+    text_stripped = text.strip()
+    sentences = re.split(r'(?<=[.!?])\s+', text_stripped)
+    sentences = [s.strip() for s in sentences if s.strip()]
+
+    overall_first = sentences[0] if sentences else ""
+    overall_last = sentences[-1] if sentences else ""
+
+    # Get first/last word of entire text
+    words = re.findall(r'\w+', text_stripped)
+    first_word = words[0] if words else ""
+    last_word = words[-1] if words else ""
+
+    # Per-section analysis
+    boundaries = []
+    for section in sections:
+        sec_text = section.text.strip()
+        if not sec_text:
+            continue
+
+        sec_words = re.findall(r'\w+', sec_text)
+        sec_sentences = re.split(r'(?<=[.!?])\s+', sec_text)
+        sec_sentences = [s.strip() for s in sec_sentences if s.strip()]
+
+        boundaries.append({
+            "section": section.label,
+            "first_word": sec_words[0] if sec_words else "",
+            "last_word": sec_words[-1] if sec_words else "",
+            "first_sentence": sec_sentences[0][:200] if sec_sentences else "",
+            "last_sentence": sec_sentences[-1][:200] if sec_sentences else "",
+        })
+
+    return FirstLastResult(
+        section_boundaries=boundaries,
+        overall_first_sentence=overall_first[:300],
+        overall_last_sentence=overall_last[:300],
+        opening_closing_words={"first_word": first_word, "last_word": last_word},
+    )
+
+
+# ─────────────────────────────────────────────────────
+# Tool 9: Parenthetical & Footnote Extractor
 # ─────────────────────────────────────────────────────
 
 @dataclass
@@ -1152,7 +1227,7 @@ def run_full_esoteric_analysis(
     text: str,
     config: Optional[EsotericAnalysisConfig] = None,
 ) -> dict:
-    """Run all ten computational esoteric analysis tools and return combined results."""
+    """Run all eleven computational esoteric analysis tools and return combined results."""
     if config is None:
         config = EsotericAnalysisConfig()
 
@@ -1259,7 +1334,18 @@ def run_full_esoteric_analysis(
         logger.error(f"Disreputable Mouthpiece Detector failed: {e}")
         results["disreputable_mouthpiece"] = {"error": str(e)}
 
-    # 8. Parenthetical & Footnote Extraction
+    # 8. First/Last Word Extraction
+    try:
+        firstlast_result = extract_first_last_words(
+            text=text,
+            delimiter_pattern=config.delimiter_pattern,
+        )
+        results["first_last_words"] = firstlast_result.to_dict()
+    except Exception as e:
+        logger.error(f"First/Last Word Extractor failed: {e}")
+        results["first_last_words"] = {"error": str(e)}
+
+    # 9. Parenthetical & Footnote Extraction
     try:
         paren_result = extract_parentheticals(
             text=text,
