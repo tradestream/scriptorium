@@ -3,7 +3,7 @@
   import { Input } from "$lib/components/ui/input";
   import { Separator } from "$lib/components/ui/separator";
   import LocationSelector from "$lib/components/LocationSelector.svelte";
-  import { X, Plus, Save, Lock, Unlock } from "lucide-svelte";
+  import { X, Plus, Save, Lock, Unlock, Circle } from "lucide-svelte";
   import * as api from "$lib/api/client";
   import type { Book, BookSeriesEntry } from "$lib/types/index";
   import { onMount, untrack } from "svelte";
@@ -61,6 +61,16 @@
   let coloristInput = $state('');
   let saving = $state(false);
   let error = $state('');
+
+  // Field completeness tracking
+  let filledCount = $derived(
+    [title, subtitle, description, isbn, language, published_date, publisher, location, binding, condition]
+      .filter(v => v && v.trim()).length
+    + (authorNames.length > 0 ? 1 : 0)
+    + (tagNames.length > 0 ? 1 : 0)
+    + (seriesEntries.length > 0 ? 1 : 0)
+  );
+  const totalFields = 13;
 
   // ── Field locking ─────────────────────────────────────────────────────────
   let lockedFields = $state<Set<string>>(untrack(() => new Set(book.locked_fields ?? [])));
@@ -186,9 +196,23 @@
 </script>
 
 <div class="space-y-5">
+  <!-- Metadata completeness bar -->
+  <div class="flex items-center gap-3">
+    <div class="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+      <div
+        class="h-full rounded-full bg-emerald-500 transition-all duration-300"
+        style="width: {Math.round((filledCount / totalFields) * 100)}%"
+      ></div>
+    </div>
+    <span class="text-[10px] font-medium tabular-nums text-muted-foreground">{filledCount}/{totalFields}</span>
+  </div>
+
   <div class="space-y-1.5">
     <div class="flex items-center justify-between">
-      <label class="text-sm font-medium" for="edit-title">Title</label>
+      <label class="text-sm font-medium flex items-center gap-1.5" for="edit-title">
+        <span class="h-1.5 w-1.5 rounded-full {title.trim() ? 'bg-emerald-500' : 'bg-muted-foreground/20'}"></span>
+        Title
+      </label>
       <button onclick={() => toggleLock('title')} title={isLocked('title') ? 'Unlock title' : 'Lock title'} class="text-muted-foreground/40 hover:text-muted-foreground transition-colors">
         {#if isLocked('title')}<Lock class="h-3.5 w-3.5 text-amber-500" />{:else}<Unlock class="h-3.5 w-3.5" />{/if}
       </button>
@@ -197,13 +221,19 @@
   </div>
 
   <div class="space-y-1.5">
-    <label class="text-sm font-medium" for="edit-subtitle">Subtitle</label>
+    <label class="text-sm font-medium flex items-center gap-1.5" for="edit-subtitle">
+      <span class="h-1.5 w-1.5 rounded-full {subtitle.trim() ? 'bg-emerald-500' : 'bg-muted-foreground/20'}"></span>
+      Subtitle
+    </label>
     <Input id="edit-subtitle" bind:value={subtitle} placeholder="Optional subtitle" />
   </div>
 
   <div class="space-y-1.5">
     <div class="flex items-center justify-between">
-      <label class="text-sm font-medium" for="edit-desc">Description</label>
+      <label class="text-sm font-medium flex items-center gap-1.5" for="edit-desc">
+        <span class="h-1.5 w-1.5 rounded-full {description.trim() ? 'bg-emerald-500' : 'bg-muted-foreground/20'}"></span>
+        Description
+      </label>
       <button onclick={() => toggleLock('description')} title={isLocked('description') ? 'Unlock description' : 'Lock description'} class="text-muted-foreground/40 hover:text-muted-foreground transition-colors">
         {#if isLocked('description')}<Lock class="h-3.5 w-3.5 text-amber-500" />{:else}<Unlock class="h-3.5 w-3.5" />{/if}
       </button>
@@ -220,7 +250,10 @@
   <div class="grid grid-cols-2 gap-4">
     <div class="space-y-1.5">
       <div class="flex items-center justify-between">
-        <label class="text-sm font-medium" for="edit-isbn">ISBN</label>
+        <label class="text-sm font-medium flex items-center gap-1.5" for="edit-isbn">
+          <span class="h-1.5 w-1.5 rounded-full {isbn.trim() ? 'bg-emerald-500' : 'bg-muted-foreground/20'}"></span>
+          ISBN
+        </label>
         <button onclick={() => toggleLock('isbn')} title={isLocked('isbn') ? 'Unlock' : 'Lock'} class="text-muted-foreground/40 hover:text-muted-foreground transition-colors">
           {#if isLocked('isbn')}<Lock class="h-3.5 w-3.5 text-amber-500" />{:else}<Unlock class="h-3.5 w-3.5" />{/if}
         </button>
@@ -229,7 +262,10 @@
     </div>
     <div class="space-y-1.5">
       <div class="flex items-center justify-between">
-        <label class="text-sm font-medium" for="edit-lang">Language</label>
+        <label class="text-sm font-medium flex items-center gap-1.5" for="edit-lang">
+          <span class="h-1.5 w-1.5 rounded-full {language.trim() ? 'bg-emerald-500' : 'bg-muted-foreground/20'}"></span>
+          Language
+        </label>
         <button onclick={() => toggleLock('language')} title={isLocked('language') ? 'Unlock' : 'Lock'} class="text-muted-foreground/40 hover:text-muted-foreground transition-colors">
           {#if isLocked('language')}<Lock class="h-3.5 w-3.5 text-amber-500" />{:else}<Unlock class="h-3.5 w-3.5" />{/if}
         </button>
@@ -238,7 +274,10 @@
     </div>
     <div class="space-y-1.5">
       <div class="flex items-center justify-between">
-        <label class="text-sm font-medium" for="edit-date">Published Date</label>
+        <label class="text-sm font-medium flex items-center gap-1.5" for="edit-date">
+          <span class="h-1.5 w-1.5 rounded-full {published_date.trim() ? 'bg-emerald-500' : 'bg-muted-foreground/20'}"></span>
+          Published Date
+        </label>
         <button onclick={() => toggleLock('published_date')} title={isLocked('published_date') ? 'Unlock' : 'Lock'} class="text-muted-foreground/40 hover:text-muted-foreground transition-colors">
           {#if isLocked('published_date')}<Lock class="h-3.5 w-3.5 text-amber-500" />{:else}<Unlock class="h-3.5 w-3.5" />{/if}
         </button>
@@ -247,7 +286,10 @@
     </div>
     <div class="space-y-1.5">
       <div class="flex items-center justify-between">
-        <label class="text-sm font-medium" for="edit-publisher">Publisher</label>
+        <label class="text-sm font-medium flex items-center gap-1.5" for="edit-publisher">
+          <span class="h-1.5 w-1.5 rounded-full {publisher.trim() ? 'bg-emerald-500' : 'bg-muted-foreground/20'}"></span>
+          Publisher
+        </label>
         <button onclick={() => toggleLock('publisher')} title={isLocked('publisher') ? 'Unlock' : 'Lock'} class="text-muted-foreground/40 hover:text-muted-foreground transition-colors">
           {#if isLocked('publisher')}<Lock class="h-3.5 w-3.5 text-amber-500" />{:else}<Unlock class="h-3.5 w-3.5" />{/if}
         </button>
@@ -255,7 +297,10 @@
       <Input id="edit-publisher" bind:value={publisher} placeholder="Publisher name" disabled={isLocked('publisher')} />
     </div>
     <div class="space-y-1.5">
-      <label class="text-sm font-medium">Location</label>
+      <label class="text-sm font-medium flex items-center gap-1.5">
+        <span class="h-1.5 w-1.5 rounded-full {locationId ? 'bg-emerald-500' : 'bg-muted-foreground/20'}"></span>
+        Location
+      </label>
       <LocationSelector value={locationId} onSelect={(id) => locationId = id} />
     </div>
   </div>
@@ -306,7 +351,10 @@
   <!-- Authors -->
   <div class="space-y-2">
     <div class="flex items-center justify-between">
-      <p class="text-sm font-medium">Authors</p>
+      <p class="text-sm font-medium flex items-center gap-1.5">
+        <span class="h-1.5 w-1.5 rounded-full {authorNames.length > 0 ? 'bg-emerald-500' : 'bg-muted-foreground/20'}"></span>
+        Authors
+      </p>
       <button onclick={() => toggleLock('authors')} title={isLocked('authors') ? 'Unlock authors' : 'Lock authors'} class="text-muted-foreground/40 hover:text-muted-foreground transition-colors">
         {#if isLocked('authors')}<Lock class="h-3.5 w-3.5 text-amber-500" />{:else}<Unlock class="h-3.5 w-3.5" />{/if}
       </button>
@@ -334,7 +382,10 @@
   <!-- Tags -->
   <div class="space-y-2">
     <div class="flex items-center justify-between">
-      <p class="text-sm font-medium">Tags</p>
+      <p class="text-sm font-medium flex items-center gap-1.5">
+        <span class="h-1.5 w-1.5 rounded-full {tagNames.length > 0 ? 'bg-emerald-500' : 'bg-muted-foreground/20'}"></span>
+        Tags
+      </p>
       <button onclick={() => toggleLock('tags')} title={isLocked('tags') ? 'Unlock tags' : 'Lock tags'} class="text-muted-foreground/40 hover:text-muted-foreground transition-colors">
         {#if isLocked('tags')}<Lock class="h-3.5 w-3.5 text-amber-500" />{:else}<Unlock class="h-3.5 w-3.5" />{/if}
       </button>
@@ -362,7 +413,10 @@
   <!-- Series -->
   <div class="space-y-2">
     <div class="flex items-center justify-between">
-      <p class="text-sm font-medium">Series</p>
+      <p class="text-sm font-medium flex items-center gap-1.5">
+        <span class="h-1.5 w-1.5 rounded-full {seriesEntries.length > 0 ? 'bg-emerald-500' : 'bg-muted-foreground/20'}"></span>
+        Series
+      </p>
       <button onclick={() => toggleLock('series')} title={isLocked('series') ? 'Unlock series' : 'Lock series'} class="text-muted-foreground/40 hover:text-muted-foreground transition-colors">
         {#if isLocked('series')}<Lock class="h-3.5 w-3.5 text-amber-500" />{:else}<Unlock class="h-3.5 w-3.5" />{/if}
       </button>

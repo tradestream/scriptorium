@@ -115,8 +115,26 @@ async def list_books(
     result = await db.execute(stmt)
     editions = result.unique().scalars().all()
 
+    # Batch-fetch reading statuses for current user
+    from app.models.edition import UserEdition
+    edition_ids = [e.id for e in editions]
+    if edition_ids:
+        ue_result = await db.execute(
+            select(UserEdition.edition_id, UserEdition.status)
+            .where(UserEdition.user_id == current_user.id, UserEdition.edition_id.in_(edition_ids))
+        )
+        status_map = {eid: st for eid, st in ue_result.all()}
+    else:
+        status_map = {}
+
+    items = []
+    for e in editions:
+        book = BookRead.model_validate(e)
+        book.reading_status = status_map.get(e.id)
+        items.append(book)
+
     return BookListResponse(
-        items=[BookRead.model_validate(e) for e in editions],
+        items=items,
         total=count,
         skip=skip,
         limit=limit,

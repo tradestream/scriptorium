@@ -232,6 +232,7 @@ export interface Book {
   illustrators: string[];
   colorists: string[];
   content_warnings?: { graphic: string[]; moderate: string[]; minor: string[] } | null;
+  reading_status?: 'want_to_read' | 'reading' | 'completed' | 'abandoned' | null;
 }
 
 export interface BookListResponse {

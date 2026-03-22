@@ -194,6 +194,7 @@ class BookRead(BookBase):
     age_range: Optional[str] = None
     interest_level: Optional[str] = None
     content_warnings: Optional[dict] = None
+    reading_status: Optional[str] = None  # want_to_read | reading | completed | abandoned
 
     @field_validator('content_warnings', mode='before')
     @classmethod
