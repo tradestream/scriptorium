@@ -858,7 +858,112 @@ class EsotericAnalysisConfig:
 
 
 # ─────────────────────────────────────────────────────
-# Tool 8: Disreputable Mouthpiece Detector
+# Tool 8: Structural Obscurity Detector
+# ─────────────────────────────────────────────────────
+
+@dataclass
+class StructuralObscurityResult:
+    """Result from the Structural Obscurity Detector."""
+    section_count: int
+    section_size_variance: float  # Higher = more uneven sections (possible obscurity)
+    digression_candidates: list[dict]  # Sections that seem thematically out of place
+    plan_regularity_score: float  # 0-1, higher = more regular/lucid plan
+
+    def to_dict(self) -> dict:
+        return {
+            "type": "structural_obscurity",
+            "section_count": self.section_count,
+            "section_size_variance": self.section_size_variance,
+            "digression_candidates": self.digression_candidates,
+            "plan_regularity_score": self.plan_regularity_score,
+        }
+
+
+def detect_structural_obscurity(
+    text: str,
+    keywords: list[str],
+    delimiter_pattern: Optional[str] = None,
+) -> StructuralObscurityResult:
+    """Detect whether a text's structure is deliberately obscure.
+
+    Per Strauss: 'A lucid plan does not leave room for hiding places —
+    an exoteric book will NOT have a very lucid plan.'
+
+    Measures: section size regularity, thematic coherence between sections,
+    and identifies sections that seem thematically displaced (potential digressions
+    where important ideas may be hidden).
+    """
+    sections = segment_text(text, delimiter_pattern)
+
+    if len(sections) <= 1:
+        return StructuralObscurityResult(
+            section_count=len(sections),
+            section_size_variance=0,
+            digression_candidates=[],
+            plan_regularity_score=1.0,
+        )
+
+    # Measure section size variance
+    sizes = [len(s.text) for s in sections]
+    avg_size = sum(sizes) / len(sizes)
+    variance = sum((s - avg_size) ** 2 for s in sizes) / len(sizes)
+    normalized_variance = min(variance / (avg_size ** 2) if avg_size > 0 else 0, 10.0)
+
+    # Check keyword distribution across sections to find thematic outliers
+    keyword_set = {k.lower() for k in keywords}
+    section_profiles = []
+    for section in sections:
+        words = re.findall(r'\w+', section.text.lower())
+        keyword_count = sum(1 for w in words if w in keyword_set)
+        density = keyword_count / len(words) * 1000 if words else 0
+        section_profiles.append({
+            "label": section.label,
+            "size": len(section.text),
+            "keyword_density": round(density, 2),
+            "word_count": len(words),
+        })
+
+    # Find thematic outliers — sections with very different keyword density
+    densities = [p["keyword_density"] for p in section_profiles]
+    if densities:
+        avg_density = sum(densities) / len(densities)
+        digressions = []
+        for p in section_profiles:
+            if avg_density > 0:
+                ratio = p["keyword_density"] / avg_density if avg_density > 0 else 0
+                if ratio < 0.3 and p["word_count"] > 100:
+                    digressions.append({
+                        "section": p["label"],
+                        "keyword_density": p["keyword_density"],
+                        "avg_density": round(avg_density, 2),
+                        "reason": "Very low keyword density — may be a thematic digression hiding important content",
+                    })
+                elif ratio > 2.5:
+                    digressions.append({
+                        "section": p["label"],
+                        "keyword_density": p["keyword_density"],
+                        "avg_density": round(avg_density, 2),
+                        "reason": "Unusually high keyword density — concentrated discussion may signal importance",
+                    })
+    else:
+        digressions = []
+
+    # Plan regularity: how evenly sized and thematically consistent are sections?
+    # High regularity = lucid plan = less room for hiding
+    size_regularity = 1.0 / (1.0 + normalized_variance)
+    theme_regularity = 1.0 - (len(digressions) / max(len(sections), 1))
+    plan_score = round((size_regularity * 0.4 + theme_regularity * 0.6), 3)
+
+    return StructuralObscurityResult(
+        section_count=len(sections),
+        section_size_variance=round(normalized_variance, 3),
+        digression_candidates=digressions[:10],
+        plan_regularity_score=plan_score,
+    )
+
+
+# ─────────────────────────────────────────────────────
+# Tool 9: Disreputable Mouthpiece Detector
 # ─────────────────────────────────────────────────────
 
 # Characters through whom an author may voice forbidden truths (per Strauss)
@@ -959,7 +1064,7 @@ def run_full_esoteric_analysis(
     text: str,
     config: Optional[EsotericAnalysisConfig] = None,
 ) -> dict:
-    """Run all eight computational esoteric analysis tools and return combined results."""
+    """Run all nine computational esoteric analysis tools and return combined results."""
     if config is None:
         config = EsotericAnalysisConfig()
 
@@ -1065,5 +1170,17 @@ def run_full_esoteric_analysis(
     except Exception as e:
         logger.error(f"Disreputable Mouthpiece Detector failed: {e}")
         results["disreputable_mouthpiece"] = {"error": str(e)}
+
+    # 9. Structural Obscurity
+    try:
+        obscurity_result = detect_structural_obscurity(
+            text=text,
+            keywords=config.keywords,
+            delimiter_pattern=config.delimiter_pattern,
+        )
+        results["structural_obscurity"] = obscurity_result.to_dict()
+    except Exception as e:
+        logger.error(f"Structural Obscurity Detector failed: {e}")
+        results["structural_obscurity"] = {"error": str(e)}
 
     return results

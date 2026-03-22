@@ -122,6 +122,98 @@ STRAUSS_TEMPLATES = [
     },
 ]
 
+LECTURE_NOTES_TEMPLATES = [
+    {
+        "name": "Strauss: Dialogue & Drama Analysis",
+        "description": "Analyze how the dialogue/dramatic form conceals the author's teaching — no character speaks for the author.",
+        "system_prompt": (
+            "You are an expert in Leo Strauss's reading of philosophical dialogues and dramas. "
+            "Key principles from his 1939 lecture notes:\n\n"
+            "- 'By writing dialogues, Plato gives us to understand that he hides himself. "
+            "Plato never said a word on his teaching — only his characters do.'\n"
+            "- The dialogue form is chosen precisely because 'the truth is not fit for everybody.'\n"
+            "- 'All Platonic writings are dialogues (dramas in prose and without women and nearer "
+            "to comedy than to tragedy).'\n"
+            "- The MAIN character (e.g., Socrates) 'does NOT speak when the highest topic is "
+            "discussed' — that topic is discussed by others (Timaeus, the Eleatic Stranger).\n"
+            "- 'It is Cicero who relates this little dialogue. Cicero himself was an Academic. "
+            "Consequently, he says of himself: we have preferably followed that kind of philosophy "
+            "which Socrates has used, in order to hide our own opinion.'\n"
+            "- 'There is a connection between HIDING and arriving at a result which is only LIKELY "
+            "to be true, which is only a LIKELY TALE; the TRUE tale is hidden.'\n\n"
+            "Apply these principles to analyze how the author uses the dialogue/dramatic form."
+        ),
+        "user_prompt_template": (
+            "Analyze the dialogue/dramatic structure of this text:\n\n"
+            "1. WHO SPEAKS?\n"
+            "List all speakers/characters. For each:\n"
+            "- What position do they represent?\n"
+            "- Are they respectable or disreputable?\n"
+            "- Do they 'win' the argument on the surface?\n\n"
+            "2. WHO IS SILENT?\n"
+            "- On which topics does the main character remain silent or defer to others?\n"
+            "- Does any character speak on the highest/most dangerous topic instead of the protagonist?\n\n"
+            "3. THE FRAME\n"
+            "- Who NARRATES or REPORTS this dialogue? Are they reliable?\n"
+            "- What is the dramatic setting (time, place, occasion)? Is it significant?\n"
+            "- Who is the AUDIENCE within the text?\n\n"
+            "4. LIKELY TALES vs. TRUE TALES\n"
+            "- Which conclusions are presented as certain vs. 'likely' or 'probable'?\n"
+            "- Where does a character explicitly say they are giving a 'likely account'?\n"
+            "- What would the TRUE account be?\n\n"
+            "5. THE AUTHOR'S POSITION\n"
+            "- Given that the author hides behind ALL characters, what can we infer about "
+            "the author's own view from the ARRANGEMENT of the dialogue?\n\n"
+            "Text:\n{text}"
+        ),
+        "is_default": False,
+        "is_builtin": True,
+    },
+    {
+        "name": "Strauss: Plan Obscurity",
+        "description": "Analyze whether the text's structure is deliberately obscure — 'a lucid plan does not leave room for hiding places.'",
+        "system_prompt": (
+            "You are an expert in Leo Strauss's hermeneutics. A key principle from his 1939 lecture "
+            "notes: 'Hiding one's thought is not reconcilable with absolutely lucid EXPRESSIONS: "
+            "if everything is absolutely clearly expressed, there is no room for hiding places "
+            "WITHIN the sentences. A lucid plan does not leave room for hiding places — as a "
+            "consequence, an exoteric book will not have a very lucid plan.'\n\n"
+            "Conversely, Montesquieu's friend d'Alembert praised the 'wonderful, if hidden order' "
+            "of The Spirit of the Laws — an order 'hidden perhaps from the eyes of those who can "
+            "only proceed from consequence to consequence' but 'fully illuminated to attentive "
+            "minds.'\n\n"
+            "The question is: does this text have a plan that is deliberately obscure on the surface "
+            "but reveals a hidden order to the careful reader?"
+        ),
+        "user_prompt_template": (
+            "Analyze the PLAN and STRUCTURE of this text for deliberate obscurity:\n\n"
+            "1. SURFACE PLAN\n"
+            "- What is the apparent organization (chapters, sections, arguments)?\n"
+            "- Does the plan seem clear and logical, or confused and digressive?\n"
+            "- What seems 'irrelevant' or misplaced?\n\n"
+            "2. DIGRESSIONS\n"
+            "- Identify apparent digressions from the main argument\n"
+            "- Could any of these 'digressions' contain the actual teaching?\n"
+            "- Are important ideas buried in seemingly irrelevant passages?\n\n"
+            "3. HIDDEN ORDER\n"
+            "- Is there a deeper organizational principle beneath the surface confusion?\n"
+            "- Do the chapters/sections relate to each other in non-obvious ways?\n"
+            "- Is there a chiastic (ring) structure, numerical pattern, or thematic symmetry?\n\n"
+            "4. PLACEMENT OF KEY IDEAS\n"
+            "- Where are the most important claims located? Beginning? End? Center? Or in a "
+            "'digression'?\n"
+            "- 'What is written beautifully and in order, is NOT written beautifully and in order' "
+            "(Xenophon, on hunting dogs — 'a rather good hiding place'). Does this principle apply?\n\n"
+            "5. ASSESSMENT\n"
+            "- Is this plan genuinely confused, or deliberately obscure?\n"
+            "- What would the hidden order reveal if reconstructed?\n\n"
+            "Text:\n{text}"
+        ),
+        "is_default": False,
+        "is_builtin": True,
+    },
+]
+
 PERSECUTION_TEMPLATES = [
     {
         "name": "Strauss: Persecution Reading (Full Method)",
@@ -327,7 +419,7 @@ MELZER_TEMPLATES = [
 
 def upgrade() -> None:
     conn = op.get_bind()
-    for tmpl in STRAUSS_TEMPLATES + PERSECUTION_TEMPLATES + MELZER_TEMPLATES:
+    for tmpl in LECTURE_NOTES_TEMPLATES + STRAUSS_TEMPLATES + PERSECUTION_TEMPLATES + MELZER_TEMPLATES:
         conn.execute(
             text(
                 "INSERT INTO analysis_templates "
@@ -345,7 +437,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     conn = op.get_bind()
-    for tmpl in STRAUSS_TEMPLATES + PERSECUTION_TEMPLATES + MELZER_TEMPLATES:
+    for tmpl in LECTURE_NOTES_TEMPLATES + STRAUSS_TEMPLATES + PERSECUTION_TEMPLATES + MELZER_TEMPLATES:
         conn.execute(
             text("DELETE FROM analysis_templates WHERE name = :name"),
             {"name": tmpl["name"]},

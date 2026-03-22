@@ -184,12 +184,14 @@ ESOTERIC_READING_TEMPLATE = """Perform a two-layer (exoteric/esoteric) reading o
 - What characters, events, or themes receive suspiciously little attention?
 - Are there expectations set by the genre or tradition that the author violates by omission?
 
-3. INTENTIONAL CONTRADICTIONS & ERRORS
+3. INTENTIONAL CONTRADICTIONS & MISSTATEMENTS
 - Identify any contradictions between different parts of the text
 - Note logical gaps, non-sequiturs, or arguments that don't follow
 - Flag factual "errors" that seem too obvious for the author to have made accidentally
 - Where does the text say one thing and demonstrate another?
 - Where do characters' actions contradict their stated beliefs?
+- REPETITION WITH VARIATION: "There is never a repetition which is an identical repetition; there is always a change" (Strauss). When the author repeats a formulation with subtle changes, the variation IS the esoteric signal
+- MISSTATEMENT PRINCIPLE: "Hiding one's thoughts about the crucial things means making MISSTATEMENTS — to LIE about those things" (Strauss). The lie points to the concealed truth
 
 4. PROTECTIVE RHETORIC (Defensive Esotericism)
 - Where does the author seem to be protecting themselves from censure?
@@ -209,6 +211,9 @@ ESOTERIC_READING_TEMPLATE = """Perform a two-layer (exoteric/esoteric) reading o
 - Does the arrangement of material hide something important in an inconspicuous location?
 - Are there chiastic (ring) structures, where the outer layers mirror each other and the center holds the key?
 - Is information placed strategically — important truths buried in digressions or asides?
+- PLAN OBSCURITY: "A lucid plan does not leave room for hiding places — an exoteric book will NOT have a very lucid plan" (Strauss). Is the plan of this work deliberately unclear?
+- GENRE DISPLACEMENT: Are important maxims hidden in unexpected genres or contexts (e.g., a philosophical principle in a hunting manual, a political teaching in a love story)?
+- DIALOGUE AS CONCEALMENT: If this is a dialogue/drama, remember: the author "never said a word on his teaching — only his characters do" (Strauss on Plato). The author hides behind characters.
 
 7. THE DOUBLE DOCTRINE
 Based on your analysis above, articulate:
