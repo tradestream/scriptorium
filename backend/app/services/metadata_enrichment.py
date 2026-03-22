@@ -1105,7 +1105,7 @@ class GoodreadsProvider(Provider):
 
 # ── Enrichment service ─────────────────────────────────────────────────────────
 
-COMIC_EXTENSIONS = {".cbr", ".cbz", ".cb7", ".cbt", ".pdf"}
+COMIC_EXTENSIONS = {".cbr", ".cbz", ".cb7", ".cbt"}
 
 
 class MetadataEnrichmentService:
