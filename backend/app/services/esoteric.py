@@ -731,6 +731,111 @@ def detect_audience_differentiation(
 
 
 # ─────────────────────────────────────────────────────
+# Tool 7: Hedging Language Detector ("Mere Possibility")
+# ─────────────────────────────────────────────────────
+
+# Phrases that signal an author is stating something as "merely possible"
+# rather than asserting it — a key technique per Strauss's reading of Lessing
+HEDGING_PHRASES = [
+    "perhaps", "it seems", "it would seem", "it might seem", "it appears",
+    "it may be", "it could be", "one might say", "one could say",
+    "it is possible", "it is not impossible", "a mere possibility",
+    "we may suppose", "we might imagine", "some would say", "some might think",
+    "if one were to", "were one to suppose", "granting that", "supposing that",
+    "not to say", "so to speak", "as it were", "in a manner of speaking",
+    "I do not mean to say", "I would not go so far", "I hesitate to",
+    "it is tempting to think", "one is tempted to", "at first glance",
+    "on the surface", "to the casual observer", "the reader might suppose",
+    "the attentive reader", "if I may say so", "if I am not mistaken",
+    "unless I am mistaken", "I leave it to the reader",
+]
+
+
+@dataclass
+class HedgingResult:
+    """Result from the Hedging Language Detector."""
+    hedges: list[dict]  # [{phrase, section, context, sentence}]
+    hedge_density: float  # hedges per 1000 words
+    sections_by_density: list[dict]  # [{section, density, count}]
+
+    def to_dict(self) -> dict:
+        return {
+            "type": "hedging_language",
+            "hedges": self.hedges,
+            "hedge_density": self.hedge_density,
+            "sections_by_density": self.sections_by_density,
+            "total_hedges": len(self.hedges),
+        }
+
+
+def detect_hedging_language(
+    text: str,
+    delimiter_pattern: Optional[str] = None,
+    context_window: int = 150,
+) -> HedgingResult:
+    """Detect phrases where the author hedges or qualifies — stating views as 'mere possibilities.'
+
+    Per Strauss's reading of Lessing, exoteric statements are presented as
+    possibilities rather than assertions. High concentrations of hedging
+    language may mark passages where the author is closest to a dangerous truth
+    but cannot state it directly.
+    """
+    sections = segment_text(text, delimiter_pattern)
+    all_hedges = []
+    section_stats = []
+    total_words = 0
+
+    for section in sections:
+        section_lower = section.text.lower()
+        section_words = len(re.findall(r'\w+', section.text))
+        total_words += section_words
+        section_count = 0
+
+        for phrase in HEDGING_PHRASES:
+            pos = 0
+            while True:
+                idx = section_lower.find(phrase, pos)
+                if idx == -1:
+                    break
+
+                # Extract the full sentence containing the hedge
+                sent_start = max(0, section.text.rfind('.', 0, idx) + 1)
+                sent_end = section.text.find('.', idx + len(phrase))
+                if sent_end == -1:
+                    sent_end = min(len(section.text), idx + context_window)
+                else:
+                    sent_end += 1
+
+                sentence = section.text[sent_start:sent_end].strip()
+
+                all_hedges.append({
+                    "phrase": phrase,
+                    "section": section.label,
+                    "context": sentence[:context_window * 2],
+                })
+                section_count += 1
+                pos = idx + len(phrase)
+
+        density = round(section_count / section_words * 1000, 2) if section_words > 0 else 0
+        section_stats.append({
+            "section": section.label,
+            "density": density,
+            "count": section_count,
+        })
+
+    overall_density = round(len(all_hedges) / total_words * 1000, 2) if total_words > 0 else 0
+
+    # Sort sections by density (highest first)
+    section_stats.sort(key=lambda s: s["density"], reverse=True)
+
+    return HedgingResult(
+        hedges=all_hedges[:50],  # Cap for UI
+        hedge_density=overall_density,
+        sections_by_density=section_stats,
+    )
+
+
+# ─────────────────────────────────────────────────────
 # Orchestrator: Run all tools
 # ─────────────────────────────────────────────────────
 
@@ -756,7 +861,7 @@ def run_full_esoteric_analysis(
     text: str,
     config: Optional[EsotericAnalysisConfig] = None,
 ) -> dict:
-    """Run all six computational esoteric analysis tools and return combined results."""
+    """Run all seven computational esoteric analysis tools and return combined results."""
     if config is None:
         config = EsotericAnalysisConfig()
 
@@ -838,5 +943,17 @@ def run_full_esoteric_analysis(
     except Exception as e:
         logger.error(f"Audience Differentiation failed: {e}")
         results["audience_differentiation"] = {"error": str(e)}
+
+    # 7. Hedging Language ("Mere Possibility")
+    try:
+        hedging_result = detect_hedging_language(
+            text=text,
+            delimiter_pattern=config.delimiter_pattern,
+            context_window=config.context_window,
+        )
+        results["hedging_language"] = hedging_result.to_dict()
+    except Exception as e:
+        logger.error(f"Hedging Language Detector failed: {e}")
+        results["hedging_language"] = {"error": str(e)}
 
     return results
