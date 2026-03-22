@@ -652,6 +652,17 @@ export async function mergeLanguages(sourceValues: string[], targetValue: string
   return fetchAPI('/metadata/languages/merge', { method: 'POST', body: JSON.stringify({ source_values: sourceValues, target_value: targetValue }) });
 }
 
+// ── Esoteric Analysis Export ─────────────────────────────────────────────────
+
+export function esotericExportUrl(bookId: number | string): string {
+  const token = getAuthToken();
+  return `${getApiBase()}/books/${bookId}/esoteric/export.epub?token=${encodeURIComponent(token || '')}`;
+}
+
+export async function exportEsotericToLibrary(bookId: number | string): Promise<Record<string, unknown>> {
+  return fetchAPI(`/books/${bookId}/esoteric/export-to-library`, { method: 'POST' });
+}
+
 // ── Bulk Esoteric Analysis ───────────────────────────────────────────────────
 
 export async function startBulkEsotericAnalysis(opts: {

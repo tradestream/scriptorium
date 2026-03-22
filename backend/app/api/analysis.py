@@ -1,6 +1,8 @@
 """API endpoints for book analysis and analysis templates."""
 
+import json
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 from pydantic import BaseModel
@@ -548,6 +550,203 @@ async def delete_computational_analysis(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found")
     await db.delete(analysis)
     await db.commit()
+
+
+# ── Export analysis as EPUB ──────────────────────────────────────────────────
+
+@router.get("/books/{book_id}/esoteric/export.epub")
+async def export_esoteric_epub(
+    book_id: int,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """Export all esoteric analyses for a book as a downloadable EPUB."""
+    from fastapi.responses import Response
+    from app.services.analysis_export import build_analysis_epub
+
+    # Get book info
+    stmt = select(Book).where(Book.id == book_id).options(
+        joinedload(Book.work).options(joinedload(Work.authors))
+    )
+    result = await db.execute(stmt)
+    book = result.unique().scalar_one_or_none()
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+
+    title = book.work.title if book.work else book.title
+    authors = [a.name for a in book.authors] if book.authors else []
+
+    # Get computational analyses
+    comp_result = await db.execute(
+        select(ComputationalAnalysis)
+        .where(ComputationalAnalysis.book_id == book_id, ComputationalAnalysis.status == "completed")
+        .order_by(ComputationalAnalysis.created_at.desc())
+        .limit(1)
+    )
+    comp = comp_result.scalar_one_or_none()
+    comp_data = json.loads(comp.results_json) if comp else None
+
+    # Get LLM analyses
+    from app.models.analysis import BookAnalysis
+    llm_result = await db.execute(
+        select(BookAnalysis)
+        .where(BookAnalysis.book_id == book_id, BookAnalysis.status == "completed")
+        .order_by(BookAnalysis.created_at.desc())
+    )
+    llm_analyses = [
+        {"title": a.title, "content": a.content}
+        for a in llm_result.scalars().all()
+        if a.content
+    ]
+
+    if not comp_data and not llm_analyses:
+        raise HTTPException(status_code=404, detail="No analyses found for this book")
+
+    epub_bytes = build_analysis_epub(title, authors, comp_data, llm_analyses)
+
+    safe_title = "".join(c for c in title if c.isalnum() or c in " -_")[:50].strip()
+    filename = f"Esoteric Analysis - {safe_title}.epub"
+
+    return Response(
+        content=epub_bytes,
+        media_type="application/epub+zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/books/{book_id}/esoteric/export-to-library")
+async def export_esoteric_to_library(
+    book_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Export esoteric analysis as an EPUB into the library, linked to a shelf for Kobo sync.
+
+    Creates a new edition with the analysis EPUB and adds it to an
+    "Esoteric Analyses" shelf (auto-created, Kobo-synced).
+    """
+    from app.services.analysis_export import build_analysis_epub
+    from app.models.edition import Edition, EditionFile
+    from app.models.shelf import Shelf, ShelfBook
+    from app.config import get_settings
+    import uuid as _uuid
+
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    # Get book info
+    stmt = select(Book).where(Book.id == book_id).options(
+        joinedload(Book.work).options(joinedload(Work.authors))
+    )
+    result = await db.execute(stmt)
+    book = result.unique().scalar_one_or_none()
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+
+    title = book.work.title if book.work else book.title
+    authors = [a.name for a in book.authors] if book.authors else []
+
+    # Get analyses
+    comp_result = await db.execute(
+        select(ComputationalAnalysis)
+        .where(ComputationalAnalysis.book_id == book_id, ComputationalAnalysis.status == "completed")
+        .order_by(ComputationalAnalysis.created_at.desc())
+        .limit(1)
+    )
+    comp = comp_result.scalar_one_or_none()
+    comp_data = json.loads(comp.results_json) if comp else None
+
+    from app.models.analysis import BookAnalysis
+    llm_result = await db.execute(
+        select(BookAnalysis)
+        .where(BookAnalysis.book_id == book_id, BookAnalysis.status == "completed")
+        .order_by(BookAnalysis.created_at.desc())
+    )
+    llm_analyses = [{"title": a.title, "content": a.content} for a in llm_result.scalars().all() if a.content]
+
+    if not comp_data and not llm_analyses:
+        raise HTTPException(status_code=404, detail="No analyses found")
+
+    epub_bytes = build_analysis_epub(title, authors, comp_data, llm_analyses)
+
+    # Save EPUB to ingest path
+    settings = get_settings()
+    ingest_dir = Path(settings.INGEST_PATH) / "esoteric-analyses"
+    ingest_dir.mkdir(parents=True, exist_ok=True)
+
+    safe_title = "".join(c for c in title if c.isalnum() or c in " -_")[:50].strip()
+    filename = f"Esoteric Analysis - {safe_title}.epub"
+    filepath = ingest_dir / filename
+    filepath.write_bytes(epub_bytes)
+
+    # Create edition in the same library as the source book
+    import hashlib
+    file_hash = hashlib.sha256(epub_bytes).hexdigest()
+    edition_uuid = str(_uuid.uuid4())
+
+    # Check if already exported
+    existing = await db.execute(
+        select(EditionFile).where(EditionFile.file_hash == file_hash)
+    )
+    if existing.scalar_one_or_none():
+        return {"status": "already_exists", "message": "Analysis EPUB already in library"}
+
+    # Create work + edition for the analysis
+    analysis_work = Work(
+        title=f"Esoteric Analysis: {title}",
+        description=f"Computational and LLM-powered esoteric analysis of {title} by {', '.join(authors)}.",
+        uuid=str(_uuid.uuid4()),
+    )
+    db.add(analysis_work)
+    await db.flush()
+
+    edition = Edition(
+        uuid=edition_uuid,
+        work_id=analysis_work.id,
+        library_id=book.library_id,
+        publisher="Scriptorium",
+        language="English",
+    )
+    db.add(edition)
+    await db.flush()
+
+    edition_file = EditionFile(
+        edition_id=edition.id,
+        filename=filename,
+        format="epub",
+        file_path=str(filepath),
+        file_hash=file_hash,
+        file_size=len(epub_bytes),
+    )
+    db.add(edition_file)
+
+    # Get or create "Esoteric Analyses" shelf with Kobo sync
+    shelf_result = await db.execute(
+        select(Shelf).where(Shelf.name == "Esoteric Analyses", Shelf.user_id == current_user.id)
+    )
+    shelf = shelf_result.scalar_one_or_none()
+    if not shelf:
+        shelf = Shelf(
+            user_id=current_user.id,
+            name="Esoteric Analyses",
+            description="Auto-generated esoteric analysis companion books",
+            sync_to_kobo=True,
+        )
+        db.add(shelf)
+        await db.flush()
+
+    # Add to shelf
+    shelf_book = ShelfBook(shelf_id=shelf.id, work_id=analysis_work.id)
+    db.add(shelf_book)
+
+    await db.commit()
+
+    return {
+        "status": "created",
+        "edition_id": edition.id,
+        "shelf": shelf.name,
+        "filename": filename,
+    }
 
 
 # ── Per-book esoteric enablement ──────────────────────────────────────────────
