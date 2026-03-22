@@ -617,6 +617,46 @@ export async function deleteSeriesEntity(id: number): Promise<void> {
   return fetchAPI(`/metadata/series/${id}`, { method: 'DELETE' });
 }
 
+// ── Publishers & Languages ────────────────────────────────────────────────────
+
+export interface FieldValueDetail {
+  value: string;
+  edition_count: number;
+}
+
+export async function getPublishers(): Promise<FieldValueDetail[]> {
+  return fetchAPI('/metadata/publishers');
+}
+export async function renamePublisher(oldValue: string, newValue: string): Promise<FieldValueDetail> {
+  return fetchAPI('/metadata/publishers/rename', { method: 'POST', body: JSON.stringify({ old_value: oldValue, new_value: newValue }) });
+}
+export async function mergePublishers(sourceValues: string[], targetValue: string): Promise<FieldValueDetail> {
+  return fetchAPI('/metadata/publishers/merge', { method: 'POST', body: JSON.stringify({ source_values: sourceValues, target_value: targetValue }) });
+}
+
+export async function getLanguages(): Promise<FieldValueDetail[]> {
+  return fetchAPI('/metadata/languages');
+}
+export async function renameLanguage(oldValue: string, newValue: string): Promise<FieldValueDetail> {
+  return fetchAPI('/metadata/languages/rename', { method: 'POST', body: JSON.stringify({ old_value: oldValue, new_value: newValue }) });
+}
+export async function mergeLanguages(sourceValues: string[], targetValue: string): Promise<FieldValueDetail> {
+  return fetchAPI('/metadata/languages/merge', { method: 'POST', body: JSON.stringify({ source_values: sourceValues, target_value: targetValue }) });
+}
+
+// ── Embedded Metadata Extraction ─────────────────────────────────────────────
+
+export async function startBulkEmbeddedMetadata(libraryId?: number): Promise<{ job_id: string; total: number }> {
+  const qs = libraryId ? `?library_id=${libraryId}` : '';
+  return fetchAPI(`/admin/embedded-metadata/bulk${qs}`, { method: 'POST' });
+}
+export async function getActiveBulkEmbeddedMetadataJob(): Promise<Record<string, unknown> | null> {
+  return fetchAPI('/admin/embedded-metadata/bulk/active');
+}
+export async function getBulkEmbeddedMetadataJob(jobId: string): Promise<Record<string, unknown>> {
+  return fetchAPI(`/admin/embedded-metadata/bulk/${jobId}`);
+}
+
 // ── Shelves ───────────────────────────────────────────────────────────────────
 
 export async function getShelves(): Promise<Shelf[]> {

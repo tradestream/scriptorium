@@ -63,6 +63,8 @@ class Edition(Base):
 
     # True after bulk identifier extraction has scanned this edition's files
     identifiers_scanned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")
+    # True after OPF/ComicInfo embedded metadata extraction
+    opf_scanned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())

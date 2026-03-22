@@ -1,8 +1,8 @@
-"""Metadata management endpoints — rename, merge, delete for Authors/Tags/Series."""
+"""Metadata management endpoints — rename, merge, delete for Authors/Tags/Series/Publishers/Languages."""
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -31,6 +31,21 @@ class MergeRequest(BaseModel):
 class SeriesRenameRequest(BaseModel):
     name: str
     description: str | None = None
+
+
+class FieldRenameRequest(BaseModel):
+    old_value: str
+    new_value: str
+
+
+class FieldMergeRequest(BaseModel):
+    source_values: list[str]
+    target_value: str
+
+
+class FieldValueDetail(BaseModel):
+    value: str
+    edition_count: int
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -308,3 +323,135 @@ async def delete_series_entity(
         )
     await db.delete(series)
     await db.commit()
+
+
+# ── Publishers ───────────────────────────────────────────────────────────────
+
+@router.get("/publishers", response_model=list[FieldValueDetail])
+async def list_publishers(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List all distinct publisher values with edition counts."""
+    from app.models.edition import Edition
+    result = await db.execute(
+        select(Edition.publisher, func.count(Edition.id).label("cnt"))
+        .where(Edition.publisher.isnot(None), Edition.publisher != "")
+        .group_by(Edition.publisher)
+        .order_by(func.count(Edition.id).desc())
+    )
+    return [FieldValueDetail(value=row[0], edition_count=row[1]) for row in result.all()]
+
+
+@router.post("/publishers/rename", response_model=FieldValueDetail)
+async def rename_publisher(
+    data: FieldRenameRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Rename all editions with one publisher value to another."""
+    _require_admin(current_user)
+    new = data.new_value.strip()
+    if not new:
+        raise HTTPException(status_code=422, detail="New value cannot be empty")
+    result = await db.execute(
+        text("UPDATE editions SET publisher = :new WHERE publisher = :old"),
+        {"new": new, "old": data.old_value},
+    )
+    await db.commit()
+    from app.models.edition import Edition
+    count = await db.scalar(
+        select(func.count(Edition.id)).where(Edition.publisher == new)
+    )
+    return FieldValueDetail(value=new, edition_count=count or 0)
+
+
+@router.post("/publishers/merge", response_model=FieldValueDetail)
+async def merge_publishers(
+    data: FieldMergeRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Merge multiple publisher values into a target value."""
+    _require_admin(current_user)
+    target = data.target_value.strip()
+    if not target:
+        raise HTTPException(status_code=422, detail="Target value cannot be empty")
+    for src in data.source_values:
+        if src != target:
+            await db.execute(
+                text("UPDATE editions SET publisher = :target WHERE publisher = :src"),
+                {"target": target, "src": src},
+            )
+    await db.commit()
+    from app.models.edition import Edition
+    count = await db.scalar(
+        select(func.count(Edition.id)).where(Edition.publisher == target)
+    )
+    return FieldValueDetail(value=target, edition_count=count or 0)
+
+
+# ── Languages ────────────────────────────────────────────────────────────────
+
+@router.get("/languages", response_model=list[FieldValueDetail])
+async def list_languages(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List all distinct language values with edition counts."""
+    from app.models.edition import Edition
+    result = await db.execute(
+        select(Edition.language, func.count(Edition.id).label("cnt"))
+        .where(Edition.language.isnot(None), Edition.language != "")
+        .group_by(Edition.language)
+        .order_by(func.count(Edition.id).desc())
+    )
+    return [FieldValueDetail(value=row[0], edition_count=row[1]) for row in result.all()]
+
+
+@router.post("/languages/rename", response_model=FieldValueDetail)
+async def rename_language(
+    data: FieldRenameRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Rename all editions with one language value to another."""
+    _require_admin(current_user)
+    new = data.new_value.strip()
+    if not new:
+        raise HTTPException(status_code=422, detail="New value cannot be empty")
+    result = await db.execute(
+        text("UPDATE editions SET language = :new WHERE language = :old"),
+        {"new": new, "old": data.old_value},
+    )
+    await db.commit()
+    from app.models.edition import Edition
+    count = await db.scalar(
+        select(func.count(Edition.id)).where(Edition.language == new)
+    )
+    return FieldValueDetail(value=new, edition_count=count or 0)
+
+
+@router.post("/languages/merge", response_model=FieldValueDetail)
+async def merge_languages(
+    data: FieldMergeRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Merge multiple language values into a target value."""
+    _require_admin(current_user)
+    target = data.target_value.strip()
+    if not target:
+        raise HTTPException(status_code=422, detail="Target value cannot be empty")
+    for src in data.source_values:
+        if src != target:
+            await db.execute(
+                text("UPDATE editions SET language = :target WHERE language = :src"),
+                {"target": target, "src": src},
+            )
+    await db.commit()
+    from app.models.edition import Edition
+    count = await db.scalar(
+        select(func.count(Edition.id)).where(Edition.language == target)
+    )
+    return FieldValueDetail(value=target, edition_count=count or 0)
