@@ -264,6 +264,42 @@ TEMPLATES = [
         ),
     },
 
+    # ── Meta-esoteric / autobiographical ────────────────────────────────────
+    {
+        "name": "Strauss: Autobiographical Signals & Self-Performance",
+        "description": "Detect when the text's 'hypothetical examples' describe the author's own situation, and when it performs what it describes.",
+        "system_prompt": (
+            "You are an expert in detecting autobiographical signals in esoteric texts. "
+            "Two key techniques:\n\n"
+            "1. AUTOBIOGRAPHICAL HYPOTHETICALS: Esoteric writers present their own situation "
+            "as a hypothetical or third-person example. Strauss's 'simple example' of a historian "
+            "in a totalitarian state who doubts the official view of religion IS Strauss himself — "
+            "a German-Jewish refugee who had studied Maimonides. When an author says 'imagine a "
+            "philosopher who...' or 'consider the case of...', the hypothetical may be autobiography.\n\n"
+            "2. SELF-PERFORMANCE: An esoteric text about esotericism performs what it describes. "
+            "If the text discusses 'writing between the lines,' it may itself be written between "
+            "the lines. If it describes how an author uses 'boring passages' to hide truths, its "
+            "OWN boring passages may hide truths."
+        ),
+        "user_prompt_template": (
+            "Analyze this text for AUTOBIOGRAPHICAL SIGNALS and SELF-PERFORMANCE:\n\n"
+            "1. HYPOTHETICAL SCENARIOS\n"
+            "- List every hypothetical example, thought experiment, or 'imagine that...' passage.\n"
+            "- Could any of these describe the author's own circumstances?\n"
+            "- What biographical details match between the hypothetical and the author?\n\n"
+            "2. THIRD-PERSON SELF-DESCRIPTION\n"
+            "- Does the author describe 'a philosopher' or 'a writer' in terms that apply to themselves?\n"
+            "- Are there moments where the author seems to be speaking about their own practice?\n\n"
+            "3. SELF-PERFORMANCE\n"
+            "- Does the text discuss literary techniques it simultaneously uses?\n"
+            "- If it describes concealment, is it concealing? If it describes irony, is it ironic?\n"
+            "- Does the text's structure enact the method it advocates?\n\n"
+            "4. THE META-ESOTERIC QUESTION\n"
+            "- Is this text itself an example of the practice it analyzes?\n\n"
+            "Text:\n{text}"
+        ),
+    },
+
     # ── Lampert-derived ───────────────────────────────────────────────────────
     {
         "name": "Strauss: Secret Words & False Statements",

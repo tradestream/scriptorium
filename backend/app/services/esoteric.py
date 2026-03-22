@@ -858,7 +858,227 @@ class EsotericAnalysisConfig:
 
 
 # ─────────────────────────────────────────────────────
-# Tool 8: Conditional Language Detector
+# Tool 8: Self-Reference Detector
+# ─────────────────────────────────────────────────────
+
+SELF_REFERENCE_MARKERS = [
+    "writing between the lines", "esoteric", "exoteric", "hidden teaching",
+    "secret teaching", "concealment", "art of writing", "careful reader",
+    "careless reader", "between the lines", "noble lie", "pious fraud",
+    "literary technique", "peculiar technique", "writing with circumspection",
+    "dissimulation", "irony", "ironic", "double meaning",
+    "the author discusses", "intentional blunders", "intentional",
+    "the wise", "the vulgar", "the few", "the many",
+]
+
+
+@dataclass
+class SelfReferenceResult:
+    """Result from the Self-Reference Detector."""
+    references: list[dict]  # [{marker, section, context}]
+    density: float
+    meta_esoteric_score: float  # 0-1, how self-referential the text is
+
+    def to_dict(self) -> dict:
+        return {
+            "type": "self_reference",
+            "references": self.references,
+            "density": self.density,
+            "meta_esoteric_score": self.meta_esoteric_score,
+            "total": len(self.references),
+        }
+
+
+def detect_self_reference(
+    text: str,
+    delimiter_pattern: Optional[str] = None,
+    context_window: int = 150,
+) -> SelfReferenceResult:
+    """Detect when a text discusses its own method of writing or reading.
+
+    When an author discusses concealment, irony, literary technique, or
+    esoteric writing, those passages may be simultaneously PERFORMING what
+    they describe. High self-reference density signals a meta-esoteric text —
+    one that is itself an example of the practice it analyzes.
+    """
+    sections = segment_text(text, delimiter_pattern)
+    text_lower = text.lower()
+    total_words = len(re.findall(r'\w+', text))
+    refs = []
+
+    for section in sections:
+        section_lower = section.text.lower()
+        for marker in SELF_REFERENCE_MARKERS:
+            pos = 0
+            while True:
+                idx = section_lower.find(marker, pos)
+                if idx == -1:
+                    break
+                start = max(0, idx - context_window)
+                end = min(len(section.text), idx + len(marker) + context_window)
+                refs.append({
+                    "marker": marker,
+                    "section": section.label,
+                    "context": section.text[start:end].strip(),
+                })
+                pos = idx + len(marker)
+
+    density = round(len(refs) / total_words * 1000, 2) if total_words > 0 else 0
+    # Score: high density of self-referential language = likely meta-esoteric
+    score = min(density / 5.0, 1.0)  # Normalize: 5 per 1000 words = max
+
+    return SelfReferenceResult(
+        references=refs[:30],
+        density=density,
+        meta_esoteric_score=round(score, 3),
+    )
+
+
+# ─────────────────────────────────────────────────────
+# Tool 9: Section Proportion Analyzer
+# ─────────────────────────────────────────────────────
+
+@dataclass
+class SectionProportionResult:
+    """Result from the Section Proportion Analyzer."""
+    sections: list[dict]  # [{label, word_count, percentage, keyword_density}]
+    short_dense_sections: list[dict]  # Sections that are short but keyword-dense
+
+    def to_dict(self) -> dict:
+        return {
+            "type": "section_proportion",
+            "sections": self.sections,
+            "short_dense_sections": self.short_dense_sections,
+        }
+
+
+def analyze_section_proportions(
+    text: str,
+    keywords: list[str],
+    delimiter_pattern: Optional[str] = None,
+) -> SectionProportionResult:
+    """Analyze relative section lengths and keyword density.
+
+    Per Strauss's own method: the esoteric teaching is typically in the
+    SHORTER section. When a brief section has disproportionately high
+    keyword density or contains the most important claims, it signals
+    that the rare/brief statement is the true one.
+    """
+    sections = segment_text(text, delimiter_pattern)
+    keyword_set = {k.lower() for k in keywords}
+    total_words = sum(len(re.findall(r'\w+', s.text)) for s in sections)
+
+    section_data = []
+    for section in sections:
+        words = re.findall(r'\w+', section.text.lower())
+        word_count = len(words)
+        pct = round(word_count / total_words * 100, 1) if total_words > 0 else 0
+        kw_count = sum(1 for w in words if w in keyword_set)
+        kw_density = round(kw_count / word_count * 1000, 2) if word_count > 0 else 0
+
+        section_data.append({
+            "label": section.label,
+            "word_count": word_count,
+            "percentage": pct,
+            "keyword_density": kw_density,
+            "keyword_count": kw_count,
+        })
+
+    # Find "short but dense" sections: below median length but above median density
+    if len(section_data) >= 2:
+        lengths = sorted(s["word_count"] for s in section_data)
+        densities = sorted(s["keyword_density"] for s in section_data)
+        median_len = lengths[len(lengths) // 2]
+        median_density = densities[len(densities) // 2]
+
+        short_dense = [
+            {
+                "label": s["label"],
+                "word_count": s["word_count"],
+                "keyword_density": s["keyword_density"],
+                "reason": f"Short ({s['percentage']}% of text) but keyword-dense "
+                          f"({s['keyword_density']}/1000 vs median {median_density:.1f}/1000) — "
+                          f"may contain the esoteric teaching",
+            }
+            for s in section_data
+            if s["word_count"] < median_len and s["keyword_density"] > median_density
+        ]
+    else:
+        short_dense = []
+
+    return SectionProportionResult(
+        sections=section_data,
+        short_dense_sections=short_dense,
+    )
+
+
+# ─────────────────────────────────────────────────────
+# Tool 10: Epigraph Extractor
+# ─────────────────────────────────────────────────────
+
+@dataclass
+class EpigraphResult:
+    """Result from the Epigraph Extractor."""
+    epigraphs: list[dict]  # [{text, attribution, location}]
+
+    def to_dict(self) -> dict:
+        return {
+            "type": "epigraph",
+            "epigraphs": self.epigraphs,
+            "total": len(self.epigraphs),
+        }
+
+
+def extract_epigraphs(text: str) -> EpigraphResult:
+    """Extract epigraphs, mottos, and opening quotations.
+
+    Epigraphs are chosen with extreme care and often contain the key to
+    the entire work. They sit at the boundary between paratext and text,
+    often expressing the author's true view through someone else's words.
+    """
+    epigraphs = []
+
+    # Pattern 1: Quoted text followed by attribution (em-dash + name)
+    # "Some quotation here." —Author Name
+    epigraph_pattern = re.compile(
+        r'["\u201c]([^"\u201d]{20,500})["\u201d]\s*'
+        r'(?:—|--|-)\s*([A-Z][^\n]{3,80})',
+        re.MULTILINE
+    )
+
+    for m in epigraph_pattern.finditer(text[:5000]):  # Only check first ~5000 chars
+        epigraphs.append({
+            "text": m.group(1).strip(),
+            "attribution": m.group(2).strip(),
+            "location": "opening",
+        })
+
+    # Pattern 2: Italic-style epigraph (lines that are short, before main text)
+    lines = text[:3000].split('\n')
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        # Short line with attribution marker
+        if stripped.startswith('—') or stripped.startswith('--'):
+            # Previous lines might be the epigraph
+            epigraph_text = []
+            for j in range(i - 1, max(i - 6, -1), -1):
+                prev = lines[j].strip()
+                if prev:
+                    epigraph_text.insert(0, prev)
+                else:
+                    break
+            if epigraph_text:
+                epigraphs.append({
+                    "text": ' '.join(epigraph_text),
+                    "attribution": stripped.lstrip('—- '),
+                    "location": "opening",
+                })
+
+    return EpigraphResult(epigraphs=epigraphs[:5])
+
+
+# ─────────────────────────────────────────────────────
+# Tool 11: Conditional Language Detector
 # ─────────────────────────────────────────────────────
 
 CONDITIONAL_PATTERNS = [
@@ -1384,7 +1604,7 @@ def run_full_esoteric_analysis(
     text: str,
     config: Optional[EsotericAnalysisConfig] = None,
 ) -> dict:
-    """Run all thirteen computational esoteric analysis tools and return combined results."""
+    """Run all sixteen computational esoteric analysis tools and return combined results."""
     if config is None:
         config = EsotericAnalysisConfig()
 
@@ -1490,6 +1710,38 @@ def run_full_esoteric_analysis(
     except Exception as e:
         logger.error(f"Disreputable Mouthpiece Detector failed: {e}")
         results["disreputable_mouthpiece"] = {"error": str(e)}
+
+    # Self-Reference Detection
+    try:
+        selfref_result = detect_self_reference(
+            text=text,
+            delimiter_pattern=config.delimiter_pattern,
+            context_window=config.context_window,
+        )
+        results["self_reference"] = selfref_result.to_dict()
+    except Exception as e:
+        logger.error(f"Self-Reference Detector failed: {e}")
+        results["self_reference"] = {"error": str(e)}
+
+    # Section Proportion Analysis
+    try:
+        proportion_result = analyze_section_proportions(
+            text=text,
+            keywords=config.keywords,
+            delimiter_pattern=config.delimiter_pattern,
+        )
+        results["section_proportion"] = proportion_result.to_dict()
+    except Exception as e:
+        logger.error(f"Section Proportion Analyzer failed: {e}")
+        results["section_proportion"] = {"error": str(e)}
+
+    # Epigraph Extraction
+    try:
+        epigraph_result = extract_epigraphs(text)
+        results["epigraph"] = epigraph_result.to_dict()
+    except Exception as e:
+        logger.error(f"Epigraph Extractor failed: {e}")
+        results["epigraph"] = {"error": str(e)}
 
     # Conditional Language
     try:

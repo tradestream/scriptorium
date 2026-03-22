@@ -455,6 +455,18 @@ async def run_computational_analysis(
             from app.services.esoteric import detect_hedging_language
             r = detect_hedging_language(text, config.delimiter_pattern, config.context_window)
             results = r.to_dict()
+        elif request.analysis_type == "self_reference":
+            from app.services.esoteric import detect_self_reference
+            r = detect_self_reference(text, config.delimiter_pattern, config.context_window)
+            results = r.to_dict()
+        elif request.analysis_type == "section_proportion":
+            from app.services.esoteric import analyze_section_proportions
+            r = analyze_section_proportions(text, config.keywords, config.delimiter_pattern)
+            results = r.to_dict()
+        elif request.analysis_type == "epigraph":
+            from app.services.esoteric import extract_epigraphs
+            r = extract_epigraphs(text)
+            results = r.to_dict()
         elif request.analysis_type == "conditional_language":
             from app.services.esoteric import detect_conditional_language
             r = detect_conditional_language(text, config.delimiter_pattern, config.context_window)
