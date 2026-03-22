@@ -606,7 +606,8 @@ async def _run_bulk_identifiers(job_id: str, edition_ids: list[int]) -> None:
     found_doi = 0
 
     for edition_id in edition_ids:
-        if await get_job_status(job_id) == "cancelled":
+        # Check cancellation every 10 items (avoids per-item DB read)
+        if done % 10 == 0 and await get_job_status(job_id) == "cancelled":
             break
 
         try:
@@ -620,9 +621,10 @@ async def _run_bulk_identifiers(job_id: str, edition_ids: list[int]) -> None:
             failed += 1
 
         done += 1
-        await update_job(job_id, done=done, failed=failed, found_isbn=found_isbn, found_doi=found_doi)
 
+        # Batch DB updates and cancel checks every 10 items (avoids per-item DB writes)
         if done % 10 == 0 or done == total:
+            await update_job(job_id, done=done, failed=failed, found_isbn=found_isbn, found_doi=found_doi)
             try:
                 from app.services.events import broadcaster
                 await broadcaster.enrich_progress(
@@ -631,8 +633,8 @@ async def _run_bulk_identifiers(job_id: str, edition_ids: list[int]) -> None:
             except Exception:
                 pass
 
-        # Throttle to keep the API responsive during heavy PDF/EPUB parsing
-        await asyncio.sleep(2.0)
+        # Brief yield — extraction itself provides natural throttling via file I/O
+        await asyncio.sleep(0.2)
 
     final_status = "done" if await get_job_status(job_id) != "cancelled" else "cancelled"
     await update_job(job_id, status=final_status, current="")

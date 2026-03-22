@@ -173,21 +173,66 @@ def _prioritize_files(files: list[str], front: int = 5, back: int = 3) -> list[s
     return files[:front] + files[-back:][::-1] + files[front:-back]
 
 
+# Max bytes to read from any single EPUB chapter to avoid OOM on huge files
+_MAX_CHAPTER_BYTES = 256 * 1024  # 256 KB
+
+
 def extract_from_epub(filepath: str | Path) -> dict:
     """Extract ISBN and DOI from EPUB file content.
 
     Returns dict with isbn_13, isbn_10, doi, isbn_source, doi_source.
+
+    Performance optimisations:
+    - Checks OPF metadata first (instant, no content parsing)
+    - Only scans front/back matter pages (not entire book)
+    - Caps per-chapter read at 256 KB to avoid OOM on huge chapters
+    - Stops as soon as both ISBN and DOI are found
     """
     result: dict = {"isbn_13": None, "isbn_10": None, "doi": None,
                     "isbn_source": None, "doi_source": None}
     try:
         with zipfile.ZipFile(str(filepath), 'r') as zf:
+            # ── Fast path: check OPF dc:identifier first ────────────────
+            opf_path = None
+            try:
+                container = zf.read('META-INF/container.xml').decode('utf-8')
+                m = re.search(r'rootfile[^>]+full-path="([^"]+)"', container)
+                if m:
+                    opf_path = m.group(1)
+            except Exception:
+                pass
+            if not opf_path:
+                opf_path = next((n for n in zf.namelist() if n.endswith('.opf')), None)
+
+            if opf_path:
+                try:
+                    opf_raw = zf.read(opf_path).decode('utf-8', errors='ignore')
+                    # Quick regex scan for ISBN in identifiers (faster than XML parsing)
+                    isbn13, isbn10 = _find_isbn_in_text(opf_raw)
+                    if isbn13:
+                        result["isbn_13"] = isbn13
+                        result["isbn_10"] = isbn10
+                        result["isbn_source"] = "epub_opf"
+                    doi = _find_doi_in_text(opf_raw)
+                    if doi:
+                        result["doi"] = doi
+                        result["doi_source"] = "epub_opf"
+                    if result["isbn_13"] and result["doi"]:
+                        return result
+                except Exception:
+                    pass
+
+            # ── Scan content pages ──────────────────────────────────────
             content_files = _get_epub_spine_files(zf)
             scan_order = _prioritize_files(content_files)
 
             for fname in scan_order:
                 try:
-                    raw = zf.read(fname).decode('utf-8', errors='ignore')
+                    info = zf.getinfo(fname)
+                    # Skip very large chapters entirely (likely image-heavy)
+                    if info.file_size > _MAX_CHAPTER_BYTES * 3:
+                        continue
+                    raw = zf.read(fname)[:_MAX_CHAPTER_BYTES].decode('utf-8', errors='ignore')
                     text = _clean_html(raw)
                 except Exception:
                     continue
@@ -216,13 +261,34 @@ def extract_from_epub(filepath: str | Path) -> dict:
 
 # ── PDF extraction ───────────────────────────────────────────────────────────
 
-def extract_from_pdf(filepath: str | Path, first_pages: int = 10, last_pages: int = 5) -> dict:
+# Max PDF file size to attempt scanning (skip very large PDFs)
+_MAX_PDF_SIZE = 100 * 1024 * 1024  # 100 MB
+
+
+def extract_from_pdf(filepath: str | Path, first_pages: int = 5, last_pages: int = 3) -> dict:
     """Extract ISBN and DOI from PDF content.
 
-    Scans metadata first, then front/back pages.
+    Scans metadata first (fast), then front/back pages only.
+
+    Performance optimisations:
+    - Skips PDFs > 100 MB (usually scanned image books, no text)
+    - Reduced page scan range (5 front + 3 back vs 10+5)
+    - Lazy page access (doesn't load entire PDF into memory)
+    - Stops as soon as both ISBN and DOI are found
     """
     result: dict = {"isbn_13": None, "isbn_10": None, "doi": None,
                     "isbn_source": None, "doi_source": None}
+
+    filepath = Path(filepath)
+
+    # Skip huge PDFs — they're usually image-heavy and won't yield text ISBNs
+    try:
+        if filepath.stat().st_size > _MAX_PDF_SIZE:
+            logger.debug("Skipping oversized PDF (%d MB): %s", filepath.stat().st_size // (1024*1024), filepath)
+            return result
+    except OSError:
+        return result
+
     try:
         from pypdf import PdfReader
     except ImportError:
@@ -230,9 +296,10 @@ def extract_from_pdf(filepath: str | Path, first_pages: int = 10, last_pages: in
         return result
 
     try:
-        reader = PdfReader(str(filepath))
+        # Use strict=False to avoid crashing on malformed PDFs
+        reader = PdfReader(str(filepath), strict=False)
 
-        # Check PDF metadata
+        # Check PDF metadata first (fast, no page parsing)
         if reader.metadata:
             meta_text = ' '.join(str(v) for v in reader.metadata.values() if v)
             isbn13, isbn10 = _find_isbn_in_text(meta_text)
@@ -248,17 +315,24 @@ def extract_from_pdf(filepath: str | Path, first_pages: int = 10, last_pages: in
         if result["isbn_13"] and result["doi"]:
             return result
 
-        # Scan pages
+        # Scan only front and back pages
         num_pages = len(reader.pages)
-        front = list(range(min(first_pages, num_pages)))
-        back_start = max(first_pages, num_pages - last_pages)
-        back = list(range(num_pages - 1, back_start - 1, -1)) if num_pages > first_pages else []
-        seen = set()
-        pages = [p for p in front + back if p not in seen and not seen.add(p)]
+        pages_to_scan = []
+        # Front pages (copyright info is usually in first few)
+        for i in range(min(first_pages, num_pages)):
+            pages_to_scan.append(i)
+        # Back pages (some books put ISBN on last page)
+        if num_pages > first_pages:
+            for i in range(num_pages - 1, max(first_pages - 1, num_pages - last_pages - 1), -1):
+                if i not in pages_to_scan:
+                    pages_to_scan.append(i)
 
-        for page_num in pages:
+        for page_num in pages_to_scan:
             try:
                 text = reader.pages[page_num].extract_text() or ""
+                # Cap text length to avoid regex backtracking on huge pages
+                if len(text) > 50000:
+                    text = text[:50000]
             except Exception:
                 continue
 
