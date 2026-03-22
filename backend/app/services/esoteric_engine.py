@@ -642,6 +642,10 @@ class MelzerTaxonomy:
         findings.extend(self._irony_markers(text, sections, weights))
         findings.extend(self._incomplete_argumentation(text, sections, weights))
         findings.extend(self._conspicuous_omission(text, sections, weights))
+        findings.extend(self._aesopian_language(text, sections, weights))
+        findings.extend(self._broken_patterns(text, sections, weights))
+        findings.extend(self._extravagant_praise(text, sections, weights))
+        findings.extend(self._multilevel_audience(text, sections, weights))
         findings.extend(self._anomalous_details(text, sections, weights))
         return findings
 
@@ -783,6 +787,129 @@ class MelzerTaxonomy:
                 ))
 
         return findings[:10]
+
+    def _aesopian_language(self, text: str, sections: list[Section], weights: ScoringWeights) -> list[Finding]:
+        """Aesopian parallels — historical/foreign settings mirroring local issues."""
+        findings = []
+        AESOPIAN_MARKERS = re.compile(
+            r'(?:in (?:ancient|classical) (?:Greece|Rome|Athens|Sparta|Persia|Egypt)|'
+            r'(?:the (?:ancients|Romans|Greeks|Athenians|Spartans)) (?:believed|held|practiced|taught)|'
+            r'(?:Plato|Aristotle|Socrates|Xenophon|Cicero|Tacitus|Thucydides) (?:tells|relates|shows|says)|'
+            r'consider (?:the case|the example) of|'
+            r'(?:a |one )(?:certain |particular )?(?:country|nation|people|city|republic|kingdom)|'
+            r'(?:in a |there was a )(?:far|distant|foreign|remote) (?:land|country|kingdom))',
+            re.I
+        )
+
+        for m in AESOPIAN_MARKERS.finditer(text):
+            start = max(0, m.start() - 100)
+            end = min(len(text), m.end() + 200)
+            findings.append(Finding(
+                technique="form_content_mismatch",
+                score=weights.form_content_mismatch * 0.5,
+                section="",
+                evidence=text[start:end][:250],
+                explanation=f"Aesopian marker: '{m.group(0)}' — may be using historical/foreign setting to mirror contemporary issues.",
+                deliberateness=0.5,
+            ))
+        return findings[:10]
+
+    def _broken_patterns(self, text: str, sections: list[Section], weights: ScoringWeights) -> list[Finding]:
+        """Detect when established lists/enumerations omit a critical entry."""
+        findings = []
+
+        # Find numbered lists: "first... second... third..." and check for gaps
+        ordinals = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth']
+        text_lower = text.lower()
+
+        for i in range(len(ordinals) - 1):
+            has_current = ordinals[i] in text_lower
+            has_next = ordinals[i + 1] in text_lower
+            if has_current and not has_next and i > 0:
+                # Previous items existed but this sequence breaks
+                # Check if we were in a genuine enumeration
+                prev_count = sum(1 for o in ordinals[:i+1] if o in text_lower)
+                if prev_count >= 2:
+                    findings.append(Finding(
+                        technique="conspicuous_omission",
+                        score=weights.conspicuous_omission * 0.5,
+                        section="",
+                        evidence=f"Enumeration: {', '.join(ordinals[:i+1])} present but '{ordinals[i+1]}' missing",
+                        explanation=f"List breaks after '{ordinals[i]}' — the missing entry may be the one the author cannot state.",
+                        deliberateness=0.5,
+                    ))
+                break
+
+        return findings
+
+    def _extravagant_praise(self, text: str, sections: list[Section], weights: ScoringWeights) -> list[Finding]:
+        """Detect discrepancies between extravagant praise and underlying critique."""
+        findings = []
+        PRAISE = re.compile(
+            r'(?:(?:the )?(?:great|illustrious|famous|renowned|celebrated|noble|divine|wise|learned|eminent|immortal)\s+'
+            r'(?:[A-Z]\w+))',
+            re.I
+        )
+
+        UNDERCUT = re.compile(
+            r'(?:however|but|yet|nevertheless|notwithstanding|although|despite|'
+            r'it must be (?:said|noted|admitted|observed)|'
+            r'on the other hand|to be sure|admittedly)',
+            re.I
+        )
+
+        for m in PRAISE.finditer(text):
+            # Check if praise is undercut within 300 chars
+            region_after = text[m.end():m.end()+300]
+            undercuts = UNDERCUT.findall(region_after)
+            if undercuts:
+                start = max(0, m.start() - 50)
+                end = min(len(text), m.end() + 200)
+                findings.append(Finding(
+                    technique="dramatic_irony",
+                    score=weights.dramatic_irony * 0.5,
+                    section="",
+                    evidence=text[start:end][:250],
+                    explanation=f"Extravagant praise '{m.group(0)}' followed by undercut '{undercuts[0]}' — possible ironic veneer.",
+                    deliberateness=0.5,
+                ))
+
+        return findings[:10]
+
+    def _multilevel_audience(self, text: str, sections: list[Section], weights: ScoringWeights) -> list[Finding]:
+        """Detect sections designed for 'the common herd' vs 'the few'."""
+        findings = []
+
+        ELITE_MARKERS = {
+            "the wise", "the few", "those who understand", "the careful reader",
+            "the attentive", "the philosophic", "the learned", "the initiated",
+            "the intelligent", "the discerning", "for few readers",
+        }
+        MASS_MARKERS = {
+            "the many", "the multitude", "the vulgar", "the common", "the people",
+            "the masses", "the populace", "most readers", "the public", "ordinary men",
+            "common opinion", "the unlearned",
+        }
+
+        text_lower = text.lower()
+        elite_count = sum(text_lower.count(m) for m in ELITE_MARKERS)
+        mass_count = sum(text_lower.count(m) for m in MASS_MARKERS)
+        total = elite_count + mass_count
+
+        if total >= 3:
+            balance = min(elite_count, mass_count) / max(elite_count, mass_count) if max(elite_count, mass_count) > 0 else 0
+            deliberateness = min(total / 15, 1.0) * (0.4 + balance * 0.6)
+
+            findings.append(Finding(
+                technique="pedagogical_stratification",
+                score=weights.pedagogical_stratification * deliberateness,
+                section="Full text",
+                evidence=f"Elite markers: {elite_count}, Mass markers: {mass_count}",
+                explanation=f"Author explicitly addresses different audiences — strong signal of multilevel writing.",
+                deliberateness=deliberateness,
+            ))
+
+        return findings
 
     def _anomalous_details(self, text: str, sections: list[Section], weights: ScoringWeights) -> list[Finding]:
         """Mode 12: Irrelevant-seeming details, unusual specificity, odd examples."""
