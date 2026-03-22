@@ -194,7 +194,13 @@ class BookRead(BookBase):
     age_range: Optional[str] = None
     interest_level: Optional[str] = None
     content_warnings: Optional[dict] = None
-    reading_status: Optional[str] = None  # want_to_read | reading | completed | abandoned
+    reading_status: Optional[str] = None  # want_to_read | reading | completed | abandoned (set by API, not ORM)
+
+    @field_validator('reading_status', mode='before')
+    @classmethod
+    def default_reading_status(cls, v):
+        # reading_status is not an ORM column — it's injected by the API layer
+        return v if isinstance(v, str) else None
 
     @field_validator('content_warnings', mode='before')
     @classmethod
@@ -216,7 +222,7 @@ class BookRead(BookBase):
             return json.loads(v)
         return v
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, extra="ignore")
 
 
 class BookListResponse(BaseModel):
