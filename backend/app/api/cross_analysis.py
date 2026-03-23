@@ -31,7 +31,7 @@ async def esoteric_dashboard(
         select(func.count(Work.id)).where(Work.esoteric_enabled == True)
     )
     total_computational = await db.scalar(
-        select(func.count(func.distinct(ComputationalAnalysis.book_id)))
+        select(func.count(func.distinct(ComputationalAnalysis.edition_id)))
         .where(ComputationalAnalysis.status == "completed")
     )
     total_llm = await db.scalar(
@@ -163,7 +163,7 @@ async def cross_book_conversation(
         # Get computational summary
         comp_result = await db.execute(
             select(ComputationalAnalysis)
-            .where(ComputationalAnalysis.book_id == book_id, ComputationalAnalysis.status == "completed")
+            .where(ComputationalAnalysis.edition_id == book_id, ComputationalAnalysis.status == "completed")
             .order_by(ComputationalAnalysis.created_at.desc())
             .limit(1)
         )

@@ -344,7 +344,7 @@ async def list_computational_analyses(
     """List all computational esoteric analyses for a book."""
     stmt = (
         select(ComputationalAnalysis)
-        .where(ComputationalAnalysis.work_id == book_id)
+        .where(ComputationalAnalysis.edition_id == book_id)
         .order_by(ComputationalAnalysis.created_at.desc())
     )
     result = await db.execute(stmt)
@@ -374,7 +374,7 @@ async def get_computational_analysis(
     """Get a specific computational analysis with full results."""
     stmt = select(ComputationalAnalysis).where(
         ComputationalAnalysis.id == analysis_id,
-        ComputationalAnalysis.work_id == book_id,
+        ComputationalAnalysis.edition_id == book_id,
     )
     result = await db.execute(stmt)
     analysis = result.scalar_one_or_none()
@@ -546,7 +546,7 @@ async def delete_computational_analysis(
     """Delete a saved computational analysis."""
     stmt = select(ComputationalAnalysis).where(
         ComputationalAnalysis.id == analysis_id,
-        ComputationalAnalysis.work_id == book_id,
+        ComputationalAnalysis.edition_id == book_id,
     )
     result = await db.execute(stmt)
     analysis = result.scalar_one_or_none()
@@ -583,7 +583,7 @@ async def export_esoteric_epub(
     # Get computational analyses
     comp_result = await db.execute(
         select(ComputationalAnalysis)
-        .where(ComputationalAnalysis.book_id == book_id, ComputationalAnalysis.status == "completed")
+        .where(ComputationalAnalysis.edition_id == book_id, ComputationalAnalysis.status == "completed")
         .order_by(ComputationalAnalysis.created_at.desc())
         .limit(1)
     )
@@ -653,7 +653,7 @@ async def export_esoteric_to_library(
     # Get analyses
     comp_result = await db.execute(
         select(ComputationalAnalysis)
-        .where(ComputationalAnalysis.book_id == book_id, ComputationalAnalysis.status == "completed")
+        .where(ComputationalAnalysis.edition_id == book_id, ComputationalAnalysis.status == "completed")
         .order_by(ComputationalAnalysis.created_at.desc())
         .limit(1)
     )

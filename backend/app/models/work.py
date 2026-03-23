@@ -129,9 +129,7 @@ class Work(Base):
     analyses: Mapped[list["BookAnalysis"]] = relationship(
         "BookAnalysis", back_populates="work", cascade="all, delete-orphan"
     )
-    computational_analyses: Mapped[list["ComputationalAnalysis"]] = relationship(
-        "ComputationalAnalysis", back_populates="work", cascade="all, delete-orphan"
-    )
+    # computational_analyses now linked to Edition, not Work
     prompt_configs: Mapped[list["BookPromptConfig"]] = relationship(
         "BookPromptConfig", back_populates="work", cascade="all, delete-orphan"
     )

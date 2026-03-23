@@ -59,14 +59,14 @@ class ComputationalAnalysis(Base):
     __tablename__ = "computational_analyses"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    work_id: Mapped[int] = mapped_column(ForeignKey("works.id"), index=True)
+    edition_id: Mapped[int] = mapped_column(ForeignKey("editions.id"), index=True)
     analysis_type: Mapped[str] = mapped_column(String(50), index=True)  # loud_silence, contradiction, center, exoteric_esoteric, full
     config_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Input config as JSON
     results_json: Mapped[str] = mapped_column(Text)  # Full results as JSON
     status: Mapped[str] = mapped_column(String(20), default="completed")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
 
-    work: Mapped["Work"] = relationship("Work", back_populates="computational_analyses")
+    edition: Mapped["Edition"] = relationship("Edition")
 
 
 class BookPromptConfig(Base):

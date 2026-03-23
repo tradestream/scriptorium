@@ -770,11 +770,11 @@ async def start_bulk_esoteric_analysis(
     if request.run_computational:
         already_done = set()
         done_result = await db.execute(
-            select(ComputationalAnalysis.book_id)
+            select(ComputationalAnalysis.edition_id)
             .where(
                 ComputationalAnalysis.analysis_type == "full",
                 ComputationalAnalysis.status == "completed",
-                ComputationalAnalysis.book_id.in_(all_ids),
+                ComputationalAnalysis.edition_id.in_(all_ids),
             )
         )
         already_done = {r[0] for r in done_result.all()}
@@ -880,7 +880,7 @@ async def _run_bulk_esoteric(
                 results = {**v1_results, "engine_v2": v2_results}
 
                 record = ComputationalAnalysis(
-                    book_id=edition_id,
+                    edition_id=edition_id,
                     analysis_type="full",
                     config_json=json.dumps({"keywords": config.keywords}),
                     results_json=json.dumps(results, default=str),
@@ -924,7 +924,7 @@ async def _run_bulk_esoteric(
                 try:
                     async with _session_factory() as db:
                         await run_analysis(
-                            book_id=edition_id,
+                            edition_id=edition_id,
                             db=db,
                             template_id=tmpl_id,
                             title=tmpl_name,
