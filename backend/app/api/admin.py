@@ -966,10 +966,150 @@ async def _run_bulk_esoteric(
             # Brief pause between batches
             await asyncio.sleep(0.5)
 
+    # Phase 3: Generate EPUB exports for all analyzed books
+    await update_job(job_id, current="Generating EPUBs...")
+    epub_done = 0
+    epub_failed = 0
+
+    try:
+        from app.services.analysis_export import build_analysis_epub
+        from app.models.analysis import BookAnalysis
+        from app.models.edition import Edition, EditionFile
+        from app.models.shelf import Shelf, ShelfBook
+        from app.config import get_settings
+        import hashlib
+        import uuid as _uuid
+
+        settings = get_settings()
+        ingest_dir = Path(settings.INGEST_PATH) / "esoteric-analyses"
+        ingest_dir.mkdir(parents=True, exist_ok=True)
+
+        # Get or create shelf (use user_id=1 for admin)
+        async with _session_factory() as db:
+            shelf_result = await db.execute(
+                select(Shelf).where(Shelf.name == "Esoteric Analyses")
+            )
+            shelf = shelf_result.scalar_one_or_none()
+            if not shelf:
+                shelf = Shelf(user_id=1, name="Esoteric Analyses",
+                              description="Auto-generated esoteric analysis companion books",
+                              sync_to_kobo=True)
+                db.add(shelf)
+                await db.commit()
+                await db.refresh(shelf)
+            shelf_id = shelf.id
+
+        all_analyzed_ids = list(set(computational_ids + llm_ids))
+        for edition_id in all_analyzed_ids:
+            if await get_job_status(job_id) == "cancelled":
+                break
+            try:
+                async with _session_factory() as db:
+                    # Get book info
+                    from sqlalchemy.orm import joinedload
+                    result = await db.execute(
+                        select(Edition).where(Edition.id == edition_id).options(
+                            joinedload(Edition.work).options(joinedload(Work.authors))
+                        )
+                    )
+                    edition = result.unique().scalar_one_or_none()
+                    if not edition or not edition.work:
+                        continue
+
+                    title = edition.work.title
+                    authors = [a.name for a in edition.work.authors] if edition.work.authors else []
+
+                    # Get computational results
+                    comp_result = await db.execute(
+                        select(ComputationalAnalysis)
+                        .where(ComputationalAnalysis.edition_id == edition_id,
+                               ComputationalAnalysis.status == "completed")
+                        .order_by(ComputationalAnalysis.created_at.desc()).limit(1)
+                    )
+                    comp = comp_result.scalar_one_or_none()
+                    comp_data = json.loads(comp.results_json) if comp else None
+
+                    # Get LLM results
+                    llm_result = await db.execute(
+                        select(BookAnalysis)
+                        .where(BookAnalysis.book_id == edition_id,
+                               BookAnalysis.status == "completed")
+                    )
+                    llm_analyses = [
+                        {"title": a.title, "content": a.content, "model_used": a.model_used}
+                        for a in llm_result.scalars().all() if a.content
+                    ]
+
+                    if not comp_data and not llm_analyses:
+                        continue
+
+                    # Build EPUB
+                    epub_bytes = build_analysis_epub(title, authors, comp_data, llm_analyses)
+                    file_hash = hashlib.sha256(epub_bytes).hexdigest()
+
+                    # Check if already exported
+                    existing = await db.execute(
+                        select(EditionFile).where(EditionFile.file_hash == file_hash)
+                    )
+                    if existing.scalar_one_or_none():
+                        epub_done += 1
+                        continue
+
+                    # Save file
+                    safe_title = "".join(c for c in title if c.isalnum() or c in " -_")[:50].strip()
+                    filename = f"Esoteric Analysis - {safe_title}.epub"
+                    filepath = ingest_dir / filename
+                    filepath.write_bytes(epub_bytes)
+
+                    # Create work + edition
+                    analysis_work = Work(
+                        title=f"Esoteric Analysis: {title}",
+                        description=f"Esoteric analysis of {title}.",
+                        uuid=str(_uuid.uuid4()),
+                    )
+                    db.add(analysis_work)
+                    await db.flush()
+
+                    new_edition = Edition(
+                        uuid=str(_uuid.uuid4()),
+                        work_id=analysis_work.id,
+                        library_id=edition.library_id,
+                        publisher="Scriptorium",
+                        language="English",
+                    )
+                    db.add(new_edition)
+                    await db.flush()
+
+                    ef = EditionFile(
+                        edition_id=new_edition.id,
+                        filename=filename,
+                        format="epub",
+                        file_path=str(filepath),
+                        file_hash=file_hash,
+                        file_size=len(epub_bytes),
+                    )
+                    db.add(ef)
+
+                    # Add to shelf
+                    db.add(ShelfBook(shelf_id=shelf_id, work_id=analysis_work.id))
+                    await db.commit()
+                    epub_done += 1
+
+            except Exception as exc:
+                logger.warning("EPUB export failed for %d: %s", edition_id, exc)
+                epub_failed += 1
+
+            if epub_done % 20 == 0:
+                await update_job(job_id, current=f"EPUBs {epub_done}/{len(all_analyzed_ids)}")
+
+    except Exception as exc:
+        logger.warning("EPUB export phase failed: %s", exc)
+
     final_status = "done" if await get_job_status(job_id) != "cancelled" else "cancelled"
     await update_job(
         job_id, status=final_status, done=done, failed=failed,
-        computational_done=comp_done, llm_done=llm_done, current="",
+        computational_done=comp_done, llm_done=llm_done,
+        current=f"Complete. {epub_done} EPUBs generated.",
     )
 
 
