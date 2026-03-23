@@ -904,7 +904,9 @@ async def _run_bulk_esoteric(
 
         await asyncio.sleep(0.1)
 
-    # Phase 2: LLM analysis (if requested)
+    # Phase 2: LLM analysis (if requested) — parallel processing
+    PARALLEL_LLM = 8  # concurrent LLM requests
+
     if llm_ids:
         # Get templates
         async with _session_factory() as db:
@@ -916,35 +918,53 @@ async def _run_bulk_esoteric(
             templates = result.scalars().all()
             template_list = [(t.id, t.name) for t in templates]
 
+        # Build task queue: (edition_id, template_id, template_name)
+        task_queue = []
         for edition_id in llm_ids:
+            for tmpl_id, tmpl_name in template_list:
+                task_queue.append((edition_id, tmpl_id, tmpl_name))
+
+        total_llm_tasks = len(task_queue)
+        llm_tasks_done = 0
+
+        async def _run_one_llm(edition_id, tmpl_id, tmpl_name):
+            nonlocal failed
+            try:
+                async with _session_factory() as db:
+                    await run_analysis(
+                        book_id=edition_id,
+                        db=db,
+                        template_id=tmpl_id,
+                        title=tmpl_name,
+                    )
+            except Exception as exc:
+                logger.warning("Bulk esoteric LLM failed for %d template %s: %s",
+                               edition_id, tmpl_name, exc)
+                failed += 1
+
+        # Process in batches of PARALLEL_LLM
+        for i in range(0, len(task_queue), PARALLEL_LLM):
             if await get_job_status(job_id) == "cancelled":
                 break
 
-            for tmpl_id, tmpl_name in template_list:
-                try:
-                    async with _session_factory() as db:
-                        await run_analysis(
-                            edition_id=edition_id,
-                            db=db,
-                            template_id=tmpl_id,
-                            title=tmpl_name,
-                        )
-                except Exception as exc:
-                    logger.warning("Bulk esoteric LLM failed for %d template %s: %s",
-                                   edition_id, tmpl_name, exc)
-                    failed += 1
+            batch = task_queue[i:i + PARALLEL_LLM]
+            await asyncio.gather(*[
+                _run_one_llm(eid, tid, tname) for eid, tid, tname in batch
+            ])
 
-                # Rate limit for LLM
-                await asyncio.sleep(2.0)
+            llm_tasks_done += len(batch)
+            llm_done = llm_tasks_done // len(template_list) if template_list else 0
+            done = comp_done + llm_done
 
-            llm_done += 1
-            done += 1
-            if llm_done % 5 == 0:
+            if llm_tasks_done % (PARALLEL_LLM * 2) == 0 or llm_tasks_done == total_llm_tasks:
                 await update_job(
                     job_id, done=done, failed=failed,
                     computational_done=comp_done, llm_done=llm_done,
-                    current=f"LLM {llm_done}/{len(llm_ids)}",
+                    current=f"LLM {llm_tasks_done}/{total_llm_tasks} tasks ({llm_done}/{len(llm_ids)} books)",
                 )
+
+            # Brief pause between batches
+            await asyncio.sleep(0.5)
 
     final_status = "done" if await get_job_status(job_id) != "cancelled" else "cancelled"
     await update_job(
