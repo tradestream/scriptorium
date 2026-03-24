@@ -839,6 +839,7 @@ async def _run_bulk_esoteric(
 ) -> None:
     """Background task: run esoteric analysis pipeline."""
     import json
+    from sqlalchemy.orm import joinedload
     from app.models.analysis import ComputationalAnalysis, AnalysisTemplate
     from app.services.esoteric import run_full_esoteric_analysis, EsotericAnalysisConfig
     from app.services.esoteric_engine import run_esoteric_analysis_v2
@@ -918,10 +919,46 @@ async def _run_bulk_esoteric(
             templates = result.scalars().all()
             template_list = [(t.id, t.name) for t in templates]
 
-        # Build task queue: (edition_id, template_id, template_name)
+        # Detect which books are dialogues (only these get the Dialogue template)
+        DIALOGUE_KEYWORDS = {
+            'dialogue', 'symposium', 'republic', 'laws', 'apology', 'phaedo',
+            'phaedrus', 'gorgias', 'meno', 'protagoras', 'theaetetus', 'timaeus',
+            'statesman', 'sophist', 'critias', 'kuzari', 'hiero', 'memorabilia',
+            'oeconomicus', 'banquet', 'tusculan', 'de natura', 'on the nature',
+            'ernst und falk', 'euthyphro', 'crito', 'cratylus', 'philebus',
+            'parmenides', 'alcibiades', 'laches', 'charmides', 'euthydemus',
+            'hippias', 'ion', 'menexenus', 'clitophon',
+        }
+        DIALOGUE_AUTHORS = {'plato', 'xenophon', 'cicero'}
+
+        dialogue_ids = set()
+        async with _session_factory() as db:
+            for eid in llm_ids:
+                result = await db.execute(
+                    select(Edition).where(Edition.id == eid).options(
+                        joinedload(Edition.work).options(joinedload(Work.authors))
+                    )
+                )
+                ed = result.unique().scalar_one_or_none()
+                if not ed or not ed.work:
+                    continue
+                title_lower = (ed.work.title or "").lower()
+                author_names = {a.name.lower() for a in ed.work.authors} if ed.work.authors else set()
+
+                if any(kw in title_lower for kw in DIALOGUE_KEYWORDS):
+                    dialogue_ids.add(eid)
+                elif author_names & DIALOGUE_AUTHORS:
+                    dialogue_ids.add(eid)
+
+        logger.info("Dialogue detection: %d of %d books are dialogues", len(dialogue_ids), len(llm_ids))
+
+        # Build task queue — skip Dialogue template for non-dialogues
+        dialogue_template_name = "Strauss: Dialogue & Drama Analysis"
         task_queue = []
         for edition_id in llm_ids:
             for tmpl_id, tmpl_name in template_list:
+                if tmpl_name == dialogue_template_name and edition_id not in dialogue_ids:
+                    continue  # Skip dialogue template for non-dialogues
                 task_queue.append((edition_id, tmpl_id, tmpl_name))
 
         total_llm_tasks = len(task_queue)
