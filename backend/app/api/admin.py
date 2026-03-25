@@ -855,6 +855,8 @@ async def _run_bulk_esoteric(
     llm_done = 0
 
     # Phase 1: Computational analysis
+    loop = asyncio.get_event_loop()
+
     for edition_id in computational_ids:
         if done % 10 == 0 and await get_job_status(job_id) == "cancelled":
             break
@@ -869,16 +871,37 @@ async def _run_bulk_esoteric(
                     done += 1
                     continue
 
-                text = await extract_text_from_book(book, db)
+                logger.info("Esoteric analysis %d/%d: extracting text for edition %d",
+                            done + 1, len(computational_ids), edition_id)
+
+                try:
+                    text = await asyncio.wait_for(
+                        extract_text_from_book(book, db),
+                        timeout=60,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("Text extraction timed out for edition %d", edition_id)
+                    done += 1
+                    failed += 1
+                    continue
+
                 if not text or len(text.strip()) < 200:
+                    logger.info("Skipping edition %d: text too short (%d chars)",
+                                edition_id, len(text.strip()) if text else 0)
                     done += 1
                     continue
 
-                # Run both v1 (16 individual tools) and v2 (unified engine with scoring)
+                # Run analysis in thread pool to avoid blocking event loop
                 config = EsotericAnalysisConfig()
-                v1_results = run_full_esoteric_analysis(text, config)
-                v2_results = run_esoteric_analysis_v2(text)
-                results = {**v1_results, "engine_v2": v2_results}
+
+                def _run_analysis(t, c):
+                    v1 = run_full_esoteric_analysis(t, c)
+                    v2 = run_esoteric_analysis_v2(t)
+                    return {**v1, "engine_v2": v2}
+
+                results = await loop.run_in_executor(
+                    None, _run_analysis, text, config
+                )
 
                 record = ComputationalAnalysis(
                     edition_id=edition_id,
@@ -890,18 +913,19 @@ async def _run_bulk_esoteric(
                 db.add(record)
                 await db.commit()
                 comp_done += 1
+                logger.info("Esoteric analysis completed for edition %d (score: %s)",
+                            edition_id, results.get("engine_v2", {}).get("overall_score", "?"))
 
         except Exception as exc:
             logger.warning("Bulk esoteric computational failed for %d: %s", edition_id, exc)
             failed += 1
 
         done += 1
-        if done % 10 == 0:
-            await update_job(
-                job_id, done=done, failed=failed,
-                computational_done=comp_done,
-                current=f"Computational {comp_done}/{len(computational_ids)}",
-            )
+        await update_job(
+            job_id, done=done, failed=failed,
+            computational_done=comp_done,
+            current=f"Computational {comp_done}/{len(computational_ids)}",
+        )
 
         await asyncio.sleep(0.1)
 
