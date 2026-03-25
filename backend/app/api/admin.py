@@ -736,7 +736,7 @@ class BulkEsotericRequest(BaseModel):
 @router.post("/esoteric/bulk")
 async def start_bulk_esoteric_analysis(
     request: BulkEsotericRequest,
-    background_tasks: BackgroundTasks = None,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     _admin: User = Depends(_require_admin),
 ):
@@ -794,6 +794,8 @@ async def start_bulk_esoteric_analysis(
         "llm_total": len(all_ids) if request.run_llm else 0,
     })
 
+    logger.info("Starting bulk esoteric background task: %d computational, %d LLM",
+                len(computational_ids), len(all_ids) if request.run_llm else 0)
     background_tasks.add_task(
         _run_bulk_esoteric, job_id, computational_ids,
         all_ids if request.run_llm else [],
