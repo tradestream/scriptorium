@@ -27,6 +27,29 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin")
 
 
+def _spawn_background_task(coro_func, *args):
+    """Spawn an async background task in a new thread with its own event loop.
+
+    This avoids the greenlet/aiosqlite issue where BackgroundTasks and
+    asyncio.create_task both fail because they run outside the proper
+    SQLAlchemy async context.
+    """
+    import threading
+
+    def _run():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(coro_func(*args))
+        except Exception as e:
+            logger.error("Background task failed: %s", e, exc_info=True)
+        finally:
+            loop.close()
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+
+
 class NamingSettingsUpdate(BaseModel):
     naming_enabled: bool
     naming_pattern: str
@@ -431,7 +454,7 @@ async def start_bulk_markdown(
         edition_ids.append(ed.id)
 
     job_id, _ = await create_job("markdown", len(edition_ids), {"skipped": 0})
-    background_tasks.add_task(_run_bulk_markdown, job_id, edition_ids)
+    _spawn_background_task(_run_bulk_markdown, job_id, edition_ids)
     return {"job_id": job_id, "total": len(edition_ids)}
 
 
@@ -796,7 +819,7 @@ async def start_bulk_esoteric_analysis(
 
     logger.info("Starting bulk esoteric background task: %d computational, %d LLM",
                 len(computational_ids), len(all_ids) if request.run_llm else 0)
-    background_tasks.add_task(
+    _spawn_background_task(
         _run_bulk_esoteric, job_id, computational_ids,
         all_ids if request.run_llm else [],
         request.llm_template_ids,
