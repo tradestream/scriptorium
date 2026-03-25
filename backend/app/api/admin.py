@@ -402,8 +402,8 @@ async def _run_bulk_enrich(
 
 @router.post("/markdown/bulk")
 async def start_bulk_markdown(
+    background_tasks: BackgroundTasks,
     library_id: Optional[int] = None,
-    background_tasks: BackgroundTasks = None,
     db: AsyncSession = Depends(get_db),
     _admin: User = Depends(_require_admin),
 ):
@@ -431,7 +431,7 @@ async def start_bulk_markdown(
         edition_ids.append(ed.id)
 
     job_id, _ = await create_job("markdown", len(edition_ids), {"skipped": 0})
-    asyncio.create_task(_run_bulk_markdown(job_id, edition_ids))
+    background_tasks.add_task(_run_bulk_markdown, job_id, edition_ids)
     return {"job_id": job_id, "total": len(edition_ids)}
 
 
@@ -796,10 +796,10 @@ async def start_bulk_esoteric_analysis(
 
     logger.info("Starting bulk esoteric background task: %d computational, %d LLM",
                 len(computational_ids), len(all_ids) if request.run_llm else 0)
-    asyncio.create_task(
-        _run_bulk_esoteric(job_id, computational_ids,
-                           all_ids if request.run_llm else [],
-                           request.llm_template_ids)
+    background_tasks.add_task(
+        _run_bulk_esoteric, job_id, computational_ids,
+        all_ids if request.run_llm else [],
+        request.llm_template_ids,
     )
 
     return {

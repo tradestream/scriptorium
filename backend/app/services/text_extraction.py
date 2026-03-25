@@ -480,7 +480,16 @@ async def _extract_pdf_pdfplumber(path: Path) -> str:
 
     Extracts with font-size metadata → detects headings → filters page
     artifacts → joins continuation lines into proper paragraphs.
+
+    Runs in a thread pool to avoid blocking the event loop.
     """
+    import asyncio
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _extract_pdf_pdfplumber_sync, path)
+
+
+def _extract_pdf_pdfplumber_sync(path: Path) -> str:
+    """Synchronous pdfplumber extraction (runs in thread pool)."""
     import pdfplumber
     from collections import Counter
 
