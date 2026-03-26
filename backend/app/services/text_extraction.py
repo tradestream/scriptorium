@@ -695,3 +695,16 @@ async def extract_text_from_book(
     text = truncate_text(text, max_chars)
 
     return text
+
+
+# ── Sync wrappers for background threads ─────────────────────────
+
+
+def _extract_epub_markdown_sync(path: Path) -> str:
+    """Sync wrapper — _extract_epub_markdown is async in name only (no awaits)."""
+    import asyncio
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(_extract_epub_markdown(path))
+    finally:
+        loop.close()

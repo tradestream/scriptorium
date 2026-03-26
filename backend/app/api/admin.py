@@ -27,26 +27,22 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin")
 
 
-_background_tasks: set = set()  # prevent garbage collection of tasks
+def _spawn_background_task(func, *args):
+    """Spawn a background task in a dedicated thread.
 
-
-def _spawn_background_task(coro_func, *args):
-    """Spawn an async background task that works with aiosqlite.
-
-    Schedules the coroutine on the main event loop. The task must use
-    await for all DB operations so the event loop can interleave them
-    with request handling. CPU-bound work should use run_in_executor.
+    The function should be a regular (sync) function, not async.
+    It should use sync_update_job/sync_get_job_status for DB access.
     """
-    loop = asyncio.get_running_loop()
-    task = loop.create_task(coro_func(*args))
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
+    import threading
 
-    def _done_callback(t):
-        exc = t.exception()
-        if exc:
-            logger.error("Background task failed: %s", exc, exc_info=exc)
-    task.add_done_callback(_done_callback)
+    def _run():
+        try:
+            func(*args)
+        except Exception as e:
+            logger.error("Background task failed: %s", e, exc_info=True)
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
 
 
 class NamingSettingsUpdate(BaseModel):
@@ -481,56 +477,36 @@ async def get_bulk_markdown_job(
     return {"job_id": job_id, **job}
 
 
-async def _run_bulk_markdown(job_id: str, edition_ids: list[int]) -> None:
-    """Background task: generate markdown for each edition."""
-    from app.services.markdown import generate_markdown
-    from app.services.events import broadcaster
-    from app.database import _session_factory
-    from app.models.edition import Edition
-    from sqlalchemy import select
+def _run_bulk_markdown(job_id: str, edition_ids: list[int]) -> None:
+    """Background task (sync, runs in thread): generate markdown for each edition."""
+    from app.services.markdown import generate_markdown_sync
+    from app.services.background_jobs import sync_update_job, sync_get_job_status
 
-    await update_job(job_id, status="running")
+    sync_update_job(job_id, status="running")
     total = len(edition_ids)
     done = 0
     failed = 0
     skipped = 0
-    current_title = ""
 
-    async with _session_factory() as db:
-        for edition_id in edition_ids:
-            if await get_job_status(job_id) == "cancelled":
-                break
+    for edition_id in edition_ids:
+        if done % 10 == 0 and sync_get_job_status(job_id) == "cancelled":
+            break
 
-            # Get title for progress display
-            result = await db.execute(select(Edition).where(Edition.id == edition_id))
-            edition = result.scalar_one_or_none()
-            if edition:
-                current_title = edition.title
+        try:
+            md = generate_markdown_sync(edition_id)
+            if md is None:
+                skipped += 1
+            done += 1
+        except Exception as exc:
+            logger.warning("Markdown generation failed for edition %d: %s", edition_id, exc)
+            failed += 1
+            done += 1
 
-            try:
-                md = await generate_markdown(edition_id)
-                if md is None:
-                    skipped += 1
-                done += 1
-            except Exception as exc:
-                logger.warning("Markdown generation failed for edition %d: %s", edition_id, exc)
-                failed += 1
-                done += 1
+        sync_update_job(job_id, done=done, failed=failed, skipped=skipped,
+                        current=f"{done}/{total}")
 
-            await update_job(job_id, done=done, failed=failed, skipped=skipped, current=current_title)
-
-            if done % 10 == 0 or done == total:
-                try:
-                    await broadcaster.enrich_progress(
-                        job_id, done, total, current_title, "running"
-                    )
-                except Exception:
-                    pass
-
-            await asyncio.sleep(0.05)
-
-    final_status = "done" if await get_job_status(job_id) != "cancelled" else "cancelled"
-    await update_job(job_id, status=final_status, current="")
+    final_status = "done" if sync_get_job_status(job_id) != "cancelled" else "cancelled"
+    sync_update_job(job_id, status=final_status, current="")
 
 
 # ── Bulk Identifier Extraction ───────────────────────────────────────────────
@@ -855,103 +831,111 @@ async def get_esoteric_job(
     return {"job_id": job_id, **job}
 
 
-async def _run_bulk_esoteric(
+def _run_bulk_esoteric(
     job_id: str,
     computational_ids: list[int],
     llm_ids: list[int],
     llm_template_ids: list[int],
 ) -> None:
-    """Background task: run esoteric analysis pipeline."""
+    """Background task (sync, runs in thread): esoteric analysis pipeline."""
     import json
-    from sqlalchemy.orm import joinedload
-    from app.models.analysis import ComputationalAnalysis, AnalysisTemplate
+    import sqlite3
     from app.services.esoteric import run_full_esoteric_analysis, EsotericAnalysisConfig
     from app.services.esoteric_engine import run_esoteric_analysis_v2
-    from app.services.text_extraction import extract_text_from_book
-    from app.services.analysis import run_analysis
-    from app.models.edition import Edition
-    from sqlalchemy import select
+    from app.services.markdown import has_cached_markdown, markdown_path_for
+    from app.services.text_extraction import (
+        _extract_epub_markdown_sync, _extract_pdf_pdfplumber_sync, optimize_for_llm,
+    )
+    from app.services.background_jobs import sync_update_job, sync_get_job_status, _get_sync_db_path
+    from pathlib import Path
 
-    await update_job(job_id, status="running")
+    sync_update_job(job_id, status="running")
     done = 0
     failed = 0
     comp_done = 0
-    llm_done = 0
 
-    # Phase 1: Computational analysis
-    loop = asyncio.get_event_loop()
+    db_path = _get_sync_db_path()
 
     for edition_id in computational_ids:
-        if done % 10 == 0 and await get_job_status(job_id) == "cancelled":
+        if done % 10 == 0 and sync_get_job_status(job_id) == "cancelled":
             break
 
         try:
-            async with _session_factory() as db:
-                stmt = select(Edition).where(Edition.id == edition_id)
-                result = await db.execute(stmt)
-                book = result.scalar_one_or_none()
-                if not book:
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                row = conn.execute("""
+                    SELECT e.id, e.uuid, w.title, w.id as work_id
+                    FROM editions e JOIN works w ON w.id = e.work_id
+                    WHERE e.id = ?
+                """, (edition_id,)).fetchone()
+                if not row:
                     failed += 1
                     done += 1
                     continue
 
-                logger.info("Esoteric analysis %d/%d: extracting text for edition %d",
-                            done + 1, len(computational_ids), edition_id)
+                logger.info("Esoteric %d/%d: edition %d (%s)",
+                            done + 1, len(computational_ids), edition_id, row["title"][:50])
 
-                try:
-                    text = await asyncio.wait_for(
-                        extract_text_from_book(book, db),
-                        timeout=60,
-                    )
-                except asyncio.TimeoutError:
-                    logger.warning("Text extraction timed out for edition %d", edition_id)
-                    done += 1
-                    failed += 1
-                    continue
+                # Get text — prefer cached markdown
+                text = None
+                if has_cached_markdown(row["uuid"]):
+                    text = markdown_path_for(row["uuid"]).read_text(encoding="utf-8")
+                else:
+                    # Extract from file
+                    frow = conn.execute("""
+                        SELECT file_path, format FROM edition_files
+                        WHERE edition_id = ? ORDER BY
+                        CASE format WHEN 'epub' THEN 0 WHEN 'pdf' THEN 2 ELSE 5 END
+                        LIMIT 1
+                    """, (edition_id,)).fetchone()
+                    if frow:
+                        fp = Path(frow["file_path"])
+                        fmt = frow["format"].lower()
+                        if fp.exists():
+                            if fmt == "epub":
+                                text = _extract_epub_markdown_sync(fp)
+                            elif fmt == "pdf":
+                                text = _extract_pdf_pdfplumber_sync(fp)
 
                 if not text or len(text.strip()) < 200:
-                    logger.info("Skipping edition %d: text too short (%d chars)",
-                                edition_id, len(text.strip()) if text else 0)
                     done += 1
                     continue
 
-                # Run analysis in thread pool to avoid blocking event loop
+                # Run analysis
                 config = EsotericAnalysisConfig()
+                v1_results = run_full_esoteric_analysis(text, config)
+                v2_results = run_esoteric_analysis_v2(text)
+                results = {**v1_results, "engine_v2": v2_results}
 
-                def _run_analysis(t, c):
-                    v1 = run_full_esoteric_analysis(t, c)
-                    v2 = run_esoteric_analysis_v2(t)
-                    return {**v1, "engine_v2": v2}
-
-                results = await loop.run_in_executor(
-                    None, _run_analysis, text, config
-                )
-
-                record = ComputationalAnalysis(
-                    edition_id=edition_id,
-                    analysis_type="full",
-                    config_json=json.dumps({"keywords": config.keywords}),
-                    results_json=json.dumps(results, default=str),
-                    status="completed",
-                )
-                db.add(record)
-                await db.commit()
+                # Save to DB
+                conn.execute("""
+                    INSERT INTO computational_analyses
+                    (edition_id, analysis_type, config_json, results_json, status, created_at)
+                    VALUES (?, 'full', ?, ?, 'completed', datetime('now'))
+                """, (
+                    edition_id,
+                    json.dumps({"keywords": config.keywords}),
+                    json.dumps(results, default=str),
+                ))
+                conn.commit()
                 comp_done += 1
-                logger.info("Esoteric analysis completed for edition %d (score: %s)",
-                            edition_id, results.get("engine_v2", {}).get("overall_score", "?"))
+                score = v2_results.get("overall_score", "?")
+                logger.info("Esoteric done: edition %d score=%s", edition_id, score)
+
+            finally:
+                conn.close()
 
         except Exception as exc:
-            logger.warning("Bulk esoteric computational failed for %d: %s", edition_id, exc)
+            logger.warning("Esoteric failed for %d: %s", edition_id, exc)
             failed += 1
 
         done += 1
-        await update_job(
+        sync_update_job(
             job_id, done=done, failed=failed,
             computational_done=comp_done,
             current=f"Computational {comp_done}/{len(computational_ids)}",
         )
-
-        await asyncio.sleep(0.1)
 
     # Phase 2: LLM analysis (if requested) — parallel processing
     PARALLEL_LLM = 8  # concurrent LLM requests

@@ -117,6 +117,92 @@ async def generate_markdown(edition_id: int) -> str | None:
             return None
 
 
+def generate_markdown_sync(edition_id: int) -> str | None:
+    """Sync version for background threads. Uses sqlite3 directly."""
+    import sqlite3
+    from app.services.text_extraction import (
+        _extract_epub_markdown_sync,
+        _extract_pdf_pdfplumber_sync,
+        optimize_for_llm,
+    )
+    from app.services.background_jobs import _get_sync_db_path
+
+    db_path = _get_sync_db_path()
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute("""
+            SELECT e.id, e.uuid, e.title as edition_title,
+                   w.title as work_title, w.id as work_id
+            FROM editions e
+            JOIN works w ON w.id = e.work_id
+            WHERE e.id = ?
+        """, (edition_id,)).fetchone()
+        if not row:
+            return None
+
+        title = row["work_title"] or row["edition_title"]
+        uuid = row["uuid"]
+
+        if has_cached_markdown(uuid):
+            return markdown_path_for(uuid).read_text(encoding="utf-8")
+
+        # Get best file
+        files = conn.execute("""
+            SELECT file_path, format FROM edition_files
+            WHERE edition_id = ? ORDER BY
+            CASE format
+                WHEN 'epub' THEN 0 WHEN 'txt' THEN 1
+                WHEN 'pdf' THEN 2 WHEN 'mobi' THEN 3
+                WHEN 'azw3' THEN 4 ELSE 99
+            END
+        """, (edition_id,)).fetchall()
+        if not files:
+            return None
+
+        best = files[0]
+        fmt = best["format"].lower()
+        file_path = Path(best["file_path"])
+
+        if fmt in _SKIP_FORMATS:
+            return None
+        if not file_path.exists():
+            logger.debug("File missing for edition %d: %s", edition_id, file_path)
+            return None
+
+        # Get author
+        author_row = conn.execute("""
+            SELECT a.name FROM authors a
+            JOIN work_authors wa ON wa.author_id = a.id
+            WHERE wa.work_id = ? LIMIT 1
+        """, (row["work_id"],)).fetchone()
+        author_name = author_row["name"] if author_row else None
+
+        try:
+            if fmt == "epub":
+                text = _extract_epub_markdown_sync(file_path)
+            elif fmt == "pdf":
+                text = _extract_pdf_pdfplumber_sync(file_path)
+            elif fmt in ("txt", "text"):
+                text = file_path.read_text(encoding="utf-8", errors="replace")
+            else:
+                return None
+
+            text = optimize_for_llm(text, title=title, author=author_name)
+
+            MARKDOWN_DIR.mkdir(parents=True, exist_ok=True)
+            out_path = markdown_path_for(uuid)
+            out_path.write_text(text, encoding="utf-8")
+            logger.info("Cached markdown for edition %d (%s)", edition_id, title)
+            return text
+
+        except Exception as exc:
+            logger.warning("Markdown sync failed for edition %d: %s", edition_id, exc)
+            return None
+    finally:
+        conn.close()
+
+
 async def _extract_mobi_via_epub(path: Path) -> str | None:
     """Extract markdown from MOBI/AZW by converting to EPUB first."""
     try:

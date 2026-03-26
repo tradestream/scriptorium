@@ -118,3 +118,70 @@ async def get_job_status(job_id: str) -> str | None:
     async with factory() as db:
         job = await db.get(BackgroundJob, job_id)
         return job.status if job else None
+
+
+# ── Sync versions for background threads ─────────────────────────
+
+import sqlite3
+from app.config import get_settings
+
+
+def _get_sync_db_path() -> str:
+    """Get the SQLite database path for sync access."""
+    url = get_settings().DATABASE_URL
+    # sqlite+aiosqlite:////data/config/scriptorium.db → /data/config/scriptorium.db
+    path = url.split("///")[-1]
+    return path
+
+
+def sync_update_job(job_id: str, **fields) -> None:
+    """Sync version of update_job for use in background threads."""
+    COMMON = {"status", "done", "failed", "current", "total"}
+    db_path = _get_sync_db_path()
+
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT counters FROM background_jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+        if not row:
+            return
+
+        sets = []
+        params = []
+        extra = {}
+        for k, v in fields.items():
+            if k in COMMON:
+                sets.append(f"{k} = ?")
+                params.append(v)
+            else:
+                extra[k] = v
+
+        if extra:
+            existing = json.loads(row[0]) if row[0] else {}
+            existing.update(extra)
+            sets.append("counters = ?")
+            params.append(json.dumps(existing))
+
+        if sets:
+            params.append(job_id)
+            conn.execute(
+                f"UPDATE background_jobs SET {', '.join(sets)} WHERE id = ?",
+                params,
+            )
+            conn.commit()
+    finally:
+        conn.close()
+
+
+def sync_get_job_status(job_id: str) -> str | None:
+    """Sync version of get_job_status for use in background threads."""
+    db_path = _get_sync_db_path()
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT status FROM background_jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
