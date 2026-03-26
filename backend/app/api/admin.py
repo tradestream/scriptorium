@@ -27,27 +27,26 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin")
 
 
+_background_tasks: set = set()  # prevent garbage collection of tasks
+
+
 def _spawn_background_task(coro_func, *args):
-    """Spawn an async background task in a new thread with its own event loop.
+    """Spawn an async background task that works with aiosqlite.
 
-    This avoids the greenlet/aiosqlite issue where BackgroundTasks and
-    asyncio.create_task both fail because they run outside the proper
-    SQLAlchemy async context.
+    Schedules the coroutine on the main event loop. The task must use
+    await for all DB operations so the event loop can interleave them
+    with request handling. CPU-bound work should use run_in_executor.
     """
-    import threading
+    loop = asyncio.get_running_loop()
+    task = loop.create_task(coro_func(*args))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
-    def _run():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(coro_func(*args))
-        except Exception as e:
-            logger.error("Background task failed: %s", e, exc_info=True)
-        finally:
-            loop.close()
-
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
+    def _done_callback(t):
+        exc = t.exception()
+        if exc:
+            logger.error("Background task failed: %s", exc, exc_info=exc)
+    task.add_done_callback(_done_callback)
 
 
 class NamingSettingsUpdate(BaseModel):
