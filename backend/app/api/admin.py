@@ -937,7 +937,16 @@ def _run_bulk_esoteric(
             current=f"Computational {comp_done}/{len(computational_ids)}",
         )
 
-    # Phase 2: LLM analysis (if requested) — parallel processing
+    # Mark job done for computational phase
+    final_status = "done" if sync_get_job_status(job_id) != "cancelled" else "cancelled"
+    sync_update_job(job_id, status=final_status, current="")
+    logger.info("Bulk esoteric computational complete: %d done, %d failed out of %d",
+                comp_done, failed, len(computational_ids))
+
+    # Phase 2: LLM analysis — TODO: rewrite as sync
+    # Phase 3: EPUB export — TODO: rewrite as sync
+    return  # LLM and EPUB phases not yet converted to sync
+
     PARALLEL_LLM = 8  # concurrent LLM requests
 
     if llm_ids:
