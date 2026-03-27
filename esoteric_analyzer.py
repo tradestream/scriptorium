@@ -2406,6 +2406,584 @@ class EsotericAnalyzer:
         }
 
     # ------------------------------------------------------------------
+    # METHOD 21: LOGOS-ERGON (SPEECH-DEED) ANALYSIS
+    # ------------------------------------------------------------------
+
+    def analyze_logos_ergon(self) -> dict:
+        """
+        METHOD: Logos-Ergon (Speech-Deed) Analysis
+        PRECEDENT: Benardete's central discovery that in Platonic dialogues and
+                   Greek poetry there is an "argument IN the action" distinct from
+                   the stated argument. From Encounters & Reflections: "I didn't
+                   understand that there was in fact an argument IN the action."
+                   Also: Herodotus's method of embedding arguments in stories
+                   ("the argument is in the evidence and not imposed on it").
+                   Socrates' Second Sailing introduction: "burstlike" vs.
+                   "filamentlike" arguments; "the unexpected break and the
+                   unexpected join in arguments."
+
+        Technique:
+        1. Detect speech-act markers vs. action markers in proximity
+        2. Identify passages where what is SAID contradicts what is DONE/DESCRIBED
+        3. Track the ratio of speech-framing to action-framing vocabulary
+        4. Detect "burstlike" (sudden) vs. "filamentlike" (gradual) argument shifts
+        """
+        if len(self.sentences) < 10:
+            return {'score': 0, 'method': 'Logos-Ergon Analysis', 'note': 'Text too short'}
+
+        speech_markers = {
+            'says', 'said', 'claims', 'claimed', 'argues', 'argued', 'asserts',
+            'asserted', 'maintains', 'maintained', 'declares', 'declared',
+            'states', 'stated', 'contends', 'insists', 'professes', 'teaches',
+            'taught', 'proposes', 'proposed', 'speaks', 'spoke', 'tells', 'told',
+            'replies', 'replied', 'answers', 'answered', 'asks', 'asked',
+            'believes', 'believed', 'thinks', 'thought', 'holds', 'opinion',
+        }
+        action_markers = {
+            'does', 'did', 'goes', 'went', 'acts', 'acted', 'performs',
+            'performed', 'makes', 'made', 'takes', 'took', 'gives', 'gave',
+            'comes', 'came', 'leaves', 'left', 'turns', 'turned', 'runs',
+            'ran', 'sits', 'sat', 'stands', 'stood', 'walks', 'walked',
+            'fights', 'fought', 'kills', 'killed', 'strikes', 'struck',
+            'seizes', 'seized', 'flees', 'fled', 'enters', 'entered',
+            'departs', 'departed', 'moves', 'moved', 'compels', 'compelled',
+        }
+
+        # Track speech-act and action densities per paragraph
+        speech_paras = []
+        action_paras = []
+        mismatches = []
+
+        for i, para in enumerate(self.paragraphs):
+            words = [w.lower() for w in word_tokenize(para) if w.isalpha()]
+            if len(words) < 10:
+                continue
+            speech_count = sum(1 for w in words if w in speech_markers)
+            action_count = sum(1 for w in words if w in action_markers)
+            speech_density = speech_count / len(words)
+            action_density = action_count / len(words)
+            speech_paras.append(speech_density)
+            action_paras.append(action_density)
+
+            # Detect paragraphs with BOTH high speech and high action (potential mismatch)
+            if speech_density > 0.01 and action_density > 0.01:
+                mismatches.append({
+                    'paragraph_index': i,
+                    'speech_density': round(speech_density, 4),
+                    'action_density': round(action_density, 4),
+                    'excerpt': para[:200],
+                })
+
+        # Detect "burstlike" argument shifts — sudden topic changes between adjacent paragraphs
+        burstlike_shifts = 0
+        filamentlike_shifts = 0
+        for i in range(1, len(self.paragraphs)):
+            prev_words = set(w.lower() for w in word_tokenize(self.paragraphs[i-1])
+                             if w.isalpha() and w.lower() not in self.stop_words and len(w) > 3)
+            curr_words = set(w.lower() for w in word_tokenize(self.paragraphs[i])
+                             if w.isalpha() and w.lower() not in self.stop_words and len(w) > 3)
+            if not prev_words or not curr_words:
+                continue
+            overlap = len(prev_words & curr_words) / max(len(prev_words | curr_words), 1)
+            if overlap < 0.05:
+                burstlike_shifts += 1
+            elif 0.05 <= overlap < 0.20:
+                filamentlike_shifts += 1
+
+        avg_speech = sum(speech_paras) / max(len(speech_paras), 1)
+        avg_action = sum(action_paras) / max(len(action_paras), 1)
+        speech_action_ratio = avg_speech / max(avg_action, 0.0001)
+        mismatch_rate = len(mismatches) / max(len(self.paragraphs), 1)
+
+        score = min(1.0, (
+            mismatch_rate * 5 +
+            min(1.0, burstlike_shifts / max(len(self.paragraphs), 1) * 10) * 0.3 +
+            min(1.0, abs(1 - speech_action_ratio) * 0.3) +
+            (0.2 if len(mismatches) > 5 else 0)
+        ))
+
+        return {
+            'score': round(score, 3),
+            'method': 'Logos-Ergon (Speech-Deed) Analysis (Benardete)',
+            'speech_action_ratio': round(speech_action_ratio, 3),
+            'mismatch_count': len(mismatches),
+            'mismatch_rate': round(mismatch_rate, 4),
+            'burstlike_shifts': burstlike_shifts,
+            'filamentlike_shifts': filamentlike_shifts,
+            'mismatches': mismatches[:10],
+            'precedent': (
+                "Benardete's discovery that Platonic dialogues contain an 'argument IN "
+                "the action' irreducible to propositional summary. From Encounters: 'I "
+                "didn't understand that there was in fact an argument IN the action.' "
+                "Also: Herodotus's embedding of universal arguments in particular stories; "
+                "Benardete's distinction between 'burstlike' and 'filamentlike' arguments "
+                "(Socrates' Second Sailing, Introduction). The method detects where speech "
+                "and action co-occur (potential for dramatic irony) and where arguments "
+                "shift suddenly (burstlike) vs. gradually (filamentlike)."
+            ),
+            'interpretation': (
+                'High mismatch counts indicate passages where speech-framing and action-framing '
+                'co-occur — potential sites of dramatic irony where what is SAID contradicts '
+                'or complicates what is DONE. High burstlike shift counts indicate sudden '
+                'argument breaks (counterexamples, digressions); high filamentlike counts '
+                'indicate periagogic/conversive arguments where premises are gradually deformed.'
+            ),
+        }
+
+    # ------------------------------------------------------------------
+    # METHOD 22: ONOMASTIC / ETYMOLOGICAL ANALYSIS
+    # ------------------------------------------------------------------
+
+    def analyze_onomastic(self) -> dict:
+        """
+        METHOD: Onomastic (Name-Meaning) and Etymological Analysis
+        PRECEDENT: Benardete's sustained attention to name-meanings as structural
+                   keys. From The Bow and the Lyre: "Odysseus's name designates two
+                   things, knowledge and lameness" (on Oedipus); "Odysseus has two
+                   names... both are significant names, but they apparently signify
+                   utterly different things. The plot of the Odyssey connects them."
+                   From Encounters: the outis/metis pun as the key to Odysseus's
+                   self-understanding. From Herodotean Inquiries: Herodotus's use
+                   of significant names (Gyges, Candaules, Croesus).
+
+        Technique:
+        1. Detect proper nouns and their frequency distributions
+        2. Identify etymological commentary (passages discussing name origins)
+        3. Track name-puns and double-naming patterns
+        4. Measure density of naming/calling vocabulary
+        """
+        if len(self.sentences) < 10:
+            return {'score': 0, 'method': 'Onomastic Analysis', 'note': 'Text too short'}
+
+        # Vocabulary for etymological/onomastic passages
+        naming_vocab = {
+            'name', 'named', 'names', 'naming', 'called', 'call', 'calls',
+            'meaning', 'means', 'signifies', 'signify', 'designates', 'designate',
+            'etymology', 'etymological', 'derives', 'derived', 'origin',
+            'cognate', 'root', 'literally', 'properly', 'so-called',
+            'translated', 'translation', 'pun', 'wordplay', 'double meaning',
+            'homonym', 'epithet', 'title', 'alias', 'nickname',
+        }
+
+        # Detect proper nouns (capitalized words not at sentence start, > 1 char)
+        proper_nouns = Counter()
+        naming_passages = []
+
+        for i, sent in enumerate(self.sentences):
+            words = word_tokenize(sent)
+            # Track proper nouns
+            for j, w in enumerate(words):
+                if j > 0 and w[0:1].isupper() and w.isalpha() and len(w) > 1:
+                    proper_nouns[w] += 1
+
+            # Detect etymological commentary
+            sent_lower = sent.lower()
+            sent_words = set(w.lower() for w in words if w.isalpha())
+            naming_hits = sent_words & naming_vocab
+            if len(naming_hits) >= 2 or ('name' in sent_lower and any(
+                w in sent_lower for w in ['means', 'signif', 'called', 'designat'])):
+                naming_passages.append({
+                    'sentence_index': i,
+                    'naming_terms': list(naming_hits),
+                    'excerpt': sent[:200],
+                })
+
+        # Detect multiple-naming: proper nouns that appear with different referent patterns
+        # (e.g., "Odysseus" and "No One" referring to same entity)
+        top_names = proper_nouns.most_common(30)
+
+        # Calculate naming density across the text
+        all_words = [w.lower() for w in self.words if w.isalpha()]
+        naming_count = sum(1 for w in all_words if w in naming_vocab)
+        naming_density = naming_count / max(len(all_words), 1)
+
+        # Proper noun diversity relative to text length
+        pn_diversity = len(proper_nouns) / max(len(all_words) / 100, 1)  # per 100 words
+
+        score = min(1.0, (
+            naming_density * 50 +
+            min(1.0, len(naming_passages) / max(len(self.sentences) / 20, 1)) * 0.3 +
+            min(1.0, pn_diversity * 0.1) * 0.2
+        ))
+
+        return {
+            'score': round(score, 3),
+            'method': 'Onomastic / Etymological Analysis (Benardete)',
+            'naming_density': round(naming_density, 5),
+            'naming_passage_count': len(naming_passages),
+            'naming_passages': naming_passages[:10],
+            'proper_noun_count': len(proper_nouns),
+            'top_proper_nouns': top_names[:20],
+            'proper_noun_diversity': round(pn_diversity, 3),
+            'precedent': (
+                "Benardete's attention to name-meanings as structural keys in Greek poetry "
+                "and Platonic dialogues. Oedipus's name = knowledge + lameness; Odysseus's "
+                "two names (Odysseus/Outis) signify utterly different things yet are connected "
+                "by the plot; the outis/metis pun encodes the relation of anonymity and mind. "
+                "Herodotus's significant names (Gyges = 'covered', Croesus linked to gold). "
+                "A high score indicates the text is rich in etymological commentary and "
+                "name-based argumentation."
+            ),
+            'interpretation': (
+                'High naming density and many etymological passages suggest the author treats '
+                'names as philosophically significant — a hallmark of esoteric writing in the '
+                'Platonic-Benardete tradition, where "the surface of things is the heart of '
+                'things" and names encode compressed arguments about the nature of their bearers.'
+            ),
+        }
+
+    # ------------------------------------------------------------------
+    # METHOD 23: RECOGNITION SCENE / CONCEALMENT-TEST-REVEAL
+    # ------------------------------------------------------------------
+
+    def analyze_recognition_structure(self) -> dict:
+        """
+        METHOD: Recognition Scene / Concealment-Test-Reveal Structure Detection
+        PRECEDENT: Benardete on the Odyssey: identity is not given but achieved
+                   through narrative. Odysseus's concealment, testing, and
+                   progressive self-revelation constitutes the plot structure.
+                   "Through speech and action it discovers the things that conceal
+                   either two in one or one in two" (The Bow and the Lyre, Preface).
+                   Also: Aristotle's anagnorisis (Poetics 1452a29-b8) as recognition
+                   paired with reversal (peripeteia).
+
+        Technique:
+        1. Track concealment vocabulary across the text
+        2. Track testing/trial vocabulary
+        3. Track revelation/recognition vocabulary
+        4. Detect sequential patterns: concealment→test→reveal
+        """
+        if len(self.sentences) < 10:
+            return {'score': 0, 'method': 'Recognition Structure Analysis', 'note': 'Text too short'}
+
+        concealment_vocab = {
+            'hide', 'hides', 'hidden', 'hiding', 'conceal', 'conceals', 'concealed',
+            'concealing', 'concealment', 'disguise', 'disguised', 'disguises',
+            'mask', 'masked', 'masks', 'masking', 'cover', 'covered', 'covering',
+            'secret', 'secretly', 'secrecy', 'invisible', 'unseen', 'unknown',
+            'anonymous', 'anonymity', 'incognito', 'pretend', 'pretends', 'pretending',
+            'impersonate', 'impersonates', 'impersonation', 'cloak', 'cloaked',
+            'veil', 'veiled', 'veiling', 'screen', 'screened', 'obscure', 'obscured',
+            'suppress', 'suppressed', 'withhold', 'withheld', 'dissemble', 'dissembling',
+        }
+        testing_vocab = {
+            'test', 'tests', 'tested', 'testing', 'trial', 'trials', 'try', 'tries',
+            'tried', 'trying', 'prove', 'proves', 'proved', 'proving', 'proof',
+            'examine', 'examines', 'examined', 'examination', 'inspect', 'inspected',
+            'question', 'questioned', 'questioning', 'challenge', 'challenged',
+            'verify', 'verified', 'assess', 'assessed', 'probe', 'probed', 'probing',
+            'scrutinize', 'scrutinized', 'investigate', 'investigated',
+        }
+        revelation_vocab = {
+            'reveal', 'reveals', 'revealed', 'revealing', 'revelation', 'disclose',
+            'disclosed', 'disclosing', 'disclosure', 'discover', 'discovers',
+            'discovered', 'discovering', 'discovery', 'recognize', 'recognizes',
+            'recognized', 'recognition', 'unmask', 'unmasked', 'unmasking',
+            'uncover', 'uncovered', 'uncovering', 'expose', 'exposed', 'exposing',
+            'manifest', 'manifested', 'manifestation', 'show', 'shows', 'shown',
+            'showing', 'apparent', 'appear', 'appears', 'appeared', 'appearing',
+            'identity', 'identify', 'identified', 'identifying', 'identification',
+        }
+
+        # Track density across text thirds
+        thirds = [
+            self.sentences[:len(self.sentences)//3],
+            self.sentences[len(self.sentences)//3:2*len(self.sentences)//3],
+            self.sentences[2*len(self.sentences)//3:],
+        ]
+
+        phase_densities = []
+        for third in thirds:
+            all_words_t = []
+            for sent in third:
+                all_words_t.extend(w.lower() for w in word_tokenize(sent) if w.isalpha())
+            total = max(len(all_words_t), 1)
+            c = sum(1 for w in all_words_t if w in concealment_vocab) / total
+            t = sum(1 for w in all_words_t if w in testing_vocab) / total
+            r = sum(1 for w in all_words_t if w in revelation_vocab) / total
+            phase_densities.append({'concealment': round(c, 5), 'testing': round(t, 5), 'revelation': round(r, 5)})
+
+        # Check for the ideal pattern: concealment highest in first third, testing in middle, revelation in last
+        ideal_pattern = (
+            phase_densities[0]['concealment'] >= phase_densities[2]['concealment'] and
+            phase_densities[1]['testing'] >= max(phase_densities[0]['testing'], phase_densities[2]['testing']) and
+            phase_densities[2]['revelation'] >= phase_densities[0]['revelation']
+        )
+
+        # Overall vocabulary presence
+        all_words = [w.lower() for w in self.words if w.isalpha()]
+        total_words = max(len(all_words), 1)
+        c_total = sum(1 for w in all_words if w in concealment_vocab)
+        t_total = sum(1 for w in all_words if w in testing_vocab)
+        r_total = sum(1 for w in all_words if w in revelation_vocab)
+        combined_density = (c_total + t_total + r_total) / total_words
+
+        score = min(1.0, (
+            combined_density * 30 +
+            (0.3 if ideal_pattern else 0) +
+            min(0.3, (c_total + t_total + r_total) / max(len(self.sentences), 1) * 0.5)
+        ))
+
+        return {
+            'score': round(score, 3),
+            'method': 'Recognition Scene / Concealment-Test-Reveal (Benardete)',
+            'phase_densities': phase_densities,
+            'ideal_pattern_detected': ideal_pattern,
+            'concealment_count': c_total,
+            'testing_count': t_total,
+            'revelation_count': r_total,
+            'combined_density': round(combined_density, 5),
+            'precedent': (
+                "Benardete on the Odyssey: identity is not given but achieved through "
+                "narrative. The concealment→test→reveal structure is the deep grammar of "
+                "the Odyssey and of Platonic dialogue alike. 'Through speech and action it "
+                "discovers the things that conceal either two in one or one in two' (Bow "
+                "and the Lyre). Also: Aristotle's anagnorisis — recognition as the pivot "
+                "of tragic plot, paired with peripeteia (reversal)."
+            ),
+            'interpretation': (
+                'A text exhibiting the concealment→test→reveal pattern moves from hiddenness '
+                'toward disclosure — the narrative structure of both the Odyssey and the '
+                'Platonic dialogue. The ideal pattern shows concealment vocabulary concentrated '
+                'early, testing in the middle, and revelation at the end. High scores suggest '
+                'the text enacts a recognition scene, making the reader undergo the process '
+                'of discovery rather than simply being told the conclusion.'
+            ),
+        }
+
+    # ------------------------------------------------------------------
+    # METHOD 24: NOMOS-PHYSIS (CUSTOM-NATURE) DETECTION
+    # ------------------------------------------------------------------
+
+    def analyze_nomos_physis(self) -> dict:
+        """
+        METHOD: Nomos-Physis (Convention vs. Nature) Detection
+        PRECEDENT: Benardete's Herodotean Inquiries: Herodotus's method of
+                   "looking at alien customs to reveal one's own." The Gyges/Candaules
+                   story as paradigm: eyes vs. ears, shame vs. knowledge, the seen
+                   vs. the heard. "To discover the human beneath the infinite disguises
+                   of custom." Also: Benardete on the Republic — the noble lie as
+                   naturalizing law and legalizing nature. Nomos vs. physis is the
+                   fundamental opposition of Greek Enlightenment thought.
+
+        Technique:
+        1. Track nomos vocabulary (law, custom, convention, tradition, rule)
+        2. Track physis vocabulary (nature, natural, by nature, innate, born)
+        3. Measure co-occurrence and opposition patterns
+        4. Detect "alien-looking" passages (comparative customs, foreign practices)
+        """
+        if len(self.sentences) < 10:
+            return {'score': 0, 'method': 'Nomos-Physis Analysis', 'note': 'Text too short'}
+
+        nomos_vocab = {
+            'law', 'laws', 'lawful', 'unlawful', 'legal', 'illegal',
+            'custom', 'customs', 'customary', 'convention', 'conventional',
+            'tradition', 'traditional', 'traditions', 'rule', 'rules',
+            'regulation', 'established', 'institution', 'institutional',
+            'opinion', 'opinions', 'belief', 'beliefs', 'belief',
+            'agreed', 'agreement', 'contract', 'oath', 'decree',
+            'prohibition', 'forbidden', 'permitted', 'allowed',
+            'obey', 'obedience', 'disobey', 'disobedience',
+            'shame', 'shameful', 'shameless', 'modesty', 'decency',
+            'propriety', 'impropriety', 'acceptable', 'unacceptable',
+        }
+        physis_vocab = {
+            'nature', 'natural', 'naturally', 'natures', 'innate',
+            'born', 'birth', 'inborn', 'native', 'inherent',
+            'instinct', 'instinctive', 'spontaneous', 'organic',
+            'necessary', 'necessity', 'inevitable', 'compel', 'compelled',
+            'force', 'forces', 'forced', 'power', 'capacity',
+            'body', 'bodies', 'bodily', 'desire', 'desires',
+            'passion', 'passions', 'appetite', 'appetites',
+            'species', 'kind', 'class', 'genus', 'breed',
+        }
+
+        # Track densities across text
+        all_words = [w.lower() for w in self.words if w.isalpha()]
+        total = max(len(all_words), 1)
+        nomos_count = sum(1 for w in all_words if w in nomos_vocab)
+        physis_count = sum(1 for w in all_words if w in physis_vocab)
+        nomos_density = nomos_count / total
+        physis_density = physis_count / total
+
+        # Detect co-occurrence in sentences
+        co_occurrences = []
+        for i, sent in enumerate(self.sentences):
+            sent_words = set(w.lower() for w in word_tokenize(sent) if w.isalpha())
+            n_hits = sent_words & nomos_vocab
+            p_hits = sent_words & physis_vocab
+            if n_hits and p_hits:
+                co_occurrences.append({
+                    'sentence_index': i,
+                    'nomos_terms': list(n_hits),
+                    'physis_terms': list(p_hits),
+                    'excerpt': sent[:200],
+                })
+
+        # Detect comparative/alien-looking passages
+        comparative_vocab = {
+            'barbarian', 'barbarians', 'foreign', 'foreigner', 'foreigners',
+            'alien', 'stranger', 'strangers', 'other peoples', 'other nations',
+            'compare', 'comparison', 'contrast', 'differ', 'different', 'difference',
+            'whereas', 'unlike', 'similar', 'similarly', 'resemble', 'resembles',
+            'greek', 'greeks', 'persian', 'persians', 'egyptian', 'egyptians',
+            'practice', 'practices', 'rite', 'rites', 'ritual', 'rituals',
+            'worship', 'worships', 'worshipped', 'sacrifice', 'sacrifices',
+        }
+        comparative_count = sum(1 for w in all_words if w in comparative_vocab)
+        comparative_density = comparative_count / total
+
+        co_occurrence_rate = len(co_occurrences) / max(len(self.sentences), 1)
+
+        score = min(1.0, (
+            (nomos_density + physis_density) * 20 +
+            co_occurrence_rate * 10 +
+            comparative_density * 15 +
+            (0.2 if nomos_count > 10 and physis_count > 10 else 0)
+        ))
+
+        return {
+            'score': round(score, 3),
+            'method': 'Nomos-Physis (Convention vs. Nature) Detection (Benardete/Herodotus)',
+            'nomos_density': round(nomos_density, 5),
+            'physis_density': round(physis_density, 5),
+            'nomos_count': nomos_count,
+            'physis_count': physis_count,
+            'co_occurrence_count': len(co_occurrences),
+            'co_occurrence_rate': round(co_occurrence_rate, 4),
+            'comparative_density': round(comparative_density, 5),
+            'co_occurrences': co_occurrences[:10],
+            'precedent': (
+                "Benardete's Herodotean Inquiries: 'To discover the human beneath the "
+                "infinite disguises of custom.' Herodotus's method of juxtaposing alien "
+                "customs to reveal what is truly natural vs. merely conventional. The "
+                "Gyges/Candaules story: the tension between seeing (physis) and hearing "
+                "(nomos), between shame (convention) and knowledge (nature). The Republic: "
+                "the noble lie 'naturalizes the law' (first part) and 'legalizes nature' "
+                "(second part) — showing the inseparability of nomos and physis."
+            ),
+            'interpretation': (
+                'High densities of both nomos and physis vocabulary, especially when '
+                'co-occurring, suggest the text is grappling with the nature/convention '
+                'distinction central to Greek thought and to esoteric writing. Comparative '
+                'passages (looking at alien customs) indicate the Herodotean method of '
+                'using the foreign to reveal the problematic character of one\'s own assumptions.'
+            ),
+        }
+
+    # ------------------------------------------------------------------
+    # METHOD 25: IMPOSSIBLE ARITHMETIC / POETIC DIALECTIC
+    # ------------------------------------------------------------------
+
+    def analyze_impossible_arithmetic(self) -> dict:
+        """
+        METHOD: Impossible Arithmetic / Poetic Dialectic
+        PRECEDENT: Benardete's The Bow and the Lyre: "The poet divides what is
+                   necessarily one and unites what is necessarily two. He practices
+                   his own kind of dialectic in which the truth shows up in two
+                   spurious forms." Also: "'It could not be,' Oedipus says, 'that
+                   one could be equal to many'" (OT 845). The plot as "disclosure
+                   of impossibilities or apparent impossibilities." Socrates' Second
+                   Sailing introduction: the paradox that "life no less than death
+                   is both one and two."
+
+        Technique:
+        1. Detect impossibility language co-occurring with unity/plurality terms
+        2. Track one/many, same/different, and arithmetic paradox language
+        3. Identify passages with "impossible yet true" structures
+        4. Measure density of dialectical impossibility markers
+        """
+        if len(self.sentences) < 10:
+            return {'score': 0, 'method': 'Impossible Arithmetic Analysis', 'note': 'Text too short'}
+
+        impossibility_vocab = {
+            'impossible', 'impossibility', 'impossibilities', 'cannot',
+            'absurd', 'absurdity', 'paradox', 'paradoxical', 'paradoxes',
+            'contradiction', 'contradictory', 'contradicts', 'inconceivable',
+            'incompatible', 'incoherent', 'incoherence', 'unintelligible',
+            'ridiculous', 'preposterous', 'unthinkable',
+        }
+        arithmetic_vocab = {
+            'one', 'two', 'three', 'many', 'both', 'neither', 'either',
+            'same', 'different', 'equal', 'unequal', 'identical', 'other',
+            'single', 'double', 'triple', 'whole', 'part', 'parts',
+            'unity', 'duality', 'plurality', 'multiplicity',
+            'divide', 'divides', 'divided', 'division', 'divisions',
+            'unite', 'unites', 'united', 'union', 'unions',
+            'separate', 'separates', 'separated', 'separation',
+            'combine', 'combines', 'combined', 'combination',
+            'split', 'splits', 'merge', 'merges', 'merged',
+            'together', 'apart', 'join', 'joins', 'joined',
+        }
+        impossibility_affirmation = {
+            'yet', 'nevertheless', 'nonetheless', 'still', 'even so',
+            'and yet', 'but', 'however', 'though', 'although',
+            'must', 'must be', 'is', 'proves', 'turns out', 'shows',
+        }
+
+        # Track co-occurrences of impossibility + arithmetic
+        poetic_dialectic_passages = []
+        for i, sent in enumerate(self.sentences):
+            sent_words = set(w.lower() for w in word_tokenize(sent) if w.isalpha())
+            imp_hits = sent_words & impossibility_vocab
+            arith_hits = sent_words & arithmetic_vocab
+            if imp_hits and arith_hits:
+                poetic_dialectic_passages.append({
+                    'sentence_index': i,
+                    'impossibility_terms': list(imp_hits),
+                    'arithmetic_terms': list(arith_hits),
+                    'excerpt': sent[:200],
+                })
+
+        # Track "impossible yet true" patterns (impossibility followed by affirmation)
+        impossible_yet_true = 0
+        for i in range(len(self.sentences) - 1):
+            sent_words = set(w.lower() for w in word_tokenize(self.sentences[i]) if w.isalpha())
+            next_words = set(w.lower() for w in word_tokenize(self.sentences[i+1]) if w.isalpha())
+            if sent_words & impossibility_vocab and next_words & impossibility_affirmation:
+                impossible_yet_true += 1
+
+        # Overall densities
+        all_words = [w.lower() for w in self.words if w.isalpha()]
+        total = max(len(all_words), 1)
+        imp_density = sum(1 for w in all_words if w in impossibility_vocab) / total
+        arith_density = sum(1 for w in all_words if w in arithmetic_vocab) / total
+        pd_rate = len(poetic_dialectic_passages) / max(len(self.sentences), 1)
+
+        score = min(1.0, (
+            pd_rate * 15 +
+            imp_density * 40 +
+            arith_density * 5 +
+            impossible_yet_true / max(len(self.sentences), 1) * 10
+        ))
+
+        return {
+            'score': round(score, 3),
+            'method': 'Impossible Arithmetic / Poetic Dialectic (Benardete)',
+            'impossibility_density': round(imp_density, 5),
+            'arithmetic_density': round(arith_density, 5),
+            'poetic_dialectic_passage_count': len(poetic_dialectic_passages),
+            'poetic_dialectic_rate': round(pd_rate, 5),
+            'impossible_yet_true_count': impossible_yet_true,
+            'poetic_dialectic_passages': poetic_dialectic_passages[:10],
+            'precedent': (
+                "Benardete's The Bow and the Lyre: 'The poet divides what is necessarily "
+                "one and unites what is necessarily two. He practices his own kind of "
+                "dialectic in which the truth shows up in two spurious forms.' The plot "
+                "as 'disclosure of impossibilities or apparent impossibilities.' The "
+                "Oedipal riddle: 'one could not be equal to many' yet proves to be so. "
+                "Socrates' Second Sailing: 'life no less than death is both one and two.'"
+            ),
+            'interpretation': (
+                'High scores indicate the text operates through productive impossibilities — '
+                'presenting paradoxes that cannot be resolved propositionally but that the '
+                'plot or argument resolves dramatically. This is the hallmark of "poetic '
+                'dialectic": truth appearing in the guise of the impossible, the one showing '
+                'up as many and the many revealing themselves as one.'
+            ),
+        }
+
+    # ------------------------------------------------------------------
     # FULL ANALYSIS
     # ------------------------------------------------------------------
 
@@ -2443,6 +3021,11 @@ class EsotericAnalyzer:
             ('trapdoor', self.analyze_trapdoors),
             ('dyadic_structure', self.analyze_dyadic_structure),
             ('periagoge', self.analyze_periagoge),
+            ('logos_ergon', self.analyze_logos_ergon),
+            ('onomastic', self.analyze_onomastic),
+            ('recognition_structure', self.analyze_recognition_structure),
+            ('nomos_physis', self.analyze_nomos_physis),
+            ('impossible_arithmetic', self.analyze_impossible_arithmetic),
         ]
 
         scores = []
@@ -2452,28 +3035,33 @@ class EsotericAnalyzer:
             scores.append(result.get('score', 0))
 
         # Composite esoteric probability (weighted)
-        # Weights sum to 1.0; rebalanced to accommodate 20 methods total
+        # Weights sum to 1.0; rebalanced to accommodate 25 methods total
         weights = {
-            'contradiction': 0.12,
-            'central_placement': 0.08,
-            'numerology': 0.05,
-            'silence': 0.06,
-            'repetition': 0.06,
-            'symmetry': 0.05,
-            'irony': 0.06,
-            'digression': 0.04,
-            'lexical_density': 0.04,
-            'acrostic': 0.04,
+            'contradiction': 0.10,
+            'central_placement': 0.06,
+            'numerology': 0.04,
+            'silence': 0.05,
+            'repetition': 0.05,
+            'symmetry': 0.04,
+            'irony': 0.05,
+            'digression': 0.03,
+            'lexical_density': 0.03,
+            'acrostic': 0.03,
             'hapax_legomena': 0.03,
-            'voice_consistency': 0.05,
-            'register': 0.04,
+            'voice_consistency': 0.04,
+            'register': 0.03,
             'logos_mythos': 0.04,
-            'commentary_divergence': 0.03,
+            'commentary_divergence': 0.02,
             'polysemy': 0.03,
             'aphoristic_fragmentation': 0.03,
-            'trapdoor': 0.06,
+            'trapdoor': 0.05,
             'dyadic_structure': 0.04,
-            'periagoge': 0.05,
+            'periagoge': 0.04,
+            'logos_ergon': 0.04,
+            'onomastic': 0.03,
+            'recognition_structure': 0.03,
+            'nomos_physis': 0.04,
+            'impossible_arithmetic': 0.03,
         }
 
         composite = 0
@@ -2807,6 +3395,49 @@ class EsotericAnalyzer:
                 findings_summary += (f"- Reversal: \"{rv['first_half_sentence'][:80]}...\" "
                                      f"-> \"{rv['second_half_sentence'][:80]}...\"\n")
 
+        logos_ergon_data = self.results['analyses'].get('logos_ergon', {})
+        if logos_ergon_data.get('mismatch_count', 0) > 0:
+            findings_summary += f"\n### Logos-Ergon (Speech-Deed) Analysis\n"
+            findings_summary += f"- Speech/action ratio: {logos_ergon_data.get('speech_action_ratio', 0)}\n"
+            findings_summary += f"- Speech-action mismatches: {logos_ergon_data.get('mismatch_count', 0)}\n"
+            findings_summary += f"- Burstlike argument shifts: {logos_ergon_data.get('burstlike_shifts', 0)}\n"
+            findings_summary += f"- Filamentlike argument shifts: {logos_ergon_data.get('filamentlike_shifts', 0)}\n"
+
+        onomastic_data = self.results['analyses'].get('onomastic', {})
+        if onomastic_data.get('naming_passage_count', 0) > 0:
+            findings_summary += f"\n### Onomastic / Etymological Analysis\n"
+            findings_summary += f"- Naming density: {onomastic_data.get('naming_density', 0)}\n"
+            findings_summary += f"- Etymological passages: {onomastic_data.get('naming_passage_count', 0)}\n"
+            findings_summary += f"- Proper noun diversity: {onomastic_data.get('proper_noun_diversity', 0)}\n"
+            for pn in onomastic_data.get('top_proper_nouns', [])[:5]:
+                findings_summary += f"- Frequent name: {pn[0]} ({pn[1]}x)\n"
+
+        recog_data = self.results['analyses'].get('recognition_structure', {})
+        if recog_data.get('combined_density', 0) > 0.001:
+            findings_summary += f"\n### Recognition Scene / Concealment-Test-Reveal\n"
+            findings_summary += f"- Ideal pattern detected: {recog_data.get('ideal_pattern_detected', False)}\n"
+            findings_summary += f"- Concealment terms: {recog_data.get('concealment_count', 0)}\n"
+            findings_summary += f"- Testing terms: {recog_data.get('testing_count', 0)}\n"
+            findings_summary += f"- Revelation terms: {recog_data.get('revelation_count', 0)}\n"
+            for pd in recog_data.get('phase_densities', []):
+                findings_summary += f"  Phase: conceal={pd.get('concealment',0)}, test={pd.get('testing',0)}, reveal={pd.get('revelation',0)}\n"
+
+        nomos_data = self.results['analyses'].get('nomos_physis', {})
+        if nomos_data.get('co_occurrence_count', 0) > 0:
+            findings_summary += f"\n### Nomos-Physis (Convention vs. Nature)\n"
+            findings_summary += f"- Nomos density: {nomos_data.get('nomos_density', 0)}\n"
+            findings_summary += f"- Physis density: {nomos_data.get('physis_density', 0)}\n"
+            findings_summary += f"- Co-occurrences: {nomos_data.get('co_occurrence_count', 0)}\n"
+            findings_summary += f"- Comparative density: {nomos_data.get('comparative_density', 0)}\n"
+
+        imp_arith_data = self.results['analyses'].get('impossible_arithmetic', {})
+        if imp_arith_data.get('poetic_dialectic_passage_count', 0) > 0:
+            findings_summary += f"\n### Impossible Arithmetic / Poetic Dialectic\n"
+            findings_summary += f"- Impossibility density: {imp_arith_data.get('impossibility_density', 0)}\n"
+            findings_summary += f"- Arithmetic density: {imp_arith_data.get('arithmetic_density', 0)}\n"
+            findings_summary += f"- Poetic dialectic passages: {imp_arith_data.get('poetic_dialectic_passage_count', 0)}\n"
+            findings_summary += f"- 'Impossible yet true' patterns: {imp_arith_data.get('impossible_yet_true_count', 0)}\n"
+
         if absent_topics:
             silence_section = f'The following topics were expected but absent or rare: {", ".join(absent_topics)}.'
         else:
@@ -2968,8 +3599,63 @@ Examine whether the text exhibits the periagoge structure:
 - If the text were read backwards from the conclusion, would the argument
   appear entirely different from a sequential reading?
 
-## STAGE 17: THE ESOTERIC ARGUMENT
-Based on ALL of the above (Stages 1-16), attempt to reconstruct the text's
+## STAGE 17: LOGOS-ERGON / SPEECH-DEED ANALYSIS (BENARDETE METHOD)
+Examine the relationship between what is SAID and what is DONE in the text:
+- Per Benardete (Encounters & Reflections): "I didn't understand that there was
+  in fact an argument IN the action." The stated argument and the dramatic action
+  may tell different stories.
+- Are there passages where characters or the author SAY one thing while the
+  narrative/dramatic context SHOWS something else?
+- Track "burstlike" arguments (sudden counterexamples that force immediate
+  concession) vs. "filamentlike" arguments (gradual deformation of terms that
+  turns the reader around without their noticing).
+- Per Benardete (Second Sailing): "the unexpected break and the unexpected join
+  in arguments constitute the way of eidetic analysis."
+
+## STAGE 18: ONOMASTIC / ETYMOLOGICAL ANALYSIS (BENARDETE METHOD)
+Examine names and their meanings as structural keys:
+- Per Benardete (The Bow and the Lyre): "Oedipus's name designates two things,
+  knowledge and lameness." "Odysseus has two names... both are significant names,
+  but they apparently signify utterly different things. The plot connects them."
+- Are character names, place names, or titles philosophically significant?
+- Are there puns, double meanings, or etymological commentaries that carry
+  argumentative weight beyond mere wordplay?
+- Per Benardete: the outis/metis pun encodes the relation of anonymity and mind —
+  "the nonparticularization of mind."
+
+## STAGE 19: RECOGNITION SCENE / CONCEALMENT-TEST-REVEAL (BENARDETE METHOD)
+Examine whether the text enacts a recognition scene structure:
+- Per Benardete on the Odyssey: "Identity is not given but achieved through narrative."
+  The concealment→test→reveal pattern is the deep grammar of both epic and dialogue.
+- Does the text conceal something that is progressively revealed?
+- Are there testing sequences where a character or idea is subjected to trial?
+- Per Aristotle (Poetics 1452a): anagnorisis (recognition) paired with peripeteia
+  (reversal) produces the most powerful dramatic effect. Does this text pair them?
+
+## STAGE 20: NOMOS-PHYSIS / CONVENTION-NATURE ANALYSIS (HERODOTEAN METHOD)
+Examine the text's treatment of the convention/nature distinction:
+- Per Benardete (Herodotean Inquiries): Herodotus "must discover the human beneath
+  the infinite disguises of custom." His method: look at alien customs to reveal
+  the problematic character of one's own.
+- Does the text present customs, laws, or conventions alongside natural necessities?
+- Does it use the foreign or unfamiliar to defamiliarize what the reader takes
+  for granted?
+- The Gyges/Candaules paradigm: the tension between eyes (nature/knowledge) and
+  ears (convention/report), between shame (nomos) and sight (physis).
+
+## STAGE 21: IMPOSSIBLE ARITHMETIC / POETIC DIALECTIC (BENARDETE METHOD)
+Examine the text's use of productive impossibilities:
+- Per Benardete (The Bow and the Lyre): "The poet divides what is necessarily one
+  and unites what is necessarily two. He practices his own kind of dialectic in
+  which the truth shows up in two spurious forms."
+- Are there passages that present apparently impossible arithmetic (one = many,
+  same = different) that the argument/plot resolves?
+- Per Benardete: "The plot is the disclosure of impossibilities or apparent
+  impossibilities." Does the text lead the reader through an impossibility
+  to a truth that could not have been stated directly?
+
+## STAGE 22: THE ESOTERIC ARGUMENT
+Based on ALL of the above (Stages 1-21), attempt to reconstruct the text's
 ESOTERIC argument — the teaching that the careful reader is meant to discover
 beneath the surface. Structure your reconstruction as:
 
@@ -2988,7 +3674,7 @@ beneath the surface. Structure your reconstruction as:
    defensive, protective, pedagogical, or political esotericism?)
 6. **Confidence level** (how strong is the case? What alternative readings exist?)
 
-## STAGE 18: SAFEGUARDS AGAINST OVER-READING
+## STAGE 23: SAFEGUARDS AGAINST OVER-READING
 Finally, critically evaluate your own esoteric reading:
 - Does it produce a MORE coherent interpretation than the surface reading, or merely
   a different one?
@@ -3300,6 +3986,68 @@ analysis now.
                     for vs in analysis['vocabulary_shifts'][:10]:
                         lines.append(f"- '{vs['word']}': {vs['first_half_freq']} -> "
                                      f"{vs['second_half_freq']} ({vs['direction']})")
+                lines.append("")
+
+            elif name == 'logos_ergon':
+                lines.append(f"- Speech/action ratio: {analysis.get('speech_action_ratio', 0)}")
+                lines.append(f"- Speech-action mismatches: {analysis.get('mismatch_count', 0)}")
+                lines.append(f"- Burstlike shifts: {analysis.get('burstlike_shifts', 0)}")
+                lines.append(f"- Filamentlike shifts: {analysis.get('filamentlike_shifts', 0)}")
+                if analysis.get('mismatches'):
+                    lines.append("### Speech-Action Mismatches")
+                    for mm in analysis['mismatches'][:5]:
+                        lines.append(f"- Para {mm['paragraph_index']}: speech={mm['speech_density']}, action={mm['action_density']}")
+                lines.append("")
+
+            elif name == 'onomastic':
+                lines.append(f"- Naming density: {analysis.get('naming_density', 0)}")
+                lines.append(f"- Etymological passages: {analysis.get('naming_passage_count', 0)}")
+                lines.append(f"- Proper noun count: {analysis.get('proper_noun_count', 0)}")
+                lines.append(f"- Proper noun diversity: {analysis.get('proper_noun_diversity', 0)}")
+                if analysis.get('top_proper_nouns'):
+                    lines.append("### Most Frequent Proper Nouns")
+                    for pn in analysis['top_proper_nouns'][:15]:
+                        lines.append(f"- {pn[0]}: {pn[1]}x")
+                if analysis.get('naming_passages'):
+                    lines.append("### Etymological/Naming Passages")
+                    for np in analysis['naming_passages'][:5]:
+                        lines.append(f"- Sent {np['sentence_index']}: {np['excerpt'][:120]}...")
+                lines.append("")
+
+            elif name == 'recognition_structure':
+                lines.append(f"- Ideal pattern (conceal→test→reveal): {analysis.get('ideal_pattern_detected', False)}")
+                lines.append(f"- Concealment terms: {analysis.get('concealment_count', 0)}")
+                lines.append(f"- Testing terms: {analysis.get('testing_count', 0)}")
+                lines.append(f"- Revelation terms: {analysis.get('revelation_count', 0)}")
+                if analysis.get('phase_densities'):
+                    lines.append("### Phase Densities (Thirds)")
+                    for idx, pd in enumerate(analysis['phase_densities']):
+                        third_label = ['First', 'Middle', 'Last'][idx]
+                        lines.append(f"- {third_label}: conceal={pd.get('concealment',0)}, "
+                                     f"test={pd.get('testing',0)}, reveal={pd.get('revelation',0)}")
+                lines.append("")
+
+            elif name == 'nomos_physis':
+                lines.append(f"- Nomos density: {analysis.get('nomos_density', 0)}")
+                lines.append(f"- Physis density: {analysis.get('physis_density', 0)}")
+                lines.append(f"- Co-occurrences: {analysis.get('co_occurrence_count', 0)}")
+                lines.append(f"- Comparative density: {analysis.get('comparative_density', 0)}")
+                if analysis.get('co_occurrences'):
+                    lines.append("### Nomos-Physis Co-occurrence Passages")
+                    for co in analysis['co_occurrences'][:5]:
+                        lines.append(f"- Sent {co['sentence_index']}: nomos={co['nomos_terms']}, physis={co['physis_terms']}")
+                lines.append("")
+
+            elif name == 'impossible_arithmetic':
+                lines.append(f"- Impossibility density: {analysis.get('impossibility_density', 0)}")
+                lines.append(f"- Arithmetic density: {analysis.get('arithmetic_density', 0)}")
+                lines.append(f"- Poetic dialectic passages: {analysis.get('poetic_dialectic_passage_count', 0)}")
+                lines.append(f"- 'Impossible yet true' patterns: {analysis.get('impossible_yet_true_count', 0)}")
+                if analysis.get('poetic_dialectic_passages'):
+                    lines.append("### Poetic Dialectic Passages")
+                    for pdp in analysis['poetic_dialectic_passages'][:5]:
+                        lines.append(f"- Sent {pdp['sentence_index']}: impossibility={pdp['impossibility_terms']}, "
+                                     f"arithmetic={pdp['arithmetic_terms']}")
                 lines.append("")
 
             lines.append("---")

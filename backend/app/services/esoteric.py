@@ -1909,6 +1909,41 @@ def run_full_esoteric_analysis(
         logger.error(f"Periagoge Detection failed: {e}")
         results["periagoge"] = {"error": str(e)}
 
+    # Benardete: Logos-Ergon (Speech-Deed)
+    try:
+        results["logos_ergon"] = detect_logos_ergon(text=text, delimiter_pattern=config.delimiter_pattern)
+    except Exception as e:
+        logger.error(f"Logos-Ergon failed: {e}")
+        results["logos_ergon"] = {"error": str(e)}
+
+    # Benardete: Onomastic (Name-Meaning)
+    try:
+        results["onomastic"] = detect_onomastic(text=text, delimiter_pattern=config.delimiter_pattern)
+    except Exception as e:
+        logger.error(f"Onomastic Analysis failed: {e}")
+        results["onomastic"] = {"error": str(e)}
+
+    # Benardete: Recognition Structure
+    try:
+        results["recognition_structure"] = detect_recognition_structure(text=text, delimiter_pattern=config.delimiter_pattern)
+    except Exception as e:
+        logger.error(f"Recognition Structure failed: {e}")
+        results["recognition_structure"] = {"error": str(e)}
+
+    # Benardete: Nomos-Physis
+    try:
+        results["nomos_physis"] = detect_nomos_physis(text=text, delimiter_pattern=config.delimiter_pattern)
+    except Exception as e:
+        logger.error(f"Nomos-Physis failed: {e}")
+        results["nomos_physis"] = {"error": str(e)}
+
+    # Benardete: Impossible Arithmetic
+    try:
+        results["impossible_arithmetic"] = detect_impossible_arithmetic(text=text, delimiter_pattern=config.delimiter_pattern)
+    except Exception as e:
+        logger.error(f"Impossible Arithmetic failed: {e}")
+        results["impossible_arithmetic"] = {"error": str(e)}
+
     return results
 
 
@@ -2868,4 +2903,219 @@ def detect_periagoge(text: str, delimiter_pattern: str = None) -> dict:
         "method": "Periagoge Detection (Benardete Structural Reversal)",
         "precedent": "Benardete: periagoge — the turning reproduced in every Platonic dialogue; pathei mathos",
         "interpretation": "A text that leads to a conclusion in its first half then inverts it in the second reproduces the philosophical 'turning' — the reader must undergo error to understand truth.",
+    }
+
+
+# ─────────────────────────────────────────────────────
+# BENARDETE METHODS 21-25
+# ─────────────────────────────────────────────────────
+
+def detect_logos_ergon(text: str, delimiter_pattern: str = None) -> dict:
+    """Detect speech-deed mismatches (Benardete: argument IN the action)."""
+    sections = re.split(delimiter_pattern or r"\n\s*\n", text)
+    sections = [s for s in sections if len(s.strip()) > 50]
+
+    SPEECH = {'says', 'said', 'claims', 'argues', 'asserts', 'maintains', 'declares',
+              'states', 'contends', 'insists', 'professes', 'teaches', 'proposes',
+              'speaks', 'spoke', 'tells', 'told', 'replies', 'answered', 'asks', 'asked',
+              'believes', 'thinks', 'holds', 'opinion'}
+    ACTION = {'does', 'did', 'goes', 'went', 'acts', 'acted', 'performs', 'makes', 'made',
+              'takes', 'took', 'gives', 'gave', 'comes', 'came', 'leaves', 'left', 'turns',
+              'turned', 'runs', 'ran', 'sits', 'sat', 'stands', 'stood', 'walks', 'walked',
+              'fights', 'fought', 'kills', 'killed', 'strikes', 'seizes', 'flees', 'fled',
+              'enters', 'entered', 'departs', 'moves', 'compels'}
+
+    mismatches = []
+    burstlike = filamentlike = 0
+
+    for i, sec in enumerate(sections):
+        words = re.findall(r'\b[a-zA-Z]+\b', sec.lower())
+        if len(words) < 10:
+            continue
+        s_count = sum(1 for w in words if w in SPEECH)
+        a_count = sum(1 for w in words if w in ACTION)
+        s_d = s_count / len(words)
+        a_d = a_count / len(words)
+        if s_d > 0.01 and a_d > 0.01:
+            mismatches.append({"section": i+1, "speech": round(s_d, 4),
+                               "action": round(a_d, 4), "excerpt": sec[:150]})
+
+    for i in range(1, len(sections)):
+        w_prev = set(re.findall(r'\b[a-zA-Z]{4,}\b', sections[i-1].lower())) - _STOPWORDS
+        w_curr = set(re.findall(r'\b[a-zA-Z]{4,}\b', sections[i].lower())) - _STOPWORDS
+        union = len(w_prev | w_curr)
+        if union == 0: continue
+        overlap = len(w_prev & w_curr) / union
+        if overlap < 0.05: burstlike += 1
+        elif overlap < 0.20: filamentlike += 1
+
+    return {
+        "mismatch_count": len(mismatches), "mismatches": mismatches[:10],
+        "burstlike_shifts": burstlike, "filamentlike_shifts": filamentlike,
+        "method": "Logos-Ergon (Speech-Deed) Analysis (Benardete)",
+        "precedent": "Benardete: 'I didn't understand there was an argument IN the action'",
+        "interpretation": "Speech-action co-occurrence = dramatic irony sites; burstlike shifts = sudden argument breaks.",
+    }
+
+
+def detect_onomastic(text: str, delimiter_pattern: str = None) -> dict:
+    """Detect etymological/name-meaning commentary (Benardete on significant names)."""
+    NAMING = {'name', 'named', 'names', 'naming', 'called', 'call', 'calls',
+              'meaning', 'means', 'signifies', 'designates', 'etymology',
+              'derives', 'derived', 'origin', 'cognate', 'root', 'literally',
+              'properly', 'so-called', 'translated', 'pun', 'wordplay', 'epithet'}
+
+    sents = re.split(r'[.!?]+', text)
+    sents = [s.strip() for s in sents if len(s.strip()) > 15]
+
+    proper_nouns = Counter()
+    naming_passages = []
+    for i, sent in enumerate(sents):
+        words = re.findall(r'\b[A-Z][a-z]+\b', sent)
+        for w in words[1:]:  # skip first word (sentence start)
+            proper_nouns[w] += 1
+        s_lower = set(re.findall(r'\b[a-zA-Z]+\b', sent.lower()))
+        hits = s_lower & NAMING
+        if len(hits) >= 2:
+            naming_passages.append({"sentence": i+1, "terms": list(hits), "excerpt": sent[:150]})
+
+    all_words = re.findall(r'\b[a-zA-Z]{3,}\b', text.lower())
+    naming_density = sum(1 for w in all_words if w in NAMING) / max(len(all_words), 1)
+
+    return {
+        "naming_density": round(naming_density, 5),
+        "naming_passages": naming_passages[:15],
+        "top_proper_nouns": proper_nouns.most_common(20),
+        "method": "Onomastic / Etymological Analysis (Benardete)",
+        "precedent": "Benardete: Odysseus's two names encode the plot; the outis/metis pun is the key",
+        "interpretation": "High naming density = author treats names as philosophically significant (compressed arguments).",
+    }
+
+
+def detect_recognition_structure(text: str, delimiter_pattern: str = None) -> dict:
+    """Detect concealment→test→reveal pattern (Benardete on Odyssey structure)."""
+    CONCEAL = {'hide', 'hidden', 'conceal', 'concealed', 'concealment', 'disguise', 'disguised',
+               'mask', 'masked', 'cover', 'covered', 'secret', 'secretly', 'invisible', 'unseen',
+               'unknown', 'anonymous', 'pretend', 'veil', 'veiled', 'obscure', 'suppress', 'withhold'}
+    TEST = {'test', 'tested', 'testing', 'trial', 'try', 'tried', 'prove', 'proved', 'proof',
+            'examine', 'examined', 'question', 'questioned', 'challenge', 'challenged',
+            'verify', 'assess', 'probe', 'scrutinize', 'investigate'}
+    REVEAL = {'reveal', 'revealed', 'revelation', 'disclose', 'disclosed', 'discover', 'discovered',
+              'discovery', 'recognize', 'recognized', 'recognition', 'unmask', 'unmasked',
+              'uncover', 'uncovered', 'expose', 'exposed', 'manifest', 'identity', 'identify'}
+
+    sents = re.split(r'[.!?]+', text)
+    sents = [s.strip() for s in sents if len(s.strip()) > 10]
+    if len(sents) < 9:
+        return {"score": 0, "method": "Recognition Structure", "note": "Text too short"}
+
+    third = len(sents) // 3
+    thirds = [sents[:third], sents[third:2*third], sents[2*third:]]
+
+    densities = []
+    for t in thirds:
+        all_w = []
+        for s in t:
+            all_w.extend(re.findall(r'\b[a-zA-Z]+\b', s.lower()))
+        total = max(len(all_w), 1)
+        densities.append({
+            "concealment": round(sum(1 for w in all_w if w in CONCEAL) / total, 5),
+            "testing": round(sum(1 for w in all_w if w in TEST) / total, 5),
+            "revelation": round(sum(1 for w in all_w if w in REVEAL) / total, 5),
+        })
+
+    ideal = (densities[0]["concealment"] >= densities[2]["concealment"] and
+             densities[1]["testing"] >= max(densities[0]["testing"], densities[2]["testing"]) and
+             densities[2]["revelation"] >= densities[0]["revelation"])
+
+    return {
+        "phase_densities": densities,
+        "ideal_pattern": ideal,
+        "method": "Recognition Scene / Concealment-Test-Reveal (Benardete)",
+        "precedent": "Benardete on Odyssey: identity achieved through narrative, not given",
+        "interpretation": "Ideal pattern = concealment early, testing middle, revelation late. The reader enacts discovery.",
+    }
+
+
+def detect_nomos_physis(text: str, delimiter_pattern: str = None) -> dict:
+    """Detect convention vs. nature tension (Benardete/Herodotus method)."""
+    NOMOS = {'law', 'laws', 'lawful', 'custom', 'customs', 'convention', 'conventional',
+             'tradition', 'traditional', 'rule', 'rules', 'opinion', 'opinions', 'belief',
+             'beliefs', 'agreed', 'agreement', 'prohibition', 'forbidden', 'permitted',
+             'obey', 'obedience', 'shame', 'shameful', 'modesty', 'propriety', 'acceptable'}
+    PHYSIS = {'nature', 'natural', 'naturally', 'innate', 'born', 'birth', 'inborn',
+              'inherent', 'instinct', 'spontaneous', 'necessary', 'necessity', 'inevitable',
+              'compel', 'force', 'power', 'capacity', 'body', 'desire', 'desires',
+              'passion', 'appetite', 'species', 'kind', 'genus'}
+    COMPARATIVE = {'barbarian', 'foreign', 'foreigner', 'alien', 'stranger', 'compare',
+                   'contrast', 'differ', 'different', 'unlike', 'practice', 'practices',
+                   'rite', 'ritual', 'worship', 'sacrifice'}
+
+    all_words = re.findall(r'\b[a-zA-Z]{3,}\b', text.lower())
+    total = max(len(all_words), 1)
+    n_count = sum(1 for w in all_words if w in NOMOS)
+    p_count = sum(1 for w in all_words if w in PHYSIS)
+    c_count = sum(1 for w in all_words if w in COMPARATIVE)
+
+    sents = re.split(r'[.!?]+', text)
+    co_occ = []
+    for i, sent in enumerate(sents):
+        sw = set(re.findall(r'\b[a-zA-Z]+\b', sent.lower()))
+        n_hits = sw & NOMOS
+        p_hits = sw & PHYSIS
+        if n_hits and p_hits:
+            co_occ.append({"sentence": i+1, "nomos": list(n_hits)[:3], "physis": list(p_hits)[:3],
+                           "excerpt": sent.strip()[:120]})
+
+    return {
+        "nomos_density": round(n_count / total, 5), "physis_density": round(p_count / total, 5),
+        "comparative_density": round(c_count / total, 5),
+        "co_occurrences": co_occ[:15], "co_occurrence_count": len(co_occ),
+        "method": "Nomos-Physis (Convention vs. Nature) Detection (Benardete/Herodotus)",
+        "precedent": "Benardete: 'To discover the human beneath the infinite disguises of custom'",
+        "interpretation": "High co-occurrence of nomos+physis = text grappling with the nature/convention distinction.",
+    }
+
+
+def detect_impossible_arithmetic(text: str, delimiter_pattern: str = None) -> dict:
+    """Detect productive impossibilities — one=many, same=different (Benardete poetic dialectic)."""
+    IMPOSSIBILITY = {'impossible', 'impossibility', 'cannot', 'absurd', 'absurdity',
+                     'paradox', 'paradoxical', 'contradiction', 'contradictory', 'inconceivable',
+                     'incompatible', 'incoherent', 'unintelligible', 'ridiculous', 'unthinkable'}
+    ARITHMETIC = {'one', 'two', 'three', 'many', 'both', 'neither', 'either', 'same',
+                  'different', 'equal', 'unequal', 'identical', 'other', 'single', 'double',
+                  'whole', 'part', 'parts', 'unity', 'duality', 'plurality', 'divide',
+                  'divided', 'division', 'unite', 'united', 'union', 'separate', 'separated',
+                  'combine', 'combined', 'split', 'merge', 'together', 'apart', 'join'}
+    AFFIRM = {'yet', 'nevertheless', 'nonetheless', 'still', 'even so', 'but', 'however',
+              'though', 'although', 'must', 'proves', 'turns out', 'shows'}
+
+    sents = re.split(r'[.!?]+', text)
+    sents = [s.strip() for s in sents if len(s.strip()) > 15]
+
+    passages = []
+    impossible_yet_true = 0
+    for i, sent in enumerate(sents):
+        sw = set(re.findall(r'\b[a-zA-Z]+\b', sent.lower()))
+        imp = sw & IMPOSSIBILITY
+        arith = sw & ARITHMETIC
+        if imp and arith:
+            passages.append({"sentence": i+1, "impossibility": list(imp),
+                             "arithmetic": list(arith), "excerpt": sent[:150]})
+        if imp and i + 1 < len(sents):
+            next_sw = set(re.findall(r'\b[a-zA-Z]+\b', sents[i+1].lower()))
+            if next_sw & AFFIRM:
+                impossible_yet_true += 1
+
+    all_words = re.findall(r'\b[a-zA-Z]{3,}\b', text.lower())
+    total = max(len(all_words), 1)
+
+    return {
+        "passages": passages[:15], "passage_count": len(passages),
+        "impossible_yet_true": impossible_yet_true,
+        "impossibility_density": round(sum(1 for w in all_words if w in IMPOSSIBILITY) / total, 5),
+        "arithmetic_density": round(sum(1 for w in all_words if w in ARITHMETIC) / total, 5),
+        "method": "Impossible Arithmetic / Poetic Dialectic (Benardete)",
+        "precedent": "Benardete: 'The poet divides what is necessarily one and unites what is necessarily two'",
+        "interpretation": "Productive impossibilities where one=many reveal the text's 'poetic dialectic' — truth in the guise of the impossible.",
     }
