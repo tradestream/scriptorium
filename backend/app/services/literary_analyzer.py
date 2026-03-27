@@ -3028,7 +3028,27 @@ class LiteraryAnalyzer:
                         })
 
         if len(poems) < 3:
-            # Fallback 3: split on triple+ newlines
+            # Fallback 3: split on --- separators (EPUB file boundaries)
+            if '\n---\n' in self.text:
+                chunks = self.text.split('\n---\n')
+                poems = []
+                for i, chunk in enumerate(chunks):
+                    chunk = chunk.strip()
+                    if len(chunk) < 20:
+                        continue
+                    # Use first line as title
+                    first_lines = [l for l in chunk.split('\n') if l.strip()]
+                    if first_lines and len(first_lines[0]) < 60:
+                        title = first_lines[0].strip().lstrip('#').strip()
+                        body = '\n'.join(first_lines[1:]).strip() if len(first_lines) > 1 else chunk
+                    else:
+                        title = f"Poem {len(poems) + 1}"
+                        body = chunk
+                    if len(body) > 20:
+                        poems.append({"title": title, "text": body, "index": len(poems)})
+
+        if len(poems) < 3:
+            # Fallback 4: split on triple+ newlines
             chunks = re.split(r'\n{3,}', self.text)
             poems = []
             for i, chunk in enumerate(chunks):

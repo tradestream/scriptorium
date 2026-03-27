@@ -506,10 +506,19 @@ async def _extract_epub_poetry(path: Path) -> str:
     book = epub.read_epub(str(path), options={"ignore_ncx": True})
     output_lines = []
     current_author = ""
+    file_count = 0
 
     for item in book.get_items():
         if item.media_type != 'application/xhtml+xml':
             continue
+
+        # Insert poem/section separator between EPUB files
+        file_count += 1
+        if file_count > 1 and output_lines:
+            # Triple newline = poem break (distinct from double = stanza break)
+            output_lines.append('')
+            output_lines.append('---')
+            output_lines.append('')
 
         soup = BeautifulSoup(item.get_content(), 'html.parser')
         for tag in soup.find_all(['img', 'svg', 'script', 'style']):
