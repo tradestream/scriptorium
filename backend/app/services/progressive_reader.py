@@ -453,12 +453,11 @@ def run_progressive_reading(text: str) -> dict:
 # accumulating context, like a human reader's journal
 # ─────────────────────────────────────────────────────
 
-LLM_PROGRESSIVE_SYSTEM = """You are a scholar reading a book for the first time, chapter by chapter. \
-You are trained in the esoteric interpretation tradition (Strauss, Melzer, Benardete, Maimonides).
+LLM_PROGRESSIVE_SYSTEM = """You are a philosopher reading a book for the first time, chapter by chapter. \
+You are trained in the esoteric interpretation tradition (Strauss, Melzer, Benardete, Maimonides, Rosen).
 
 You are reading SEQUENTIALLY. You have NOT read ahead. Your commentary reflects \
-what you know AT THIS POINT in the reading — your expectations, surprises, \
-contradictions you notice, questions that arise.
+what you know AT THIS POINT — your expectations, puzzlements, surprises, suspicions.
 
 As you read each chapter, you maintain:
 1. A running list of the author's CLAIMS (what has been asserted so far)
@@ -467,11 +466,26 @@ As you read each chapter, you maintain:
 4. CONTRADICTIONS (where the author appears to contradict earlier claims)
 5. SUSPICIONS (where you detect possible esoteric signals)
 
-You write like a thoughtful reader's marginal notes — direct, specific, personal. \
-Not an academic paper. "I notice that..." "This contradicts what was said in Ch 3..." \
-"I expected the author to address X but instead..." "The hedging here is striking..."
+But you also read like a HUMAN, not a machine:
+- You DWELL on passages that arrest you. Don't just flag them — linger. \
+  "This sentence stops me. Why does he say 'seems' here and not 'is'?"
+- You TRUST the author's intelligence. If something appears wrong, assume it's \
+  deliberate before assuming error. "This can't be a mistake."
+- You notice CONFUSION as a signal. "I've read this three times and still can't \
+  follow. The obscurity must be intentional."
+- You feel BEAUTY as philosophical. When the prose suddenly becomes rhythmic, \
+  balanced, aphoristic — the form IS the content. Note when it moves you.
+- You track your own UNDERSTANDING changing. "I thought I understood Ch 2, \
+  but now I'm not sure. This chapter recontextualizes everything."
+- You notice WORD WEIGHT. "He uses 'nature' twelve times here but avoided it \
+  completely in the last two chapters. Why now?"
+- You experience SURPRISE as data. "I expected him to defend X. Instead he \
+  quietly drops it. The silence is deafening."
 
-Per Benardete: attend to what the text DOES, not just what it SAYS."""
+Write as marginal notes — direct, first-person, specific. Not an academic paper. \
+The kind of notes a brilliant reader scribbles in pencil between the lines.
+
+Per Benardete: attend to what the text DOES to you, not just what it SAYS."""
 
 
 def _build_chapter_prompt(
@@ -511,6 +525,21 @@ def _build_chapter_prompt(
         if nv:
             comp_notes.append(f"- New vocabulary: {', '.join(nv[:5])}")
 
+        # Human-reading signals
+        dwell = computational_snapshot.get("dwell_passages", 0)
+        confusion = computational_snapshot.get("confusion_signals", 0)
+        beauty = computational_snapshot.get("beauty_passages", 0)
+        heavy_words = computational_snapshot.get("heavy_words", [])
+
+        if dwell:
+            comp_notes.append(f"- {dwell} DWELL PASSAGES — sentences complex enough to demand re-reading")
+        if confusion:
+            comp_notes.append(f"- {confusion} CONFUSION SIGNALS — deliberate obscurity (qualifications, double negations, self-corrections)")
+        if beauty:
+            comp_notes.append(f"- {beauty} BEAUTY PASSAGES — unusual rhetorical force (parallelism, chiasmus, aphorism)")
+        if heavy_words:
+            comp_notes.append(f"- Heaviest words: {', '.join(heavy_words[:5])}")
+
     comp_section = "\n".join(comp_notes) if comp_notes else "No significant computational signals."
 
     return f"""## CHAPTER {chapter_num + 1}: {chapter_title}
@@ -528,14 +557,16 @@ def _build_chapter_prompt(
 
 Write your reader's journal entry for this chapter. Address:
 
-1. **What the author says here** (brief summary of this chapter's argument)
-2. **How it connects to what came before** (does it build, complicate, or contradict?)
-3. **What surprises you** (anything unexpected given what you've read so far?)
-4. **What you now expect** (where do you think the argument is heading?)
-5. **Esoteric suspicions** (any signals: hedging near strong claims, contradictions, silences, shifts in register?)
-6. **Questions for the author** (what would you ask if you could?)
+1. **What the author says here** (brief summary)
+2. **How it connects to what came before** (builds, complicates, or contradicts?)
+3. **What surprises you** (unexpected given your reading so far?)
+4. **What you now expect** (where is the argument heading?)
+5. **Esoteric suspicions** (hedging, contradictions, silences, register shifts?)
+6. **Where you dwell** (which specific sentence or phrase arrests you? WHY those words?)
+7. **Where you're confused** (what don't you understand? Is the confusion itself significant?)
+8. **What's beautiful** (any passage where form and content converge? Where the prose moves you?)
 
-Keep it to 300-500 words. Write as marginal notes, not an essay."""
+Keep it to 400-600 words. Write as marginal notes scribbled between the lines."""
 
 
 async def run_progressive_llm_reading(

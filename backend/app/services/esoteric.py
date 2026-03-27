@@ -1944,6 +1944,34 @@ def run_full_esoteric_analysis(
         logger.error(f"Impossible Arithmetic failed: {e}")
         results["impossible_arithmetic"] = {"error": str(e)}
 
+    # Dwell Passage Detection
+    try:
+        results["dwell_passages"] = detect_dwell_passages(text=text, delimiter_pattern=config.delimiter_pattern)
+    except Exception as e:
+        logger.error(f"Dwell Passages failed: {e}")
+        results["dwell_passages"] = {"error": str(e)}
+
+    # Confusion Signal Detection
+    try:
+        results["confusion_signals"] = detect_confusion_signals(text=text, delimiter_pattern=config.delimiter_pattern)
+    except Exception as e:
+        logger.error(f"Confusion Signals failed: {e}")
+        results["confusion_signals"] = {"error": str(e)}
+
+    # Rhetorical Beauty Detection
+    try:
+        results["rhetorical_beauty"] = detect_rhetorical_beauty(text=text, delimiter_pattern=config.delimiter_pattern)
+    except Exception as e:
+        logger.error(f"Rhetorical Beauty failed: {e}")
+        results["rhetorical_beauty"] = {"error": str(e)}
+
+    # Word Weight Analysis
+    try:
+        results["word_weight"] = detect_word_weight(text=text, delimiter_pattern=config.delimiter_pattern)
+    except Exception as e:
+        logger.error(f"Word Weight failed: {e}")
+        results["word_weight"] = {"error": str(e)}
+
     return results
 
 
@@ -3118,4 +3146,292 @@ def detect_impossible_arithmetic(text: str, delimiter_pattern: str = None) -> di
         "method": "Impossible Arithmetic / Poetic Dialectic (Benardete)",
         "precedent": "Benardete: 'The poet divides what is necessarily one and unites what is necessarily two'",
         "interpretation": "Productive impossibilities where one=many reveal the text's 'poetic dialectic' — truth in the guise of the impossible.",
+    }
+
+
+# ─────────────────────────────────────────────────────
+# HUMAN-READING TOOLS: Dwell, Confusion, Beauty, Weight
+# ─────────────────────────────────────────────────────
+
+def detect_dwell_passages(text: str, delimiter_pattern: str = None) -> dict:
+    """Find passages that would make a careful reader slow down and dwell.
+
+    A "dwell passage" has high syntactic complexity + semantic density —
+    long sentences, nested clauses, rare vocabulary, abstract terms.
+    These are passages the author INTENDED the reader to linger on.
+    """
+    sents = re.split(r'(?<=[.!?])\s+', text)
+    sents = [s.strip() for s in sents if len(s.strip()) > 20]
+
+    ABSTRACT = {'being', 'nature', 'truth', 'essence', 'soul', 'reason', 'justice',
+                'virtue', 'freedom', 'knowledge', 'wisdom', 'good', 'evil', 'beauty',
+                'power', 'law', 'necessity', 'possibility', 'existence', 'substance',
+                'cause', 'principle', 'form', 'matter', 'end', 'purpose', 'whole',
+                'part', 'opinion', 'science', 'philosophy', 'god', 'divine', 'human'}
+
+    dwell_passages = []
+    for i, sent in enumerate(sents):
+        words = re.findall(r'\b[a-zA-Z]{3,}\b', sent.lower())
+        if len(words) < 8:
+            continue
+
+        # Syntactic complexity: sentence length + subordinate clause markers
+        subordinates = sum(1 for w in words if w in {'which', 'that', 'whom', 'whose',
+                                                       'where', 'when', 'while', 'although',
+                                                       'because', 'since', 'unless', 'whereas'})
+        clause_density = subordinates / len(words)
+
+        # Semantic density: abstract term concentration
+        abstract_count = sum(1 for w in words if w in ABSTRACT)
+        abstract_density = abstract_count / len(words)
+
+        # Vocabulary rarity: type-token ratio in this sentence
+        ttr = len(set(words)) / len(words)
+
+        # Dwell score: long + complex + abstract + rare vocabulary
+        dwell_score = (
+            min(len(words) / 40, 1.0) * 0.3 +     # length
+            min(clause_density * 10, 1.0) * 0.25 +  # complexity
+            min(abstract_density * 10, 1.0) * 0.25 + # abstraction
+            min(ttr, 1.0) * 0.2                       # vocabulary richness
+        )
+
+        if dwell_score > 0.45:
+            dwell_passages.append({
+                "sentence": i + 1,
+                "score": round(dwell_score, 3),
+                "word_count": len(words),
+                "clause_density": round(clause_density, 4),
+                "abstract_density": round(abstract_density, 4),
+                "excerpt": sent[:200],
+                "position": round(i / max(len(sents), 1), 3),
+            })
+
+    dwell_passages.sort(key=lambda x: -x["score"])
+    return {
+        "total_dwell_passages": len(dwell_passages),
+        "passages": dwell_passages[:20],
+        "method": "Dwell Passage Detection",
+        "precedent": "Benardete: 'the surface of things is the heart of things' — passages that arrest the reader reward lingering",
+        "interpretation": "High-dwell passages combine syntactic complexity with semantic density. The author intended the reader to slow down here.",
+    }
+
+
+def detect_confusion_signals(text: str, delimiter_pattern: str = None) -> dict:
+    """Detect deliberately obscure passages — confusion as pedagogical technique.
+
+    Per Strauss: deliberate obscurity is a technique. Per Maimonides:
+    'the scattered chapters' method requires the reader to struggle.
+    Confusion is not failure — it's the beginning of understanding.
+    """
+    sents = re.split(r'(?<=[.!?])\s+', text)
+    sents = [s.strip() for s in sents if len(s.strip()) > 20]
+
+    # Markers of deliberate complexity
+    QUALIFICATION_CHAINS = {'not that', 'not so much', 'not merely', 'not simply',
+                             'not exactly', 'not quite', 'not entirely', 'not only',
+                             'in a sense', 'so to speak', 'as it were', 'to some extent',
+                             'in a way', 'in a manner'}
+    DOUBLE_NEGATION = {'not un', 'not in', 'not im', 'cannot not', 'not without',
+                        'not non', 'hardly un', 'scarcely un', 'no small', 'not a few'}
+    SELF_CORRECTION = {'or rather', 'more precisely', 'to put it differently',
+                        'that is to say', 'i mean', 'in other words', 'or better',
+                        'strictly speaking', 'to be more exact', 'to put it more carefully'}
+
+    confusion_passages = []
+    for i, sent in enumerate(sents):
+        s_lower = sent.lower()
+        quals = sum(1 for q in QUALIFICATION_CHAINS if q in s_lower)
+        double_negs = sum(1 for d in DOUBLE_NEGATION if d in s_lower)
+        corrections = sum(1 for c in SELF_CORRECTION if c in s_lower)
+
+        # Also check for very long sentences (>50 words) with parentheticals
+        words = re.findall(r'\b\w+\b', sent)
+        parens = sent.count('(') + sent.count('—')
+        semicolons = sent.count(';')
+
+        confusion_score = (
+            quals * 0.2 +
+            double_negs * 0.3 +
+            corrections * 0.25 +
+            min(parens * 0.1, 0.3) +
+            min(semicolons * 0.1, 0.2) +
+            (0.2 if len(words) > 50 else 0)
+        )
+
+        if confusion_score > 0.3:
+            confusion_passages.append({
+                "sentence": i + 1,
+                "score": round(confusion_score, 3),
+                "qualifications": quals,
+                "double_negations": double_negs,
+                "self_corrections": corrections,
+                "excerpt": sent[:200],
+                "position": round(i / max(len(sents), 1), 3),
+            })
+
+    confusion_passages.sort(key=lambda x: -x["score"])
+    return {
+        "total_confusion_signals": len(confusion_passages),
+        "passages": confusion_passages[:20],
+        "method": "Confusion Signal Detection",
+        "precedent": "Maimonides: scattered chapters require struggle; Strauss: deliberate obscurity; Benardete: 'the text resists you where it matters most'",
+        "interpretation": "Deliberately confusing passages — chains of qualifications, double negations, self-corrections — signal that the author is handling a dangerous or delicate truth.",
+    }
+
+
+def detect_rhetorical_beauty(text: str, delimiter_pattern: str = None) -> dict:
+    """Detect passages of unusual rhetorical force — beauty as a philosophical signal.
+
+    Per Rosen: 'the surface of things is the heart of things.'
+    Beautiful prose arrests the reader. In philosophical texts, beauty
+    often marks the passage where form and content converge.
+    """
+    sents = re.split(r'(?<=[.!?])\s+', text)
+    sents = [s.strip() for s in sents if len(s.strip()) > 30]
+
+    # Parallelism detection: repeated syntactic patterns
+    # Anaphora: sentences starting with the same word/phrase
+    # Isocolon: clauses of similar length within a sentence
+    # Tricolon: three parallel elements
+
+    beauty_passages = []
+    for i, sent in enumerate(sents):
+        score = 0.0
+        features = []
+
+        # Check for tricolon / listing patterns (x, y, and z)
+        tricolon = len(re.findall(r',\s*\w+,\s*(?:and|or)\s+\w+', sent))
+        if tricolon:
+            score += 0.2
+            features.append("tricolon")
+
+        # Check for balanced clauses (semicolons separating similar-length phrases)
+        if ';' in sent:
+            parts = sent.split(';')
+            if len(parts) >= 2:
+                lengths = [len(p.split()) for p in parts]
+                if lengths and max(lengths) < min(lengths) * 2:
+                    score += 0.2
+                    features.append("isocolon")
+
+        # Check for anaphora with nearby sentences
+        if i > 0:
+            prev_first = re.match(r'^(\w+\s+\w+)', sents[i-1])
+            curr_first = re.match(r'^(\w+\s+\w+)', sent)
+            if prev_first and curr_first and prev_first.group(1).lower() == curr_first.group(1).lower():
+                score += 0.25
+                features.append("anaphora")
+
+        # Chiastic structure within sentence: A B ... B' A'
+        words = re.findall(r'\b[a-zA-Z]{4,}\b', sent.lower())
+        if len(words) >= 8:
+            first_half = words[:len(words)//2]
+            second_half = words[len(words)//2:]
+            reversed_second = list(reversed(second_half))
+            mirror_matches = sum(1 for a, b in zip(first_half[:4], reversed_second[:4]) if a == b)
+            if mirror_matches >= 2:
+                score += 0.3
+                features.append("chiasmus")
+
+        # Rhythmic regularity (low variance in word-per-clause count)
+        clauses = re.split(r'[,;:]', sent)
+        if len(clauses) >= 3:
+            clause_lens = [len(c.split()) for c in clauses if c.strip()]
+            if clause_lens:
+                avg = sum(clause_lens) / len(clause_lens)
+                variance = sum((l - avg) ** 2 for l in clause_lens) / len(clause_lens)
+                if variance < 4 and avg > 3:
+                    score += 0.15
+                    features.append("rhythmic")
+
+        # Aphoristic brevity + depth (short sentence with abstract terms)
+        abstract = {'truth', 'nature', 'soul', 'beauty', 'justice', 'wisdom', 'good',
+                    'evil', 'freedom', 'love', 'death', 'god', 'being', 'nothing'}
+        if len(words) < 15 and sum(1 for w in words if w in abstract) >= 2:
+            score += 0.25
+            features.append("aphoristic")
+
+        if score > 0.3:
+            beauty_passages.append({
+                "sentence": i + 1,
+                "score": round(score, 3),
+                "features": features,
+                "excerpt": sent[:200],
+                "position": round(i / max(len(sents), 1), 3),
+            })
+
+    beauty_passages.sort(key=lambda x: -x["score"])
+    return {
+        "total_beauty_passages": len(beauty_passages),
+        "passages": beauty_passages[:20],
+        "method": "Rhetorical Beauty Detection",
+        "precedent": "Rosen: 'the surface of things is the heart of things'; Benardete on the inseparability of form and content in Plato",
+        "interpretation": "Passages of unusual rhetorical beauty — parallelism, chiasmus, aphoristic density — mark moments where form and content converge. The beauty IS the argument.",
+    }
+
+
+def detect_word_weight(text: str, delimiter_pattern: str = None) -> dict:
+    """Measure the philosophical 'weight' of individual words across the text.
+
+    Weight = rarity × structural centrality × emphasis markers.
+    Heavy words are the ones the author chose with greatest care.
+    """
+    words = re.findall(r'\b[a-zA-Z]{4,}\b', text.lower())
+    freq = Counter(words)
+    total = len(words)
+
+    # Positional weight: words at the center carry more weight
+    sents = re.split(r'(?<=[.!?])\s+', text)
+    n_sents = len(sents)
+    word_positions = defaultdict(list)
+    for i, sent in enumerate(sents):
+        for w in re.findall(r'\b[a-zA-Z]{4,}\b', sent.lower()):
+            word_positions[w].append(i / max(n_sents, 1))
+
+    # Emphasis: words that appear in scare quotes or near emphasis markers
+    emphasized = set()
+    for m in re.finditer(r'"([^"]{3,30})"', text):
+        for w in re.findall(r'\b[a-zA-Z]{4,}\b', m.group(1).lower()):
+            emphasized.add(w)
+    for m in re.finditer(r'\*([^*]{3,30})\*', text):
+        for w in re.findall(r'\b[a-zA-Z]{4,}\b', m.group(1).lower()):
+            emphasized.add(w)
+
+    # Calculate weight
+    weighted = []
+    for word, count in freq.items():
+        if word in _STOPWORDS or count < 2:
+            continue
+
+        # Rarity: inverse frequency (rare = heavy)
+        rarity = 1.0 / (count / total * 1000 + 1)
+
+        # Centrality: how concentrated near the structural center (0.4-0.6)
+        positions = word_positions.get(word, [])
+        center_positions = [p for p in positions if 0.35 <= p <= 0.65]
+        centrality = len(center_positions) / max(len(positions), 1)
+
+        # Emphasis bonus
+        emph_bonus = 0.3 if word in emphasized else 0.0
+
+        weight = rarity * 0.4 + centrality * 0.3 + emph_bonus + (0.2 if count <= 5 else 0.0)
+
+        if weight > 0.3:
+            weighted.append({
+                "word": word,
+                "weight": round(weight, 3),
+                "occurrences": count,
+                "rarity": round(rarity, 3),
+                "centrality": round(centrality, 3),
+                "emphasized": word in emphasized,
+            })
+
+    weighted.sort(key=lambda x: -x["weight"])
+    return {
+        "total_heavy_words": len(weighted),
+        "words": weighted[:30],
+        "method": "Word Weight Analysis",
+        "precedent": "Benardete: every word choice in Plato is philosophically significant; Strauss: the rare statement is the true one",
+        "interpretation": "Heavy words — rare, centrally placed, emphasized — are the ones the author chose with greatest care. They carry the argument's weight.",
     }
