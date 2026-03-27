@@ -3040,12 +3040,19 @@ class LiteraryAnalyzer:
         return poems
 
     def _split_prose_chapters(self) -> list[dict]:
-        """Strategy 6: Prose chapter/story detection."""
-        # Match: "Chapter 1", "CHAPTER I", "Part One", "I.", "1.", story-title-like headings
+        """Strategy 6: Prose chapter/story detection.
+
+        Handles:
+        - Chapter/Part/Book headings
+        - ALL CAPS story titles embedded in text (e.g., Dubliners)
+        - TOC-derived title lists used as split markers
+        - Story-length blocks separated by significant gaps
+        """
+        # Strategy 6a: Chapter/Part/Book headings
         chapter_pat = re.compile(
             r'^(?:'
             r'(?:Chapter|CHAPTER|Part|PART|Book|BOOK|Section|SECTION)\s+[\dIVXLCDMivxlcdm]+\.?'
-            r'|[IVX]{1,4}\.\s'  # Roman numeral section: "I. ", "IV. "
+            r'|[IVX]{1,4}\.\s'
             r')\s*(.*)$',
             re.MULTILINE,
         )
@@ -3065,8 +3072,78 @@ class LiteraryAnalyzer:
             if len(chapters) >= 3:
                 return chapters
 
-        # Also try: long blocks (>500 chars) separated by double newlines with title-like first lines
-        blocks = re.split(r'\n\s*\n\s*\n', self.text)  # Triple newline = chapter break
+        # Strategy 6b: ALL CAPS story/section titles embedded in text
+        # Detect: "THE SISTERS", "AN ENCOUNTER", "ARABY" as standalone ALL CAPS
+        # or preceded by a book title like "DUBLINERS THE SISTERS"
+        # Also match ALL CAPS followed by double-newline (story titles in continuous text)
+        caps_title_pat = re.compile(
+            r'([A-Z][A-Z\s\'\-]{2,40}?)(?=\n\n)',
+        )
+        caps_matches = list(caps_title_pat.finditer(self.text))
+        BOILERPLATE = {'CONTENTS', 'COPYRIGHT', 'ACKNOWLEDGMENTS', 'NOTES', 'INDEX',
+                       'ABOUT THE AUTHOR', 'ALSO BY', 'DEDICATION', 'DISCLAIMER',
+                       'TM ETEXTS', 'DISCLAIMER OF DAMAGES', 'YOU USE', 'NO REMEDIES'}
+        valid_caps = []
+        for m in caps_matches:
+            title = m.group(1).strip()
+            words = title.split()
+            if not all(w.isalpha() or w in ("'", "-") for w in words):
+                continue
+            if any(b in title for b in BOILERPLATE):
+                continue
+            if 1 <= len(words) <= 8 and len(title) >= 4:
+                # Strip book-title prefix if present (e.g., "DUBLINERS THE SISTERS" -> "THE SISTERS")
+                # Heuristic: if first word appears only once in titles, it's a prefix
+                valid_caps.append((m.start(), title))
+
+        if len(valid_caps) >= 5:
+            chapters = []
+            for i, (pos, title) in enumerate(valid_caps):
+                start = pos + len(title) + 1
+                end = valid_caps[i + 1][0] if i + 1 < len(valid_caps) else len(self.text)
+                body = self.text[start:end].strip()
+                if len(body) < 200:
+                    continue
+                chapters.append({"title": title.title(), "text": body, "index": len(chapters)})
+            if len(chapters) >= 5:
+                return chapters
+
+        # Strategy 6c: Extract titles from embedded TOC and use as split markers
+        # Look for a block of short Title Case lines (TOC)
+        toc_pat = re.compile(r'(?:CONTENTS|Contents)\s*\n((?:[^\n]{5,50}\n){3,30})', re.MULTILINE)
+        toc_match = toc_pat.search(self.text)
+        if toc_match:
+            toc_text = toc_match.group(1)
+            toc_titles = [l.strip() for l in toc_text.split('\n') if l.strip() and len(l.strip()) < 50]
+            if len(toc_titles) >= 3:
+                chapters = []
+                for i, title in enumerate(toc_titles):
+                    # Find title in the text (after TOC)
+                    search_start = toc_match.end()
+                    # Try both exact and ALL CAPS versions
+                    idx = self.text.find(title, search_start)
+                    if idx < 0:
+                        idx = self.text.find(title.upper(), search_start)
+                    if idx < 0:
+                        continue
+                    start = idx + len(title)
+                    # Find next title
+                    next_idx = len(self.text)
+                    for next_title in toc_titles[i+1:]:
+                        ni = self.text.find(next_title, start)
+                        if ni < 0:
+                            ni = self.text.find(next_title.upper(), start)
+                        if ni >= 0:
+                            next_idx = ni
+                            break
+                    body = self.text[start:next_idx].strip()
+                    if len(body) >= 100:
+                        chapters.append({"title": title, "text": body, "index": len(chapters)})
+                if len(chapters) >= 3:
+                    return chapters
+
+        # Strategy 6d: Story-length blocks separated by significant gaps
+        blocks = re.split(r'\n\s*\n\s*\n', self.text)
         if len(blocks) >= 3:
             chapters = []
             for block in blocks:
