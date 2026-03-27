@@ -2869,202 +2869,293 @@ class LiteraryAnalyzer:
     # ==================================================================
 
     def split_poems(self) -> list[dict]:
-        """Split a poetry collection into individual poems.
+        """Split a collection into individual poems or stories/chapters.
 
-        Detects poem boundaries via:
-        - Roman numeral headings (## iii., ## xvi., etc.)
-        - Arabic numeral headings (## 16., 72., etc.)
-        - Markdown headings that look like poem titles
-        - Large gaps between stanza groups
+        Strategies (tried in order, first to produce 3+ results wins):
+        1. Bracketed EPUB title links [TITLE](link)
+        2. Markdown headings (## or ###)
+        3. --- EPUB file boundary separators
+        4. Inline Roman/Arabic numeral markers
+        5. Anthology format (ALL CAPS author + dated headings)
+        6. Within-section splitting (blank line + capitalized first line)
+        7. Prose chapter detection (Chapter X, Part X, story-length blocks)
+        8. Triple+ newline fallback
 
-        Returns list of {"title": str, "text": str, "index": int}
+        Returns list of {"title": str, "text": str, "index": int, "author"?: str}
         """
-        # Strategy 1: Bracketed title links [POEM TITLE](link) — common in EPUB exports
+        poems = self._split_bracketed_titles()
+        if len(poems) >= 3:
+            return poems
+
+        poems = self._split_markdown_headings()
+        if len(poems) >= 3:
+            # Check if any sections are very large — may need within-section splitting
+            poems = self._refine_large_sections(poems)
+            return poems
+
+        poems = self._split_separator_markers()
+        if len(poems) >= 3:
+            return poems
+
+        poems = self._split_inline_numerals()
+        if len(poems) >= 3:
+            return poems
+
+        poems = self._split_anthology_authors()
+        if len(poems) >= 3:
+            return poems
+
+        poems = self._split_prose_chapters()
+        if len(poems) >= 3:
+            return poems
+
+        poems = self._split_blank_line_poems()
+        if len(poems) >= 3:
+            return poems
+
+        # Final fallback: triple+ newlines
+        return self._split_triple_newlines()
+
+    def _split_bracketed_titles(self) -> list[dict]:
+        """Strategy 1: [POEM TITLE](link) — common in EPUB exports."""
+        # Match both ALL CAPS and mixed case bracketed titles
         bracket_pattern = re.compile(
-            r'^\[([A-Z][A-Z\s\-\'\,\.\:\;\!\?0-9]+)\]\([^\)]+\)\s*$',
+            r'^\[([A-Za-z][A-Za-z\s\-\'\,\.\:\;\!\?0-9]+)\]\([^\)]+\)\s*$',
             re.MULTILINE,
         )
-        bracket_matches = list(bracket_pattern.finditer(self.text))
-        if len(bracket_matches) >= 5:
-            poems = []
-            for i, m in enumerate(bracket_matches):
-                title = m.group(1).strip()
-                # Skip TOC entries, navigation, and boilerplate
-                if any(skip in title.upper() for skip in [
-                    'CONTENTS', 'COVER', 'TITLE PAGE', 'DEDICATION', 'EPIGRAPH',
-                    'ACKNOWLEDGMENT', 'COPYRIGHT', 'OCEANOFPDF', 'ONE', 'TWO',
-                    'THREE', 'FOUR', 'FIVE', 'SIX', 'NOTES', 'INDEX',
-                ]):
-                    continue
-                start = m.end()
-                end = bracket_matches[i + 1].start() if i + 1 < len(bracket_matches) else len(self.text)
-                body = self.text[start:end].strip()
-                # Clean OceanofPDF markers
-                body = re.sub(r'\[\*OceanofPDF\.com\*\]\([^\)]+\)', '', body).strip()
-                if len(body) < 20:
-                    continue
-                poems.append({"title": title.title(), "text": body, "index": len(poems)})
-            if len(poems) >= 3:
-                return poems
+        matches = list(bracket_pattern.finditer(self.text))
+        if len(matches) < 5:
+            return []
 
-        # Strategy 2: Markdown headings ## Title
-        poem_pattern = re.compile(
-            r'^##\s+'
-            r'(?:'
-            r'[ivxlcdm]+\.'           # Roman numeral with dot
-            r'|[ivxlcdm]+$'           # Roman numeral without dot
-            r'|\d{1,3}\.'             # Arabic numeral with dot
-            r'|[A-Z][a-z].*'          # Capitalized title
-            r')',
-            re.MULTILINE | re.IGNORECASE,
-        )
+        SKIP = {'CONTENTS', 'COVER', 'TITLE PAGE', 'DEDICATION', 'EPIGRAPH',
+                'ACKNOWLEDGMENT', 'COPYRIGHT', 'OCEANOFPDF', 'ONE', 'TWO',
+                'THREE', 'FOUR', 'FIVE', 'SIX', 'NOTES', 'INDEX', 'ABOUT'}
+        poems = []
+        for i, m in enumerate(matches):
+            title = m.group(1).strip()
+            if any(skip in title.upper() for skip in SKIP):
+                continue
+            start = m.end()
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(self.text)
+            body = self.text[start:end].strip()
+            body = re.sub(r'\[\*OceanofPDF\.com\*\]\([^\)]+\)', '', body).strip()
+            if len(body) < 20:
+                continue
+            poems.append({"title": title.title(), "text": body, "index": len(poems)})
+        return poems
 
-        parts = poem_pattern.split(self.text)
-        headings = poem_pattern.findall(self.text)
+    def _split_markdown_headings(self) -> list[dict]:
+        """Strategy 2: ## or ### headings."""
+        heading_pattern = re.compile(r'^(#{2,3})\s+(.+)$', re.MULTILINE)
+        matches = list(heading_pattern.finditer(self.text))
+        if len(matches) < 3:
+            return []
 
         poems = []
-        if len(headings) >= 3:  # At least 3 poems detected via markdown headings
-            for i, heading in enumerate(headings):
-                body = parts[i + 1].strip() if i + 1 < len(parts) else ""
-                if not body or len(body) < 20:
+        for i, m in enumerate(matches):
+            title = m.group(2).strip()
+            start = m.end()
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(self.text)
+            body = self.text[start:end].strip()
+            if not body or len(body) < 20:
+                continue
+            poems.append({"title": title[:60], "text": body, "index": len(poems)})
+        return poems
+
+    def _split_separator_markers(self) -> list[dict]:
+        """Strategy 3: --- EPUB file boundary separators."""
+        if '\n---\n' not in self.text:
+            return []
+        chunks = self.text.split('\n---\n')
+        poems = []
+        for chunk in chunks:
+            chunk = chunk.strip()
+            if len(chunk) < 20:
+                continue
+            first_lines = [l for l in chunk.split('\n') if l.strip()]
+            if first_lines and len(first_lines[0]) < 60:
+                title = first_lines[0].strip().lstrip('#').strip()
+                body = '\n'.join(first_lines[1:]).strip() if len(first_lines) > 1 else chunk
+            else:
+                title = f"Poem {len(poems) + 1}"
+                body = chunk
+            if len(body) > 20:
+                poems.append({"title": title, "text": body, "index": len(poems)})
+        return poems
+
+    def _split_inline_numerals(self) -> list[dict]:
+        """Strategy 4: Inline Roman/Arabic numeral markers (iii. xxvii. 16.)."""
+        inline = re.compile(r'(?:^|\s)([ivxlcdm]{1,6})\.\s+(?=[a-z])', re.MULTILINE)
+        arabic = re.compile(r'(?:^|\s)(\d{1,3})\.\s+(?=[a-zA-Z])', re.MULTILINE)
+        markers = [(m.start(), m.group(1), m.end()) for m in inline.finditer(self.text)]
+        markers += [(m.start(), m.group(1), m.end()) for m in arabic.finditer(self.text)]
+        markers.sort(key=lambda x: x[0])
+        if len(markers) < 3:
+            return []
+
+        poems = []
+        for i, (start, numeral, text_start) in enumerate(markers):
+            end = markers[i + 1][0] if i + 1 < len(markers) else len(self.text)
+            body = self.text[text_start:end].strip()
+            if len(body) >= 20:
+                poems.append({"title": numeral, "text": body, "index": len(poems)})
+        return poems
+
+    def _split_anthology_authors(self) -> list[dict]:
+        """Strategy 5: ALL CAPS author headings with dates."""
+        author_pat = re.compile(
+            r'^([A-Z][A-Z\s\.\-\']{3,})\s*\(\s*(?:b\.\s*)?\d{4}\s*[-–]\s*(?:\d{4})?\s*\)',
+            re.MULTILINE,
+        )
+        matches = list(author_pat.finditer(self.text))
+        if len(matches) < 5:
+            return []
+
+        poems = []
+        for i, am in enumerate(matches):
+            author_name = am.group(1).strip().title()
+            start = am.end()
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(self.text)
+            section = self.text[start:end].strip()
+            if len(section) < 50:
+                continue
+
+            # Try to split within author section by poem titles
+            title_pat = re.compile(r'^([A-Z][A-Za-z\s\'\"\,\-\.\:\;\!\?]+?)\s+\d{3,4}\s*$', re.MULTILINE)
+            titles = list(title_pat.finditer(section))
+            if titles:
+                for j, tm in enumerate(titles):
+                    poem_title = tm.group(1).strip()
+                    if poem_title.upper() == poem_title or len(poem_title) < 3:
+                        continue
+                    p_start = tm.end()
+                    p_end = titles[j + 1].start() if j + 1 < len(titles) else len(section)
+                    body = re.sub(r'\s+\d{3,4}\s*$', '', section[p_start:p_end].strip(), flags=re.MULTILINE)
+                    if len(body) >= 20:
+                        poems.append({"title": f"{poem_title} ({author_name})", "text": body,
+                                      "index": len(poems), "author": author_name})
+            else:
+                poems.append({"title": f"Poems by {author_name}", "text": section,
+                              "index": len(poems), "author": author_name})
+        return poems
+
+    def _split_prose_chapters(self) -> list[dict]:
+        """Strategy 6: Prose chapter/story detection."""
+        # Match: "Chapter 1", "CHAPTER I", "Part One", "I.", "1.", story-title-like headings
+        chapter_pat = re.compile(
+            r'^(?:'
+            r'(?:Chapter|CHAPTER|Part|PART|Book|BOOK|Section|SECTION)\s+[\dIVXLCDMivxlcdm]+\.?'
+            r'|[IVX]{1,4}\.\s'  # Roman numeral section: "I. ", "IV. "
+            r')\s*(.*)$',
+            re.MULTILINE,
+        )
+        matches = list(chapter_pat.finditer(self.text))
+        if len(matches) >= 3:
+            chapters = []
+            for i, m in enumerate(matches):
+                title = m.group(0).strip()
+                subtitle = m.group(1).strip() if m.group(1) else ""
+                start = m.end()
+                end = matches[i + 1].start() if i + 1 < len(matches) else len(self.text)
+                body = self.text[start:end].strip()
+                if len(body) < 100:
                     continue
-                title = heading.strip().lstrip('#').strip().rstrip('.')
-                poems.append({
-                    "title": title or f"Poem {len(poems) + 1}",
-                    "text": body,
-                    "index": len(poems),
-                })
+                full_title = f"{title} {subtitle}".strip() if subtitle else title
+                chapters.append({"title": full_title[:60], "text": body, "index": len(chapters)})
+            if len(chapters) >= 3:
+                return chapters
 
-        if len(poems) < 3:
-            # Fallback 1: split on inline Roman numeral markers (e.g., "xvi. between the breasts")
-            # Common in poetry collections where poems run together
-            inline_pattern = re.compile(
-                r'(?:^|\s)([ivxlcdm]{1,6})\.\s+(?=[a-z])',
-                re.MULTILINE,
-            )
-            full_text = self.text
-            # Also try Arabic numerals: "16. may i feel"
-            arabic_pattern = re.compile(
-                r'(?:^|\s)(\d{1,3})\.\s+(?=[a-zA-Z])',
-                re.MULTILINE,
-            )
-
-            # Find all matches and their positions
-            markers = []
-            for m in inline_pattern.finditer(full_text):
-                markers.append((m.start(), m.group(1), m.end()))
-            for m in arabic_pattern.finditer(full_text):
-                markers.append((m.start(), m.group(1), m.end()))
-            markers.sort(key=lambda x: x[0])
-
-            if len(markers) >= 3:
-                poems = []
-                for i, (start, numeral, text_start) in enumerate(markers):
-                    end = markers[i + 1][0] if i + 1 < len(markers) else len(full_text)
-                    body = full_text[text_start:end].strip()
-                    if len(body) < 20:
-                        continue
-                    poems.append({
-                        "title": numeral,
-                        "text": body,
-                        "index": len(poems),
-                    })
-
-        if len(poems) < 3:
-            # Fallback 2: Anthology format — author headings in ALL CAPS with dates
-            # Pattern: "SYLVIA PLATH (1932-1963)" followed by poem titles + page numbers
-            author_pattern = re.compile(
-                r'^([A-Z][A-Z\s\.\-\']{3,})\s*\(\s*(?:b\.\s*)?\d{4}\s*[-–]\s*(?:\d{4})?\s*\)',
-                re.MULTILINE,
-            )
-            author_matches = list(author_pattern.finditer(self.text))
-
-            if len(author_matches) >= 5:
-                poems = []
-                for i, am in enumerate(author_matches):
-                    author_name = am.group(1).strip().title()
-                    start = am.end()
-                    end = author_matches[i + 1].start() if i + 1 < len(author_matches) else len(self.text)
-                    author_section = self.text[start:end].strip()
-
-                    if not author_section or len(author_section) < 50:
-                        continue
-
-                    # Within each author's section, split on lines that look like poem titles
-                    # Pattern: Title Case words followed by a page number
-                    # "Daddy 1840" or "Morning Song 1837" or "The Colossus 1836"
-                    title_pattern = re.compile(
-                        r'^([A-Z][A-Za-z\s\'\"\,\-\.\:\;\!\?]+?)\s+\d{3,4}\s*$',
-                        re.MULTILINE,
-                    )
-                    title_matches = list(title_pattern.finditer(author_section))
-
-                    if title_matches:
-                        for j, tm in enumerate(title_matches):
-                            poem_title = tm.group(1).strip()
-                            # Skip if it's just the author name repeated or TOC-like
-                            if poem_title.upper() == poem_title or len(poem_title) < 3:
-                                continue
-                            p_start = tm.end()
-                            p_end = title_matches[j + 1].start() if j + 1 < len(title_matches) else len(author_section)
-                            body = author_section[p_start:p_end].strip()
-                            # Remove trailing page numbers
-                            body = re.sub(r'\s+\d{3,4}\s*$', '', body, flags=re.MULTILINE)
-                            if len(body) < 20:
-                                continue
-                            poems.append({
-                                "title": f"{poem_title} ({author_name})",
-                                "text": body,
-                                "index": len(poems),
-                                "author": author_name,
-                            })
-                    else:
-                        # No individual poem titles found — treat entire section as one entry
-                        poems.append({
-                            "title": f"Poems by {author_name}",
-                            "text": author_section,
-                            "index": len(poems),
-                            "author": author_name,
-                        })
-
-        if len(poems) < 3:
-            # Fallback 3: split on --- separators (EPUB file boundaries)
-            if '\n---\n' in self.text:
-                chunks = self.text.split('\n---\n')
-                poems = []
-                for i, chunk in enumerate(chunks):
-                    chunk = chunk.strip()
-                    if len(chunk) < 20:
-                        continue
-                    # Use first line as title
-                    first_lines = [l for l in chunk.split('\n') if l.strip()]
-                    if first_lines and len(first_lines[0]) < 60:
-                        title = first_lines[0].strip().lstrip('#').strip()
-                        body = '\n'.join(first_lines[1:]).strip() if len(first_lines) > 1 else chunk
-                    else:
-                        title = f"Poem {len(poems) + 1}"
-                        body = chunk
-                    if len(body) > 20:
-                        poems.append({"title": title, "text": body, "index": len(poems)})
-
-        if len(poems) < 3:
-            # Fallback 4: split on triple+ newlines
-            chunks = re.split(r'\n{3,}', self.text)
-            poems = []
-            for i, chunk in enumerate(chunks):
-                chunk = chunk.strip()
-                if len(chunk) < 20:
+        # Also try: long blocks (>500 chars) separated by double newlines with title-like first lines
+        blocks = re.split(r'\n\s*\n\s*\n', self.text)  # Triple newline = chapter break
+        if len(blocks) >= 3:
+            chapters = []
+            for block in blocks:
+                block = block.strip()
+                if len(block) < 200:
                     continue
-                lines = chunk.split('\n')
-                if len(lines[0]) < 60 and len(lines) > 2:
-                    title = lines[0].strip()
+                lines = block.split('\n')
+                first = lines[0].strip()
+                if len(first) < 60 and first[0:1].isupper() and len(lines) > 3:
+                    title = first
                     body = '\n'.join(lines[1:]).strip()
                 else:
-                    title = f"Poem {i + 1}"
-                    body = chunk
-                poems.append({"title": title, "text": body, "index": len(poems)})
+                    title = f"Chapter {len(chapters) + 1}"
+                    body = block
+                chapters.append({"title": title, "text": body, "index": len(chapters)})
+            if len(chapters) >= 3:
+                return chapters
+        return []
 
+    def _split_blank_line_poems(self) -> list[dict]:
+        """Strategy 7: Within-section splitting for collections like Dickinson.
+
+        Poems separated by blank lines where each poem starts with a capitalized line
+        and is 3-40 lines long.
+        """
+        # Split on double+ blank lines
+        blocks = re.split(r'\n\s*\n', self.text)
+        poems = []
+        for block in blocks:
+            block = block.strip()
+            if not block:
+                continue
+            lines = [l for l in block.split('\n') if l.strip()]
+            # A poem-like block: 2-50 lines, first line capitalized, not a heading
+            if 2 <= len(lines) <= 50 and lines[0][0:1].isupper() and not lines[0].startswith('#'):
+                title = lines[0][:50].rstrip(',;:—-').strip()
+                poems.append({"title": title, "text": block, "index": len(poems)})
+            elif len(lines) == 1 and len(lines[0]) > 30:
+                # Single long line = might be a prose paragraph, skip
+                continue
+        return poems if len(poems) >= 3 else []
+
+    def _split_triple_newlines(self) -> list[dict]:
+        """Final fallback: split on triple+ newlines."""
+        chunks = re.split(r'\n{3,}', self.text)
+        poems = []
+        for i, chunk in enumerate(chunks):
+            chunk = chunk.strip()
+            if len(chunk) < 20:
+                continue
+            lines = chunk.split('\n')
+            if len(lines[0]) < 60 and len(lines) > 2:
+                title = lines[0].strip()
+                body = '\n'.join(lines[1:]).strip()
+            else:
+                title = f"Section {len(poems) + 1}"
+                body = chunk
+            poems.append({"title": title, "text": body, "index": len(poems)})
         return poems
+
+    def _refine_large_sections(self, sections: list[dict]) -> list[dict]:
+        """Post-process: split very large sections into sub-poems if possible.
+
+        When a section is >10x the median size, try within-section splitting.
+        """
+        if not sections:
+            return sections
+        sizes = [len(s['text']) for s in sections]
+        median_size = sorted(sizes)[len(sizes) // 2]
+        if median_size < 100:
+            return sections  # All sections are small, no refinement needed
+
+        refined = []
+        for section in sections:
+            if len(section['text']) > median_size * 10 and len(section['text']) > 5000:
+                # Try to split this large section into sub-poems
+                sub_analyzer = LiteraryAnalyzer()
+                sub_analyzer.text = section['text']
+                sub_analyzer.mode = self.mode
+                sub_poems = sub_analyzer._split_blank_line_poems()
+                if len(sub_poems) >= 3:
+                    for sp in sub_poems:
+                        sp['index'] = len(refined)
+                        sp['parent_section'] = section['title']
+                        refined.append(sp)
+                    continue
+            refined.append(section)
+            section['index'] = len(refined) - 1
+        return refined
 
     def full_collection_analysis(self) -> dict:
         """Analyze a poetry collection — runs per-poem analysis then aggregates.
