@@ -59,6 +59,70 @@ from typing import Optional
 
 
 # ---------------------------------------------------------------------------
+# SMART TYPOGRAPHY (inspired by Crowbook)
+# ---------------------------------------------------------------------------
+
+def smart_typography(text: str, language: str = "en") -> str:
+    """Apply typographic enhancements to text.
+
+    - Straight quotes → smart/curly quotes
+    - Hyphens → proper dashes (em-dash, en-dash)
+    - Ellipsis normalization
+    - Non-breaking spaces (French typography)
+    - Clean excess whitespace
+    """
+    EM = '\u2014'   # —
+    EN = '\u2013'   # –
+    EL = '\u2026'   # …
+    LDQ = '\u201c'  # "
+    RDQ = '\u201d'  # "
+    LSQ = '\u2018'  # '
+    RSQ = '\u2019'  # '
+    NBSP = '\u00a0'
+
+    # Ellipsis: ... → …
+    text = text.replace('...', EL)
+
+    # Em-dash: --- or -- with spaces → —
+    text = re.sub(r'\s*---\s*', EM, text)
+    text = re.sub(r'\s*--\s*', EM, text)
+    # Standalone -- at word boundary → em-dash
+    text = text.replace('--', EM)
+
+    # En-dash: number ranges (1990-2000 → 1990–2000)
+    text = re.sub(r'(\d)-(\d)', rf'\1{EN}\2', text)
+
+    # Smart double quotes
+    # Opening: after whitespace/start or before word
+    text = re.sub(r'(^|[\s(\[{])"(\S)', rf'\1{LDQ}\2', text)
+    # Closing: after non-space before whitespace/end/punctuation
+    text = re.sub(rf'(\S)"([\s)\]}},.:;!?{EM}]|$)', rf'\1{RDQ}\2', text)
+    # Catch remaining straight doubles
+    text = text.replace('"', RDQ)
+
+    # Smart single quotes / apostrophes
+    # Apostrophe in contractions: don't, it's, '90s
+    text = re.sub(r"(\w)'(\w)", rf"\1{RSQ}\2", text)
+    # Opening single quote: after whitespace before word
+    text = re.sub(r"(^|[\s(\[{])'(\S)", rf"\1{LSQ}\2", text)
+    # Closing single quote
+    text = re.sub(rf"(\S)'([\s)\]}},.:;!?]|$)", rf"\1{RSQ}\2", text)
+
+    # French typography: non-breaking space before : ; ? !
+    if language.startswith("fr"):
+        text = re.sub(r'\s+([;:!?])', rf'{NBSP}\1', text)
+        text = re.sub(r'<<\s*', f'\u00ab{NBSP}', text)
+        text = re.sub(r'\s*>>', f'{NBSP}\u00bb', text)
+
+    # Clean multiple spaces (but preserve paragraph breaks)
+    text = re.sub(r'[ \t]{2,}', ' ', text)
+    # Fix space before punctuation
+    text = re.sub(r'\s+([.,;:!?])', r'\1', text)
+
+    return text
+
+
+# ---------------------------------------------------------------------------
 # DATA STRUCTURES
 # ---------------------------------------------------------------------------
 
@@ -831,8 +895,9 @@ class StudyEdition:
         if para.section_num:
             parts.append(f'<span class="section-num">{html.escape(para.section_num)}</span> ')
 
-        # Main text
-        text = html.escape(para.text)
+        # Main text — apply smart typography then HTML escape
+        text = smart_typography(para.text, language=getattr(self, 'language', 'en'))
+        text = html.escape(text)
         # Convert basic markdown-like formatting
         text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
         text = re.sub(r'\*(.+?)\*', r'<i>\1</i>', text)

@@ -72,6 +72,15 @@ def _esc(text: str) -> str:
     return escape(str(text or ""))
 
 
+def _smart_typo(text: str) -> str:
+    """Apply smart typography to text before HTML escaping."""
+    try:
+        from app.services.study_edition import smart_typography
+        return smart_typography(text)
+    except ImportError:
+        return text
+
+
 def _xhtml_wrap(title: str, body: str, css_href: str = "style.css") -> str:
     """Wrap content in valid XHTML for EPUB3."""
     return f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -89,8 +98,9 @@ def _xhtml_wrap(title: str, body: str, css_href: str = "style.css") -> str:
 
 
 def _md_to_html(text: str) -> str:
-    """Convert markdown-ish LLM output to basic HTML."""
+    """Convert markdown-ish LLM output to basic HTML with smart typography."""
     import re
+    text = _smart_typo(text)
     lines = text.split('\n')
     html_parts = []
     in_list = False
