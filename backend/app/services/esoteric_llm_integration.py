@@ -44,6 +44,163 @@ IMPORTANT METHODOLOGICAL NOTES:
 - Your goal is to help the reader see what a careful, historically informed reader would see."""
 
 
+def _load_stages_template() -> str:
+    """Load the 40-stage analysis template.
+
+    Tries to read from the reference llm_esoteric_prompt.md file first,
+    falling back to a compact embedded version.
+    """
+    # Try loading from file (for development/customization)
+    import os
+    for search_path in [
+        os.path.join(os.path.dirname(__file__), '..', '..', '..', 'llm_esoteric_prompt.md'),
+        os.path.join(os.path.dirname(__file__), '..', '..', 'llm_esoteric_prompt.md'),
+        'llm_esoteric_prompt.md',
+    ]:
+        try:
+            p = os.path.abspath(search_path)
+            if os.path.exists(p):
+                with open(p, encoding='utf-8') as f:
+                    content = f.read()
+                # Extract just the stages section (from "YOUR TASK" to end)
+                idx = content.find("YOUR TASK:")
+                if idx >= 0:
+                    return content[idx:]
+                # Try alternate marker
+                idx = content.find("## STAGE 1")
+                if idx >= 0:
+                    return "YOUR TASK: Perform a deep esoteric reading guided by the computational findings above.\n\n" + content[idx:]
+        except Exception:
+            continue
+
+    # Fallback: compact embedded stages
+    return """YOUR TASK: Perform a deep esoteric reading of this text, guided by the 56-tool \
+computational findings above. Proceed through ALL of the following stages:
+
+## STAGE 1: LITERAL SURFACE READING
+Describe the exoteric argument. What does the text appear to say? Who is the audience?
+
+## STAGE 2: CONTRADICTION ANALYSIS
+Examine contradictions. Per Strauss: the less emphatic statement is likelier true. \
+Per Maimonides: 5th cause (pedagogy) or 7th cause (concealment)?
+
+## STAGE 3: STRUCTURAL ANALYSIS
+Center placement, ring/chiastic structure, numerological patterns, lexical density.
+
+## STAGE 4: SILENCE AND OMISSION
+Why are expected topics absent? Does silence constitute a negative argument?
+
+## STAGE 5: IRONY AND INDIRECT COMMUNICATION
+Hedging, excessive praise, conditional language, qualifier-to-assertion ratio.
+
+## STAGE 6: DIGRESSIONS AND SCATTERED ARGUMENTS
+Per Maimonides: "combine scattered chapters." Do digressions yield a hidden argument?
+
+## STAGE 7: SOURCE AND AUTHORITY ANALYSIS
+Scare quotes, parenthetical asides, commentary divergence, distorted citations.
+
+## STAGE 8: VOICE AND PERSONA (KIERKEGAARD)
+Stylistic shifts between sections. Multiple voices? Indirect communication?
+
+## STAGE 9: REGISTER ANALYSIS (AVERROES)
+Rhetorical/dialectical/demonstrative modes. Where does the demonstrative register appear?
+
+## STAGE 10: LOGOS/MYTHOS (PLATO)
+Transitions between argument and myth/narrative. Myth at the boundary of reason.
+
+## STAGE 11: MULTI-LEVEL READING (DANTE/KABBALAH)
+Literal, allegorical, moral, anagogical. Peshat/Remez/Derash/Sod.
+
+## STAGE 12: MASK AND SELF-REFERENCE (NIETZSCHE)
+Self-referential concealment. Does the text announce its own esotericism?
+
+## STAGE 13: ACROSTIC AND STEGANOGRAPHIC PATTERNS
+First/last letter patterns, numerological structure counts.
+
+## STAGE 14: TRAPDOOR ANALYSIS (BENARDETE)
+Hedged absolutes, non-sequiturs, local impossibilities. What lies beneath?
+
+## STAGE 15: DYADIC STRUCTURE (BENARDETE)
+Binary oppositions converging. Conjunctive→disjunctive two. Phantom images.
+
+## STAGE 16: PERIAGOGE (BENARDETE)
+Second half inverting/deepening the first. The philosophical "turning." Pathei mathos.
+
+## STAGE 17: LOGOS-ERGON (BENARDETE)
+Speech vs deed. The argument IN the action. Burstlike vs filamentlike arguments.
+
+## STAGE 18: ONOMASTIC ANALYSIS (BENARDETE)
+Names as philosophical arguments. Etymological commentary. The outis/metis pun.
+
+## STAGE 19: RECOGNITION SCENE (BENARDETE)
+Concealment→test→reveal. Identity achieved through narrative, not given.
+
+## STAGE 20: NOMOS-PHYSIS (HERODOTEAN METHOD)
+Convention vs nature. Alien customs revealing problematic assumptions.
+
+## STAGE 21: IMPOSSIBLE ARITHMETIC (BENARDETE)
+One=many, same=different. The poet's dialectic. Truth in two spurious forms.
+
+## STAGE 22: RHETORIC OF CONCEALMENT (ROSEN)
+Hidden design beneath disorder. Defensive maneuvering. The disheveled surface.
+
+## STAGE 23: TRANSCENDENTAL AMBIGUITY (ROSEN)
+Deliberately unresolved double meanings. Ambiguity as condition of possibility.
+
+## STAGE 24: RHETORIC OF FRANKNESS (ROSEN)
+Performative transparency as concealment. "Dare to know" as rhetoric.
+
+## STAGE 25: INTUITION-ANALYSIS DIALECTIC (ROSEN)
+Appeals to non-discursive knowing. Limits of formalization. Winke (hints).
+
+## STAGE 26: LOGOGRAPHIC NECESSITY (BENARDETE)
+Form carries the logos. Dramatic constraints as philosophical content.
+
+## STAGE 27: THEOLOGICAL DISAVOWAL (ROSEN)
+Theology disguised as philosophy. Philosophical substitutes for religious concepts.
+
+## STAGE 28: DEFENSIVE WRITING (ROSEN/STRAUSS)
+Preemptive rebuttals, disclaimers, appeals to orthodoxy. Defensive layering.
+
+## STAGE 29: NATURE-FREEDOM OSCILLATION (ROSEN)
+Systematic alternation between necessity and freedom. The oscillation IS the insight.
+
+## STAGE 30: POSTMODERN MISREADING VULNERABILITY (ROSEN)
+What would deconstruction latch onto? What would it miss? What resists appropriation?
+
+## STAGE 31: DRAMATIC CONTEXT (ROSEN/SYMPOSIUM)
+Speaker identity, setting, occasion. Arguments enabled/foreclosed by dramatic situation.
+
+## STAGE 32: SPEECH SEQUENCING (ROSEN/SYMPOSIUM)
+Successive sections building/transforming each other. Does sequence matter?
+
+## STAGE 33: PHILOSOPHICAL COMEDY (ROSEN/SYMPOSIUM)
+Serious philosophy in comic form. Laughter as philosophical instrument.
+
+## STAGE 34: DAIMONIC MEDIATION (ROSEN/SYMPOSIUM)
+Intermediate beings/concepts bridging opposites. Neither/nor positions.
+
+## STAGE 35: MEDICINAL RHETORIC (ROSEN/SYMPOSIUM)
+Speech adapted to the listener's soul. Graduated disclosure. Truth in measured doses.
+
+## STAGE 36: POETRY-PHILOSOPHY DIALECTIC (ROSEN/SYMPOSIUM)
+The ancient quarrel. The same person writing comedy and tragedy.
+
+## STAGE 37: ASPIRATION-ACHIEVEMENT GAP (ROSEN/SYMPOSIUM)
+Philosophy as permanent unfulfilled desire. Unresolved tensions as feature, not bug.
+
+## STAGE 38: SYNOPTIC REQUIREMENT (ROSEN/SYMPOSIUM)
+Full understanding requires the wider corpus. Deliberate incompleteness.
+
+## STAGE 39: THE ESOTERIC ARGUMENT
+Reconstruct: 1) Exoteric teaching 2) Esoteric teaching 3) Methods of concealment \
+4) Evidence 5) Motive (Melzer's four types) 6) Confidence level
+
+## STAGE 40: SAFEGUARDS AGAINST OVER-READING
+Does your reading produce MORE coherence? Is evidence convergent? \
+Could patterns be accidental? What would DISPROVE your reading?"""
+
+
 def build_integrated_prompt(
     text: str,
     computational_results: dict,
@@ -66,6 +223,10 @@ def build_integrated_prompt(
 
     excerpt = text[:max_text_chars]
 
+    # Load the full 40-stage prompt from the reference file if available,
+    # otherwise use the embedded version
+    stages_text = _load_stages_template()
+
     prompt = f"""## TEXT BEING ANALYZED
 
 **Title:** {title}
@@ -75,96 +236,13 @@ def build_integrated_prompt(
 
 ---
 
-## COMPUTATIONAL PRE-ANALYSIS FINDINGS
+## COMPUTATIONAL PRE-ANALYSIS FINDINGS (56 tools)
 
 {findings_context}
 
 ---
 
-## YOUR TASK: 9-STAGE ESOTERIC ANALYSIS
-
-### STAGE 1: LITERAL SURFACE READING
-Describe the text's apparent (exoteric) argument — what it seems to say on the surface. \
-What is its declared subject, stated thesis, overt conclusions? Who is the apparent intended audience?
-
-### STAGE 2: CONTRADICTION ANALYSIS
-Examine the computationally flagged contradictions and sentiment inversions above. For each:
-- Is this a genuine contradiction, or can it be harmonized?
-- If genuine: which statement is more emphatic/public, and which is more hidden/qualified?
-- Per Strauss: the less emphatic, more hidden statement is likelier to represent the author's true view.
-- Does this fall under Maimonides' 5th cause (pedagogical simplification) or 7th cause (necessary concealment)?
-
-### STAGE 3: STRUCTURAL ANALYSIS
-Examine the text's architecture using the computational findings:
-- What is placed at the STRUCTURAL CENTER?
-- Does it exhibit RING or CHIASTIC structure?
-- Are there numerologically significant structural features?
-- Which sections have the highest lexical density (most carefully written)?
-
-### STAGE 4: SILENCE AND OMISSION
-Based on the loud silence detector findings:
-- Why might the author have omitted flagged topics?
-- Does the silence constitute a "negative argument"?
-
-### STAGE 5: IRONY AND INDIRECT COMMUNICATION
-Using the hedging language, conditional language, and excessive praise findings:
-- Where does the author hedge on central claims?
-- Where does emphatic praise suggest "protesting too much"?
-- Are there passages where qualifier-to-assertion ratio is unusually high?
-
-### STAGE 6: DIGRESSIONS AND SCATTERED ARGUMENTS
-Using the structural obscurity findings:
-- Do flagged digressions carry content that, when reassembled (per Maimonides), yields a hidden argument?
-- Are digressions at structurally significant locations?
-
-### STAGE 7: SOURCE AND AUTHORITY ANALYSIS
-Using the emphasis/quotation, parenthetical, and commentary divergence findings:
-- What words does the author put in scare quotes or italics?
-- What do parenthetical asides reveal when isolated from their context?
-- Are cited authorities being used sincerely or subversively?
-- Where does the author's commentary diverge from the cited source?
-
-### STAGE 7B: BENARDETE ANALYSIS — THE ARGUMENT IN THE ACTION
-Using the logos-ergon, trapdoor, dyadic structure, periagoge, recognition, onomastic, nomos-physis, and impossible arithmetic findings:
-
-**Speech vs. Deed:** Where does what is SAID contradict what is DONE or DESCRIBED? \
-What is the "argument in the action" that cannot be reduced to propositional summary?
-
-**Trapdoors:** Which local impossibilities (hedged absolutes, non-sequiturs, nearby negation reversals) \
-are deliberate flaws planted to force the reader beneath the surface?
-
-**Periagoge (Structural Reversal):** Does the text's second half invert or deepen its first half's conclusions? \
-Where is the "turning point" — the philosophical conversion analogous to the cave-dweller's wrenching toward light?
-
-**Dyadic Structure:** Which binary oppositions recur? Do they converge later (conjunctive → disjunctive two)? \
-Are there "phantom images" — split appearances hiding a single reality?
-
-**Recognition Pattern:** Does the text move from concealment → testing → revelation? \
-Does the reader undergo discovery rather than being told the conclusion?
-
-**Significant Names:** Do names carry philosophical weight? Are there etymological arguments?
-
-**Nomos-Physis:** Is the text grappling with convention vs. nature? Does it use alien/foreign customs \
-to reveal the problematic character of familiar assumptions?
-
-**Impossible Arithmetic:** Where does the text present productive impossibilities — \
-one = many, same = different — that the argument resolves dramatically rather than logically?
-
-### STAGE 8: THE ESOTERIC ARGUMENT
-Reconstruct the text's esoteric teaching:
-1. **The exoteric teaching** (what the text appears to say)
-2. **The esoteric teaching** (what it actually communicates to the careful reader)
-3. **The methods of concealment** (which techniques, citing historical precedent)
-4. **The evidence** (specific textual passages)
-5. **The motive** (defensive, protective, pedagogical, or political esotericism per Melzer)
-6. **Confidence level** (how strong is the case?)
-
-### STAGE 9: SAFEGUARDS AGAINST OVER-READING
-Critically evaluate your own esoteric reading:
-- Does it produce a MORE coherent interpretation than the surface reading?
-- Is the evidence convergent (multiple methods pointing to the same conclusion)?
-- Could the patterns be explained by accident, editorial history, or genre conventions?
-- What would DISPROVE your esoteric reading?
+{stages_text}
 
 Begin your analysis now."""
 
@@ -407,13 +485,14 @@ async def run_integrated_analysis(
 
 def _extract_stages(content: str) -> dict:
     """Extract individual stages from the LLM response for structured storage."""
+    import re as _re
     stages = {}
     stage_pattern = r'###?\s*STAGE\s*(\d+)[:\s]*([^\n]*)\n(.*?)(?=###?\s*STAGE\s*\d+|$)'
-    for match in __import__('re').finditer(stage_pattern, content, __import__('re').DOTALL):
+    for match in _re.finditer(stage_pattern, content, _re.DOTALL):
         num = int(match.group(1))
         title = match.group(2).strip()
         body = match.group(3).strip()
-        stages[f"stage_{num}"] = {"title": title, "content": body[:2000]}
+        stages[f"stage_{num}"] = {"title": title, "content": body[:3000]}
     return stages
 
 
