@@ -13,13 +13,26 @@ logger = logging.getLogger(__name__)
 
 
 INTEGRATED_SYSTEM_PROMPT = """You are a scholar trained in the tradition of esoteric textual interpretation, \
-drawing on the methods of Leo Strauss ("Persecution and the Art of Writing"), Arthur Melzer \
-("Philosophy Between the Lines"), and the broader tradition including Maimonides, Al-Farabi, \
-Francis Bacon, Clement of Alexandria, and the Pythagorean/Kabbalistic numerological traditions.
+drawing on the methods of:
+- Leo Strauss ("Persecution and the Art of Writing")
+- Arthur Melzer ("Philosophy Between the Lines")
+- Seth Benardete ("The Argument of the Action", "Socrates' Second Sailing", "The Bow and the Lyre")
+- Maimonides, Al-Farabi, Francis Bacon, Clement of Alexandria
+- The Pythagorean/Kabbalistic numerological traditions
 
-You have been provided with COMPUTATIONAL PRE-ANALYSIS findings. These are starting points, \
-not conclusions. Your task is to perform a deep esoteric reading guided by these findings \
-but going far beyond them.
+You are especially attentive to Benardete's methods:
+- The "argument IN the action" — what the text DOES vs. what it SAYS
+- Trapdoors — intentional local flaws that force deeper reading
+- Periagoge — structural reversal where the second half inverts the first
+- Dyadic structure — binary oppositions that converge (conjunctive → disjunctive two)
+- Recognition scenes — concealment → test → reveal patterns
+- Onomastic analysis — names as compressed philosophical arguments
+- Nomos-physis — the convention/nature tension beneath every argument
+- Impossible arithmetic — productive paradoxes where one = many
+
+You have been provided with COMPUTATIONAL PRE-ANALYSIS findings from 35 analytical tools. \
+These are starting points, not conclusions. Your task is to perform a deep esoteric reading \
+guided by these findings but going far beyond them.
 
 IMPORTANT METHODOLOGICAL NOTES:
 - You are looking for DELIBERATE concealment by a skilled author, not random noise.
@@ -27,6 +40,7 @@ IMPORTANT METHODOLOGICAL NOTES:
 - Esoteric reading is "a form of rhetoric" (Melzer), not a mechanical procedure.
 - The computational findings are STARTING POINTS, not conclusions.
 - The literal surface reading is the FOUNDATION (per Melzer: take the surface with extreme seriousness).
+- Per Benardete: "the surface of things is the heart of things" — the dramatic/narrative surface IS philosophically constitutive.
 - Your goal is to help the reader see what a careful, historically informed reader would see."""
 
 
@@ -104,10 +118,37 @@ Using the structural obscurity findings:
 - Are digressions at structurally significant locations?
 
 ### STAGE 7: SOURCE AND AUTHORITY ANALYSIS
-Using the emphasis/quotation and parenthetical findings:
+Using the emphasis/quotation, parenthetical, and commentary divergence findings:
 - What words does the author put in scare quotes or italics?
 - What do parenthetical asides reveal when isolated from their context?
 - Are cited authorities being used sincerely or subversively?
+- Where does the author's commentary diverge from the cited source?
+
+### STAGE 7B: BENARDETE ANALYSIS — THE ARGUMENT IN THE ACTION
+Using the logos-ergon, trapdoor, dyadic structure, periagoge, recognition, onomastic, nomos-physis, and impossible arithmetic findings:
+
+**Speech vs. Deed:** Where does what is SAID contradict what is DONE or DESCRIBED? \
+What is the "argument in the action" that cannot be reduced to propositional summary?
+
+**Trapdoors:** Which local impossibilities (hedged absolutes, non-sequiturs, nearby negation reversals) \
+are deliberate flaws planted to force the reader beneath the surface?
+
+**Periagoge (Structural Reversal):** Does the text's second half invert or deepen its first half's conclusions? \
+Where is the "turning point" — the philosophical conversion analogous to the cave-dweller's wrenching toward light?
+
+**Dyadic Structure:** Which binary oppositions recur? Do they converge later (conjunctive → disjunctive two)? \
+Are there "phantom images" — split appearances hiding a single reality?
+
+**Recognition Pattern:** Does the text move from concealment → testing → revelation? \
+Does the reader undergo discovery rather than being told the conclusion?
+
+**Significant Names:** Do names carry philosophical weight? Are there etymological arguments?
+
+**Nomos-Physis:** Is the text grappling with convention vs. nature? Does it use alien/foreign customs \
+to reveal the problematic character of familiar assumptions?
+
+**Impossible Arithmetic:** Where does the text present productive impossibilities — \
+one = many, same = different — that the argument resolves dramatically rather than logically?
 
 ### STAGE 8: THE ESOTERIC ARGUMENT
 Reconstruct the text's esoteric teaching:
@@ -229,6 +270,95 @@ def _format_computational_findings(results: dict) -> str:
                 parts.append(f"- First: {first[:100]}...")
             if last:
                 parts.append(f"- Last: {last[:100]}...")
+
+    # ── Benardete Methods ──
+
+    # Trapdoors
+    trap = results.get("trapdoors", {})
+    if isinstance(trap, dict) and trap.get("total_trapdoors", 0) > 0:
+        parts.append(f"\n**Benardete Trapdoors:** {trap['total_trapdoors']} detected")
+        for t in trap.get("hedge_near_absolute", [])[:3]:
+            parts.append(f"- Hedge near absolute at sentence {t.get('sentence', '?')}: {t.get('excerpt', '')[:80]}...")
+        for t in trap.get("local_contradictions", [])[:2]:
+            parts.append(f"- Local contradiction: sentences {t.get('sentence_a', '?')}-{t.get('sentence_b', '?')}")
+        for t in trap.get("non_sequiturs", [])[:2]:
+            parts.append(f"- Non-sequitur at sentence {t.get('sentence', '?')}: {t.get('excerpt', '')[:60]}...")
+
+    # Periagoge
+    peri = results.get("periagoge", {})
+    if isinstance(peri, dict) and peri.get("score", 0) > 0:
+        parts.append(f"\n**Periagoge (Structural Reversal):** polarity shift={peri.get('polarity_shift', 0):.3f}")
+        parts.append(f"- First half polarity: {peri.get('first_half_polarity', 0):.3f}, Second: {peri.get('second_half_polarity', 0):.3f}")
+        parts.append(f"- Turning vocabulary density at center: {peri.get('turning_vocabulary_density', 0):.5f}")
+        for s in peri.get("vocabulary_shifts", [])[:3]:
+            parts.append(f"- '{s.get('word', '?')}' {s.get('direction', '?')} ({s.get('shift', 0):.5f})")
+
+    # Dyadic Structure
+    dyad = results.get("dyadic_structure", {})
+    if isinstance(dyad, dict) and dyad.get("total_pairs", 0) > 5:
+        parts.append(f"\n**Dyadic Structure:** {dyad['total_pairs']} binary pairs")
+        for p in dyad.get("recurring_pairs", [])[:3]:
+            parts.append(f"- {p.get('pair', '?')} × {p.get('count', 0)}")
+        if dyad.get("convergences"):
+            parts.append(f"- {len(dyad['convergences'])} convergences detected (conjunctive → disjunctive)")
+        if dyad.get("phantom_passages"):
+            parts.append(f"- {len(dyad['phantom_passages'])} phantom image passages")
+
+    # Logos-Ergon
+    le = results.get("logos_ergon", {})
+    if isinstance(le, dict) and le.get("mismatch_count", 0) > 0:
+        parts.append(f"\n**Logos-Ergon (Speech-Deed):** {le['mismatch_count']} mismatches, {le.get('burstlike_shifts', 0)} burstlike shifts")
+        for m in le.get("mismatches", [])[:2]:
+            parts.append(f"- Section {m.get('section', '?')}: speech={m.get('speech', 0):.4f} action={m.get('action', 0):.4f}")
+
+    # Recognition Structure
+    rec = results.get("recognition_structure", {})
+    if isinstance(rec, dict) and rec.get("phase_densities"):
+        ideal = rec.get("ideal_pattern", False)
+        parts.append(f"\n**Recognition Pattern (Conceal→Test→Reveal):** {'IDEAL pattern detected' if ideal else 'non-ideal pattern'}")
+        for i, label in enumerate(["First third", "Middle third", "Final third"]):
+            d = rec["phase_densities"][i]
+            parts.append(f"- {label}: conceal={d.get('concealment', 0):.5f} test={d.get('testing', 0):.5f} reveal={d.get('revelation', 0):.5f}")
+
+    # Onomastic
+    ono = results.get("onomastic", {})
+    if isinstance(ono, dict) and ono.get("naming_passages"):
+        parts.append(f"\n**Onomastic (Name-Meaning):** {len(ono['naming_passages'])} etymological passages, density={ono.get('naming_density', 0):.5f}")
+        for p in ono.get("naming_passages", [])[:3]:
+            parts.append(f"- {p.get('excerpt', '')[:80]}...")
+
+    # Nomos-Physis
+    np_ = results.get("nomos_physis", {})
+    if isinstance(np_, dict) and np_.get("co_occurrence_count", 0) > 0:
+        parts.append(f"\n**Nomos-Physis (Convention vs Nature):** {np_['co_occurrence_count']} co-occurrences")
+        parts.append(f"- Nomos density: {np_.get('nomos_density', 0):.5f}, Physis: {np_.get('physis_density', 0):.5f}")
+
+    # Impossible Arithmetic
+    ia = results.get("impossible_arithmetic", {})
+    if isinstance(ia, dict) and ia.get("passage_count", 0) > 0:
+        parts.append(f"\n**Impossible Arithmetic (Poetic Dialectic):** {ia['passage_count']} passages, {ia.get('impossible_yet_true', 0)} 'impossible yet true'")
+        for p in ia.get("passages", [])[:2]:
+            parts.append(f"- Sentence {p.get('sentence', '?')}: {p.get('excerpt', '')[:80]}...")
+
+    # Voice shifts
+    vs = results.get("voice_shifts", {})
+    if isinstance(vs, dict) and vs.get("total_shifts", 0) > 0:
+        parts.append(f"\n**Voice/Persona Shifts:** {vs['total_shifts']} detected")
+
+    # Register tiers
+    rt = results.get("register_tiers", {})
+    if isinstance(rt, dict) and rt.get("tier_distribution"):
+        parts.append(f"\n**Register Tiers (Averroes):** {rt['tier_distribution']}")
+
+    # Acrostics
+    acr = results.get("acrostics", {})
+    if isinstance(acr, dict) and acr.get("total_findings", 0) > 0:
+        parts.append(f"\n**Acrostic Patterns:** {acr['total_findings']} findings")
+
+    # Hapax legomena
+    hap = results.get("hapax_legomena", {})
+    if isinstance(hap, dict) and hap.get("philosophical_hapax"):
+        parts.append(f"\n**Philosophical Hapax (words used exactly once):** {', '.join(hap['philosophical_hapax'][:10])}")
 
     return "\n".join(parts) if parts else "No significant computational findings."
 
