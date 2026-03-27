@@ -2865,6 +2865,198 @@ class LiteraryAnalyzer:
         }
 
     # ==================================================================
+    # COLLECTION / POEM SPLITTING
+    # ==================================================================
+
+    def split_poems(self) -> list[dict]:
+        """Split a poetry collection into individual poems.
+
+        Detects poem boundaries via:
+        - Roman numeral headings (## iii., ## xvi., etc.)
+        - Arabic numeral headings (## 16., 72., etc.)
+        - Markdown headings that look like poem titles
+        - Large gaps between stanza groups
+
+        Returns list of {"title": str, "text": str, "index": int}
+        """
+        # Try heading-based splitting first
+        # Match: ## iii. or ## xvi. or ## 16. or ## iv. or numbered like "72."
+        poem_pattern = re.compile(
+            r'^##\s+'
+            r'(?:'
+            r'[ivxlcdm]+\.'           # Roman numeral with dot
+            r'|[ivxlcdm]+$'           # Roman numeral without dot
+            r'|\d{1,3}\.'             # Arabic numeral with dot
+            r'|[A-Z][a-z].*'          # Capitalized title
+            r')',
+            re.MULTILINE | re.IGNORECASE,
+        )
+
+        # Split on poem headings
+        parts = poem_pattern.split(self.text)
+        headings = poem_pattern.findall(self.text)
+
+        poems = []
+        if len(headings) >= 3:  # At least 3 poems detected via markdown headings
+            for i, heading in enumerate(headings):
+                body = parts[i + 1].strip() if i + 1 < len(parts) else ""
+                if not body or len(body) < 20:
+                    continue
+                title = heading.strip().lstrip('#').strip().rstrip('.')
+                poems.append({
+                    "title": title or f"Poem {len(poems) + 1}",
+                    "text": body,
+                    "index": len(poems),
+                })
+
+        if len(poems) < 3:
+            # Fallback 1: split on inline Roman numeral markers (e.g., "xvi. between the breasts")
+            # Common in poetry collections where poems run together
+            inline_pattern = re.compile(
+                r'(?:^|\s)([ivxlcdm]{1,6})\.\s+(?=[a-z])',
+                re.MULTILINE,
+            )
+            full_text = self.text
+            # Also try Arabic numerals: "16. may i feel"
+            arabic_pattern = re.compile(
+                r'(?:^|\s)(\d{1,3})\.\s+(?=[a-zA-Z])',
+                re.MULTILINE,
+            )
+
+            # Find all matches and their positions
+            markers = []
+            for m in inline_pattern.finditer(full_text):
+                markers.append((m.start(), m.group(1), m.end()))
+            for m in arabic_pattern.finditer(full_text):
+                markers.append((m.start(), m.group(1), m.end()))
+            markers.sort(key=lambda x: x[0])
+
+            if len(markers) >= 3:
+                poems = []
+                for i, (start, numeral, text_start) in enumerate(markers):
+                    end = markers[i + 1][0] if i + 1 < len(markers) else len(full_text)
+                    body = full_text[text_start:end].strip()
+                    if len(body) < 20:
+                        continue
+                    poems.append({
+                        "title": numeral,
+                        "text": body,
+                        "index": len(poems),
+                    })
+
+        if len(poems) < 3:
+            # Fallback 2: split on triple+ newlines
+            chunks = re.split(r'\n{3,}', self.text)
+            poems = []
+            for i, chunk in enumerate(chunks):
+                chunk = chunk.strip()
+                if len(chunk) < 20:
+                    continue
+                lines = chunk.split('\n')
+                if len(lines[0]) < 60 and len(lines) > 2:
+                    title = lines[0].strip()
+                    body = '\n'.join(lines[1:]).strip()
+                else:
+                    title = f"Poem {i + 1}"
+                    body = chunk
+                poems.append({"title": title, "text": body, "index": len(poems)})
+
+        return poems
+
+    def full_collection_analysis(self) -> dict:
+        """Analyze a poetry collection — runs per-poem analysis then aggregates.
+
+        Returns:
+        {
+            "collection_title": str,
+            "mode": str,
+            "poem_count": int,
+            "poems": [{"title": str, "composite_score": float, "analyses": {...}}, ...],
+            "collection_summary": {
+                "avg_composite": float,
+                "dominant_meter": str,
+                "dominant_tone": str,
+                "common_imagery": list,
+                "formal_range": str,
+                ...
+            }
+        }
+        """
+        poems = self.split_poems()
+        if not poems:
+            # Not a collection — run single analysis
+            return self.full_analysis()
+
+        poem_results = []
+        all_meters = []
+        all_tones = []
+        all_forms = []
+        all_scores = []
+        all_imagery = Counter()
+
+        for poem in poems:
+            # Create a fresh analyzer for each poem
+            pa = LiteraryAnalyzer()
+            pa.load_text_string(poem["text"], title=poem["title"])
+            pa.set_mode(self.mode)
+            try:
+                result = pa.full_analysis()
+                poem_results.append({
+                    "title": poem["title"],
+                    "index": poem["index"],
+                    "composite_score": result.get("composite_literary_score", 0),
+                    "score_interpretation": result.get("score_interpretation", ""),
+                    "analyses": result.get("analyses", {}),
+                    "text_statistics": result.get("text_statistics", {}),
+                })
+                all_scores.append(result.get("composite_literary_score", 0))
+
+                # Aggregate
+                meter = result.get("analyses", {}).get("meter", {})
+                if meter.get("dominant_pattern"):
+                    all_meters.append(meter["dominant_pattern"])
+
+                tone = result.get("analyses", {}).get("tone", {})
+                if tone.get("dominant_tone"):
+                    all_tones.append(tone["dominant_tone"])
+
+                form = result.get("analyses", {}).get("fixed_form", {})
+                if form.get("best_match"):
+                    all_forms.append(form["best_match"])
+
+                img = result.get("analyses", {}).get("image_clustering", {})
+                if img.get("domain_counts"):
+                    for domain, count in img["domain_counts"].items():
+                        all_imagery[domain] += count
+
+            except Exception as e:
+                poem_results.append({
+                    "title": poem["title"],
+                    "index": poem["index"],
+                    "error": str(e),
+                })
+
+        # Collection summary
+        summary = {
+            "avg_composite": round(sum(all_scores) / max(len(all_scores), 1), 3),
+            "max_composite": round(max(all_scores) if all_scores else 0, 3),
+            "min_composite": round(min(all_scores) if all_scores else 0, 3),
+            "dominant_meter": Counter(all_meters).most_common(1)[0][0] if all_meters else "varied",
+            "dominant_tone": Counter(all_tones).most_common(1)[0][0] if all_tones else "varied",
+            "forms_used": dict(Counter(all_forms).most_common(5)),
+            "dominant_imagery": all_imagery.most_common(5),
+            "formal_range": f"{len(set(all_forms))} distinct forms across {len(poems)} poems",
+        }
+
+        return {
+            "collection_title": self.title,
+            "mode": self.mode,
+            "poem_count": len(poems),
+            "poems": poem_results,
+            "collection_summary": summary,
+        }
+
+    # ==================================================================
     # FULL ANALYSIS
     # ==================================================================
 
