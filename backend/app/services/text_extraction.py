@@ -780,9 +780,9 @@ async def extract_text_from_book(
     # Check for cached markdown first
     if output_format == "markdown" and llm_optimize:
         try:
-            from app.services.markdown import has_cached_markdown, markdown_path_for
+            from app.services.markdown import has_cached_markdown, markdown_path_for, strip_yaml_frontmatter
             if hasattr(book, 'uuid') and has_cached_markdown(book.uuid):
-                text = markdown_path_for(book.uuid).read_text(encoding="utf-8")
+                text = strip_yaml_frontmatter(markdown_path_for(book.uuid).read_text(encoding="utf-8"))
                 return truncate_text(text, max_chars)
         except Exception:
             pass  # Fall through to live extraction

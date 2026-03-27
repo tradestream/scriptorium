@@ -900,7 +900,8 @@ def _run_bulk_esoteric(
                 # Get text — prefer cached markdown
                 text = None
                 if has_cached_markdown(row["uuid"]):
-                    text = markdown_path_for(row["uuid"]).read_text(encoding="utf-8")
+                    from app.services.markdown import strip_yaml_frontmatter
+                    text = strip_yaml_frontmatter(markdown_path_for(row["uuid"]).read_text(encoding="utf-8"))
                 else:
                     # Extract from file
                     frow = conn.execute("""

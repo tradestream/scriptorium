@@ -415,3 +415,150 @@ def _extract_stages(content: str) -> dict:
         body = match.group(3).strip()
         stages[f"stage_{num}"] = {"title": title, "content": body[:2000]}
     return stages
+
+
+# ── Highlight-Based Prompts ──────────────────────────────────────────────────
+# Inspired by Readwise Ghostreader — use reader's own highlights/annotations
+# as the basis for targeted LLM analysis.
+
+
+HIGHLIGHT_PROMPTS = {
+    "esoteric_highlights": {
+        "name": "Esoteric Highlight Analysis",
+        "system": INTEGRATED_SYSTEM_PROMPT,
+        "template": """The reader has highlighted the following passages from "{title}" by {author}.
+Analyze these specific highlights through the lens of esoteric writing:
+
+## HIGHLIGHTED PASSAGES
+
+{highlights}
+
+---
+
+For each highlight:
+1. Why might the reader have flagged this passage?
+2. Does it contain esoteric signals (hedging, contradiction, irony, excessive praise)?
+3. What is the relationship between the highlighted passage and its surrounding context?
+4. Does the highlight sit at a structurally significant position (center, opening, closing)?
+
+Then synthesize:
+5. What pattern emerges across ALL the highlights taken together?
+6. Do the highlights, when read as a sequence, reveal an argument not visible on the surface?
+7. What passages SHOULD the reader have highlighted but didn't?""",
+    },
+
+    "socratic_questions": {
+        "name": "Socratic Questions from Highlights",
+        "system": "You are a Socratic interlocutor. Your role is to generate probing questions \
+that challenge the reader's understanding and push toward deeper insight. Never provide answers — \
+only questions that the careful reader must think through.",
+        "template": """Based on these highlighted passages from "{title}" by {author}:
+
+{highlights}
+
+Generate 10 Socratic questions that:
+1. Challenge the surface meaning of each highlight
+2. Expose tensions between different highlighted passages
+3. Ask what the author DIDN'T say in the vicinity of each highlight
+4. Push the reader to consider why the author chose THESE specific words
+5. Connect the highlights to the broader argument of the work
+
+Format each question with the relevant highlight excerpt.""",
+    },
+
+    "contradiction_map": {
+        "name": "Contradiction Map from Highlights",
+        "system": "You are an expert in detecting contradictions in philosophical texts, \
+following the methods of Maimonides (7th cause) and Leo Strauss.",
+        "template": """The reader has highlighted these passages from "{title}" by {author}:
+
+{highlights}
+
+For each pair of highlights that could be in tension:
+1. State the apparent contradiction
+2. Is it reconcilable or genuine?
+3. If genuine: which statement is more emphatic (exoteric) and which more hidden (esoteric)?
+4. What does the contradiction teach us about the author's real position?
+5. Does it fall under Maimonides' 5th cause (pedagogy) or 7th cause (concealment)?""",
+    },
+
+    "missing_highlights": {
+        "name": "What You Missed",
+        "system": "You are a careful reader trained in esoteric interpretation. The user has \
+shared their highlights, but a careful reader would have noticed additional passages.",
+        "template": """The reader highlighted these passages from "{title}" by {author}:
+
+{highlights}
+
+Now examine the FULL TEXT below and identify 5-10 passages the reader SHOULD have \
+highlighted but didn't — passages that contain esoteric signals the reader may have missed:
+
+{text}
+
+For each missed passage:
+1. Quote the exact passage
+2. Explain what esoteric signal it contains
+3. Explain how it relates to the passages the reader DID highlight""",
+    },
+
+    "deep_passage": {
+        "name": "Deep Passage Analysis",
+        "system": "You are a scholar performing a close reading in the tradition of \
+Benardete's 'argument of the action' — treating every word, every dramatic detail, \
+every name as philosophically significant.",
+        "template": """Perform a deep close reading of this specific passage from "{title}" by {author}:
+
+## PASSAGE
+
+{focused_paragraph}
+
+## SURROUNDING CONTEXT
+
+{context}
+
+Analyze:
+1. **Every word choice** — why THIS word and not a synonym?
+2. **Sentence structure** — what does the syntax do that a paraphrase would lose?
+3. **Names and references** — what do they mean etymologically? What do they evoke?
+4. **What is NOT said** — what would a reader expect here that the author omits?
+5. **Position in the work** — where does this sit structurally? Why here?
+6. **Tone and register** — is the author speaking in logos or mythos? To whom?
+7. **The argument in the action** — what does this passage DO, beyond what it says?""",
+    },
+}
+
+
+def build_highlight_prompt(
+    prompt_key: str,
+    title: str = "",
+    author: str = "",
+    highlights: list[str] = None,
+    text: str = "",
+    focused_paragraph: str = "",
+    context: str = "",
+) -> tuple[str, str]:
+    """Build a highlight-based prompt.
+
+    Returns (system_prompt, user_prompt) tuple.
+    """
+    if prompt_key not in HIGHLIGHT_PROMPTS:
+        raise ValueError(f"Unknown prompt key: {prompt_key}. Available: {list(HIGHLIGHT_PROMPTS.keys())}")
+
+    prompt_def = HIGHLIGHT_PROMPTS[prompt_key]
+    system = prompt_def["system"]
+
+    # Format highlights as numbered list
+    formatted_highlights = ""
+    if highlights:
+        formatted_highlights = "\n".join(f"{i+1}. > {h}" for i, h in enumerate(highlights))
+
+    user = prompt_def["template"].format(
+        title=title or "Unknown",
+        author=author or "Unknown",
+        highlights=formatted_highlights,
+        text=text[:8000] if text else "",
+        focused_paragraph=focused_paragraph,
+        context=context[:2000] if context else "",
+    )
+
+    return system, user

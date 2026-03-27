@@ -3,6 +3,9 @@
 Stores cached markdown at {MARKDOWN_PATH}/{edition_uuid}.md so analyses and
 other LLM features can skip the expensive extraction step.
 
+Cached files include YAML frontmatter with metadata (title, author, UUID, etc.)
+so they are self-describing and can be used standalone.
+
 Skips audiobooks (ABS-only, no local files) and comics (image-based).
 """
 
@@ -23,6 +26,57 @@ _SKIP_FORMATS = {"cbz", "cbr", "cb7", "m4b", "mp3", "m4a", "ogg", "flac"}
 def markdown_path_for(edition_uuid: str) -> Path:
     """Return the cache path for an edition's markdown file."""
     return MARKDOWN_DIR / f"{edition_uuid}.md"
+
+
+def build_yaml_frontmatter(
+    title: str = "",
+    author: str = "",
+    uuid: str = "",
+    edition_id: int = 0,
+    work_id: int = 0,
+    isbn: str = "",
+    language: str = "",
+    publisher: str = "",
+    published_date: str = "",
+    format: str = "",
+) -> str:
+    """Build YAML frontmatter block for cached markdown files."""
+    lines = ["---"]
+    if title:
+        # Escape YAML special chars in title
+        safe_title = title.replace('"', '\\"')
+        lines.append(f'title: "{safe_title}"')
+    if author:
+        safe_author = author.replace('"', '\\"')
+        lines.append(f'author: "{safe_author}"')
+    if uuid:
+        lines.append(f"uuid: {uuid}")
+    if edition_id:
+        lines.append(f"edition_id: {edition_id}")
+    if work_id:
+        lines.append(f"work_id: {work_id}")
+    if isbn:
+        lines.append(f"isbn: {isbn}")
+    if language:
+        lines.append(f"language: {language}")
+    if publisher:
+        safe_pub = publisher.replace('"', '\\"')
+        lines.append(f'publisher: "{safe_pub}"')
+    if published_date:
+        lines.append(f"published_date: {published_date}")
+    if format:
+        lines.append(f"source_format: {format}")
+    lines.append("---\n")
+    return "\n".join(lines)
+
+
+def strip_yaml_frontmatter(text: str) -> str:
+    """Remove YAML frontmatter from markdown text for analysis."""
+    if text.startswith("---"):
+        end = text.find("\n---\n", 3)
+        if end != -1:
+            return text[end + 5:].lstrip()
+    return text
 
 
 def has_cached_markdown(edition_uuid: str) -> bool:
@@ -104,6 +158,20 @@ async def generate_markdown(edition_id: int) -> str | None:
             if edition.work and edition.work.authors:
                 author_name = edition.work.authors[0].name
             text = optimize_for_llm(text, title=edition.title, author=author_name)
+
+            # Add YAML frontmatter
+            frontmatter = build_yaml_frontmatter(
+                title=edition.work.title if edition.work else edition.title,
+                author=author_name or "",
+                uuid=edition.uuid,
+                edition_id=edition.id,
+                work_id=edition.work_id,
+                isbn=getattr(edition, 'isbn', '') or '',
+                language=getattr(edition, 'language', '') or '',
+                publisher=getattr(edition, 'publisher', '') or '',
+                format=best_file.format,
+            )
+            text = frontmatter + text
 
             # Cache to disk
             MARKDOWN_DIR.mkdir(parents=True, exist_ok=True)
@@ -190,6 +258,24 @@ def generate_markdown_sync(edition_id: int) -> str | None:
                 return None
 
             text = optimize_for_llm(text, title=title, author=author_name)
+
+            # Add YAML frontmatter
+            # Get extra metadata
+            isbn_row = conn.execute("SELECT isbn, language, publisher, published_date FROM editions WHERE id = ?",
+                                    (edition_id,)).fetchone()
+            frontmatter = build_yaml_frontmatter(
+                title=title,
+                author=author_name or "",
+                uuid=uuid,
+                edition_id=edition_id,
+                work_id=row["work_id"],
+                isbn=(isbn_row["isbn"] or "") if isbn_row else "",
+                language=(isbn_row["language"] or "") if isbn_row else "",
+                publisher=(isbn_row["publisher"] or "") if isbn_row else "",
+                published_date=(isbn_row["published_date"] or "") if isbn_row else "",
+                format=fmt,
+            )
+            text = frontmatter + text
 
             MARKDOWN_DIR.mkdir(parents=True, exist_ok=True)
             out_path = markdown_path_for(uuid)
