@@ -2879,8 +2879,35 @@ class LiteraryAnalyzer:
 
         Returns list of {"title": str, "text": str, "index": int}
         """
-        # Try heading-based splitting first
-        # Match: ## iii. or ## xvi. or ## 16. or ## iv. or numbered like "72."
+        # Strategy 1: Bracketed title links [POEM TITLE](link) — common in EPUB exports
+        bracket_pattern = re.compile(
+            r'^\[([A-Z][A-Z\s\-\'\,\.\:\;\!\?0-9]+)\]\([^\)]+\)\s*$',
+            re.MULTILINE,
+        )
+        bracket_matches = list(bracket_pattern.finditer(self.text))
+        if len(bracket_matches) >= 5:
+            poems = []
+            for i, m in enumerate(bracket_matches):
+                title = m.group(1).strip()
+                # Skip TOC entries, navigation, and boilerplate
+                if any(skip in title.upper() for skip in [
+                    'CONTENTS', 'COVER', 'TITLE PAGE', 'DEDICATION', 'EPIGRAPH',
+                    'ACKNOWLEDGMENT', 'COPYRIGHT', 'OCEANOFPDF', 'ONE', 'TWO',
+                    'THREE', 'FOUR', 'FIVE', 'SIX', 'NOTES', 'INDEX',
+                ]):
+                    continue
+                start = m.end()
+                end = bracket_matches[i + 1].start() if i + 1 < len(bracket_matches) else len(self.text)
+                body = self.text[start:end].strip()
+                # Clean OceanofPDF markers
+                body = re.sub(r'\[\*OceanofPDF\.com\*\]\([^\)]+\)', '', body).strip()
+                if len(body) < 20:
+                    continue
+                poems.append({"title": title.title(), "text": body, "index": len(poems)})
+            if len(poems) >= 3:
+                return poems
+
+        # Strategy 2: Markdown headings ## Title
         poem_pattern = re.compile(
             r'^##\s+'
             r'(?:'
@@ -2892,7 +2919,6 @@ class LiteraryAnalyzer:
             re.MULTILINE | re.IGNORECASE,
         )
 
-        # Split on poem headings
         parts = poem_pattern.split(self.text)
         headings = poem_pattern.findall(self.text)
 
