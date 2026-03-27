@@ -132,8 +132,7 @@ def generate_markdown_sync(edition_id: int) -> str | None:
     conn.row_factory = sqlite3.Row
     try:
         row = conn.execute("""
-            SELECT e.id, e.uuid, e.title as edition_title,
-                   w.title as work_title, w.id as work_id
+            SELECT e.id, e.uuid, w.title, w.id as work_id
             FROM editions e
             JOIN works w ON w.id = e.work_id
             WHERE e.id = ?
@@ -141,7 +140,7 @@ def generate_markdown_sync(edition_id: int) -> str | None:
         if not row:
             return None
 
-        title = row["work_title"] or row["edition_title"]
+        title = row["title"]
         uuid = row["uuid"]
 
         if has_cached_markdown(uuid):
@@ -162,7 +161,8 @@ def generate_markdown_sync(edition_id: int) -> str | None:
 
         best = files[0]
         fmt = best["format"].lower()
-        file_path = Path(best["file_path"])
+        from app.config import resolve_path
+        file_path = Path(resolve_path(best["file_path"]))
 
         if fmt in _SKIP_FORMATS:
             return None

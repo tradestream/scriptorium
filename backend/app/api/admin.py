@@ -890,7 +890,8 @@ def _run_bulk_esoteric(
                         LIMIT 1
                     """, (edition_id,)).fetchone()
                     if frow:
-                        fp = Path(frow["file_path"])
+                        from app.config import resolve_path
+                        fp = Path(resolve_path(frow["file_path"]))
                         fmt = frow["format"].lower()
                         if fp.exists():
                             if fmt == "epub":
