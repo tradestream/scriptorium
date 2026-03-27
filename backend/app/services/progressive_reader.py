@@ -446,3 +446,227 @@ def run_progressive_reading(text: str) -> dict:
     """
     reader = ProgressiveReader()
     return reader.read(text)
+
+
+# ─────────────────────────────────────────────────────
+# LLM Progressive Reading — chapter-by-chapter with
+# accumulating context, like a human reader's journal
+# ─────────────────────────────────────────────────────
+
+LLM_PROGRESSIVE_SYSTEM = """You are a scholar reading a book for the first time, chapter by chapter. \
+You are trained in the esoteric interpretation tradition (Strauss, Melzer, Benardete, Maimonides).
+
+You are reading SEQUENTIALLY. You have NOT read ahead. Your commentary reflects \
+what you know AT THIS POINT in the reading — your expectations, surprises, \
+contradictions you notice, questions that arise.
+
+As you read each chapter, you maintain:
+1. A running list of the author's CLAIMS (what has been asserted so far)
+2. EXPECTATIONS (what you anticipate the author will address next)
+3. SURPRISES (where the text deviates from what you expected)
+4. CONTRADICTIONS (where the author appears to contradict earlier claims)
+5. SUSPICIONS (where you detect possible esoteric signals)
+
+You write like a thoughtful reader's marginal notes — direct, specific, personal. \
+Not an academic paper. "I notice that..." "This contradicts what was said in Ch 3..." \
+"I expected the author to address X but instead..." "The hedging here is striking..."
+
+Per Benardete: attend to what the text DOES, not just what it SAYS."""
+
+
+def _build_chapter_prompt(
+    chapter_num: int,
+    chapter_title: str,
+    chapter_text: str,
+    accumulated_context: str,
+    computational_snapshot: dict,
+    max_text_chars: int = 4000,
+) -> str:
+    """Build the prompt for one chapter of progressive reading."""
+    excerpt = chapter_text[:max_text_chars]
+
+    # Format computational findings for this chapter
+    comp_notes = []
+    if computational_snapshot:
+        h = computational_snapshot.get("hedging", 0)
+        c = computational_snapshot.get("certainty", 0)
+        p = computational_snapshot.get("periagoge", 0)
+        v = computational_snapshot.get("voice_shift", 0)
+        r = computational_snapshot.get("register", "")
+        nc = computational_snapshot.get("contradictions_found", 0)
+        nv = computational_snapshot.get("new_vocabulary", [])
+
+        if h > 0.003:
+            comp_notes.append(f"- HIGH hedging density ({h:.5f}) — the author is qualifying heavily")
+        if c > 0.003:
+            comp_notes.append(f"- HIGH certainty density ({c:.5f}) — emphatic assertions")
+        if p > 1.0:
+            comp_notes.append(f"- PERIAGOGE SIGNAL ({p:.2f}) — polarity reversal from previous chapters")
+        if v > 0.05:
+            comp_notes.append(f"- VOICE SHIFT ({v:.4f}) — stylistic change from previous chapter")
+        if nc > 0:
+            comp_notes.append(f"- {nc} CONTRADICTIONS detected with earlier chapters")
+        if r:
+            comp_notes.append(f"- Register: {r}")
+        if nv:
+            comp_notes.append(f"- New vocabulary: {', '.join(nv[:5])}")
+
+    comp_section = "\n".join(comp_notes) if comp_notes else "No significant computational signals."
+
+    return f"""## CHAPTER {chapter_num + 1}: {chapter_title}
+
+### YOUR READING SO FAR
+{accumulated_context}
+
+### COMPUTATIONAL SIGNALS FOR THIS CHAPTER
+{comp_section}
+
+### TEXT OF THIS CHAPTER
+{excerpt}
+
+---
+
+Write your reader's journal entry for this chapter. Address:
+
+1. **What the author says here** (brief summary of this chapter's argument)
+2. **How it connects to what came before** (does it build, complicate, or contradict?)
+3. **What surprises you** (anything unexpected given what you've read so far?)
+4. **What you now expect** (where do you think the argument is heading?)
+5. **Esoteric suspicions** (any signals: hedging near strong claims, contradictions, silences, shifts in register?)
+6. **Questions for the author** (what would you ask if you could?)
+
+Keep it to 300-500 words. Write as marginal notes, not an essay."""
+
+
+async def run_progressive_llm_reading(
+    text: str,
+    metadata: Optional[dict] = None,
+    provider=None,
+    max_chapters: int = 20,
+    max_tokens_per_chapter: int = 1024,
+) -> dict:
+    """Run a full progressive LLM reading — chapter by chapter with accumulating context.
+
+    Returns a reading journal with per-chapter LLM commentary + computational snapshots.
+    """
+    if provider is None:
+        from app.services.llm import get_llm_provider
+        provider = get_llm_provider()
+
+    meta = metadata or {}
+    title = meta.get("title", "Unknown")
+    author = meta.get("author", "Unknown")
+
+    # First run computational progressive reading
+    reader = ProgressiveReader()
+    comp_journal = reader.read(text)
+
+    chapters = split_into_chapters(text)
+    snapshots = comp_journal.get("chapter_snapshots", [])
+
+    # Build accumulated context as we go
+    accumulated = f"I am reading \"{title}\" by {author} for the first time.\n"
+    entries = []
+    total_tokens = 0
+
+    for i, (ch_title, ch_body) in enumerate(chapters[:max_chapters]):
+        if len(ch_body.strip()) < 100:
+            continue
+
+        # Get computational snapshot for this chapter
+        snapshot = snapshots[i] if i < len(snapshots) else {}
+
+        prompt = _build_chapter_prompt(
+            chapter_num=i,
+            chapter_title=ch_title,
+            chapter_text=ch_body,
+            accumulated_context=accumulated,
+            computational_snapshot=snapshot,
+        )
+
+        try:
+            resp = await provider.generate(
+                LLM_PROGRESSIVE_SYSTEM,
+                prompt,
+                max_tokens=max_tokens_per_chapter,
+            )
+            entry_text = resp.content
+            total_tokens += resp.total_tokens
+            model = resp.model
+
+            # Update accumulated context with this chapter's key points
+            # (Keep it concise — just claims, contradictions, expectations)
+            accumulated += f"\n\n**Ch {i+1} ({ch_title[:30]}):** {entry_text[:300]}..."
+
+            # Trim accumulated context to stay within token limits
+            if len(accumulated) > 6000:
+                # Keep first paragraph + last 4000 chars
+                first_nl = accumulated.find('\n\n', 200)
+                if first_nl > 0:
+                    accumulated = accumulated[:first_nl] + "\n\n[...earlier notes condensed...]\n\n" + accumulated[-4000:]
+
+            entries.append({
+                "chapter": i + 1,
+                "title": ch_title[:60],
+                "commentary": entry_text,
+                "computational": snapshot,
+                "model": model,
+            })
+
+            logger.info("Progressive read Ch %d/%d: %s (%d tokens)",
+                        i + 1, len(chapters), ch_title[:30], resp.total_tokens)
+
+        except Exception as e:
+            logger.warning("Progressive LLM failed for Ch %d: %s", i + 1, e)
+            entries.append({
+                "chapter": i + 1,
+                "title": ch_title[:60],
+                "commentary": f"[LLM analysis failed: {e}]",
+                "computational": snapshot,
+            })
+
+    # Final synthesis — ask the LLM to reflect on the whole reading
+    synthesis = None
+    if entries:
+        all_notes = "\n\n".join(
+            f"**Ch {e['chapter']} ({e['title']}):**\n{e['commentary'][:500]}"
+            for e in entries
+        )
+
+        synth_prompt = f"""You have just finished reading "{title}" by {author}, chapter by chapter.
+
+Here are your reading notes:
+
+{all_notes[:8000]}
+
+---
+
+Now write a SYNTHESIS — a final reflection on the whole reading experience:
+
+1. **The arc**: How did your understanding change from beginning to end?
+2. **The turning point**: Where did the argument pivot? Did you experience periagoge?
+3. **Contradictions resolved?**: Were the contradictions you noticed reconciled, or do they stand?
+4. **The esoteric reading**: Having read the whole book, what do you think the author really meant?
+5. **What the surface hides**: What did the sequential reading reveal that a summary would miss?
+6. **The argument of the action**: What did the text DO to you as a reader that it couldn't say directly?
+
+Write 500-800 words."""
+
+        try:
+            synth_resp = await provider.generate(
+                LLM_PROGRESSIVE_SYSTEM, synth_prompt, max_tokens=2048
+            )
+            synthesis = synth_resp.content
+            total_tokens += synth_resp.total_tokens
+        except Exception as e:
+            logger.warning("Progressive synthesis failed: %s", e)
+
+    return {
+        "title": title,
+        "author": author,
+        "chapters_read": len(entries),
+        "total_tokens": total_tokens,
+        "entries": entries,
+        "synthesis": synthesis,
+        "computational_journal": comp_journal,
+    }
