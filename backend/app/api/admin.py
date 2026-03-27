@@ -478,35 +478,55 @@ async def get_bulk_markdown_job(
 
 
 def _run_bulk_markdown(job_id: str, edition_ids: list[int]) -> None:
-    """Background task (sync, runs in thread): generate markdown for each edition."""
+    """Background task (sync, runs in thread): generate markdown for each edition.
+
+    Uses a thread pool for parallel processing (4 workers).
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     from app.services.markdown import generate_markdown_sync
     from app.services.background_jobs import sync_update_job, sync_get_job_status
+
+    WORKERS = 4
 
     sync_update_job(job_id, status="running")
     total = len(edition_ids)
     done = 0
+    generated = 0
     failed = 0
     skipped = 0
 
-    for edition_id in edition_ids:
-        if done % 10 == 0 and sync_get_job_status(job_id) == "cancelled":
-            break
-
+    def _process_one(edition_id):
         try:
             md = generate_markdown_sync(edition_id)
-            if md is None:
-                skipped += 1
-            done += 1
+            return ("generated" if md else "skipped", edition_id)
         except Exception as exc:
-            logger.warning("Markdown generation failed for edition %d: %s", edition_id, exc)
-            failed += 1
-            done += 1
+            logger.warning("Markdown failed for edition %d: %s", edition_id, exc)
+            return ("failed", edition_id)
 
-        sync_update_job(job_id, done=done, failed=failed, skipped=skipped,
-                        current=f"{done}/{total}")
+    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        futures = {pool.submit(_process_one, eid): eid for eid in edition_ids}
+
+        for future in as_completed(futures):
+            status, eid = future.result()
+            done += 1
+            if status == "generated":
+                generated += 1
+            elif status == "skipped":
+                skipped += 1
+            else:
+                failed += 1
+
+            if done % 20 == 0 or done == total:
+                if sync_get_job_status(job_id) == "cancelled":
+                    pool.shutdown(wait=False, cancel_futures=True)
+                    break
+                sync_update_job(job_id, done=done, failed=failed,
+                                skipped=skipped, generated=generated,
+                                current=f"{done}/{total} ({generated} gen, {skipped} skip, {failed} fail)")
 
     final_status = "done" if sync_get_job_status(job_id) != "cancelled" else "cancelled"
-    sync_update_job(job_id, status=final_status, current="")
+    sync_update_job(job_id, status=final_status, done=done, generated=generated,
+                    failed=failed, skipped=skipped, current="")
 
 
 # ── Bulk Identifier Extraction ───────────────────────────────────────────────
