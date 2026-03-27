@@ -1888,6 +1888,27 @@ def run_full_esoteric_analysis(
         logger.error(f"Aphoristic Fragmentation failed: {e}")
         results["aphoristic_fragmentation"] = {"error": str(e)}
 
+    # Benardete: Trapdoor Detection
+    try:
+        results["trapdoors"] = detect_trapdoors(text=text, delimiter_pattern=config.delimiter_pattern)
+    except Exception as e:
+        logger.error(f"Trapdoor Detection failed: {e}")
+        results["trapdoors"] = {"error": str(e)}
+
+    # Benardete: Dyadic Structure
+    try:
+        results["dyadic_structure"] = detect_dyadic_structure(text=text, delimiter_pattern=config.delimiter_pattern)
+    except Exception as e:
+        logger.error(f"Dyadic Structure failed: {e}")
+        results["dyadic_structure"] = {"error": str(e)}
+
+    # Benardete: Periagoge (Structural Reversal)
+    try:
+        results["periagoge"] = detect_periagoge(text=text, delimiter_pattern=config.delimiter_pattern)
+    except Exception as e:
+        logger.error(f"Periagoge Detection failed: {e}")
+        results["periagoge"] = {"error": str(e)}
+
     return results
 
 
@@ -2631,4 +2652,220 @@ def detect_aphoristic_fragmentation(text: str, delimiter_pattern: str = None) ->
         "method": "Aphoristic Fragmentation (Nietzsche Mask Method)",
         "precedent": "Nietzsche's aphoristic style; Bacon on aphorisms; the principle that fragmentation forces active reader reconstruction",
         "interpretation": "High fragmentation suggests the author deliberately avoids continuous argument, forcing the reader to reconstruct coherence — a mask that rewards only the careful reader.",
+    }
+
+
+# ─────────────────────────────────────────────────────
+# BENARDETE METHODS (from "The Argument of the Action")
+# ─────────────────────────────────────────────────────
+
+def detect_trapdoors(text: str, delimiter_pattern: str = None) -> dict:
+    """Detect Benardete's 'trapdoors' — local impossibilities that force deeper reading.
+
+    Precedent: Benardete on intentional flaws in the apparent argument.
+    """
+    sents = re.split(r'[.!?]+', text)
+    sents = [s.strip() for s in sents if len(s.strip()) > 15]
+
+    ABSOLUTES = {'all', 'every', 'always', 'never', 'none', 'certainly', 'undoubtedly',
+                 'obviously', 'clearly', 'must', 'necessarily', 'proven', 'beyond doubt',
+                 'no one denies', 'everyone agrees', 'without exception'}
+    HEDGES = {'perhaps', 'maybe', 'possibly', 'might', 'could', 'seems', 'appears',
+              'apparently', 'arguably', 'not entirely', 'not quite', 'one wonders',
+              'however', 'yet', 'but', 'although', 'nevertheless', 'admittedly'}
+    CONCLUSION = {'therefore', 'thus', 'hence', 'consequently', 'it follows',
+                  'this proves', 'this shows', 'accordingly', 'so we see'}
+    NEGATION = {'not', 'no', 'never', 'neither', 'nor', 'nothing', 'deny', 'denies',
+                'impossible', 'false', 'untrue'}
+
+    trapdoors = []
+    local_contradictions = []
+    non_sequiturs = []
+
+    for i, sent in enumerate(sents):
+        s_low = sent.lower()
+        # Hedge near absolute
+        if any(m in s_low for m in ABSOLUTES):
+            nearby_hedges = []
+            for j in range(max(0, i-3), min(len(sents), i+4)):
+                if j == i:
+                    continue
+                h_found = [h for h in HEDGES if h in sents[j].lower()]
+                if h_found:
+                    nearby_hedges.append({"sentence": j+1, "hedges": h_found[:3]})
+            if nearby_hedges:
+                trapdoors.append({"type": "hedge_near_absolute", "sentence": i+1,
+                                  "excerpt": sent[:150], "nearby_hedges": nearby_hedges,
+                                  "position": round(i / max(len(sents), 1), 3)})
+
+        # Non-sequitur
+        if any(m in s_low for m in CONCLUSION) and i >= 2:
+            conc_words = set(re.findall(r'\b[a-zA-Z]{4,}\b', s_low)) - _STOPWORDS
+            prem_words = set()
+            for k in range(max(0, i-3), i):
+                prem_words |= set(re.findall(r'\b[a-zA-Z]{4,}\b', sents[k].lower())) - _STOPWORDS
+            if len(conc_words & prem_words) < 2:
+                non_sequiturs.append({"sentence": i+1, "excerpt": sent[:150],
+                                      "position": round(i / max(len(sents), 1), 3)})
+
+    # Local self-contradiction
+    for i in range(len(sents) - 2):
+        s1_words = set(re.findall(r'\b[a-zA-Z]{4,}\b', sents[i].lower())) - _STOPWORDS
+        s1_neg = bool(set(re.findall(r'\b\w+\b', sents[i].lower())) & NEGATION)
+        for j in range(i+1, min(i+4, len(sents))):
+            s2_words = set(re.findall(r'\b[a-zA-Z]{4,}\b', sents[j].lower())) - _STOPWORDS
+            s2_neg = bool(set(re.findall(r'\b\w+\b', sents[j].lower())) & NEGATION)
+            if len(s1_words & s2_words) >= 3 and s1_neg != s2_neg:
+                local_contradictions.append({
+                    "sentence_a": i+1, "sentence_b": j+1,
+                    "shared": list(s1_words & s2_words)[:5],
+                    "excerpt_a": sents[i][:100], "excerpt_b": sents[j][:100],
+                })
+
+    total = len(trapdoors) + len(local_contradictions) + len(non_sequiturs)
+    return {
+        "total_trapdoors": total,
+        "hedge_near_absolute": trapdoors[:15],
+        "local_contradictions": local_contradictions[:15],
+        "non_sequiturs": non_sequiturs[:10],
+        "method": "Trapdoor Detection (Benardete)",
+        "precedent": "Benardete: intentional flaws induce the reader to drop beneath the surface",
+        "interpretation": "Local impossibilities — hedged absolutes, nearby negation reversals, unsupported conclusions — are deliberately planted to force deeper reading.",
+    }
+
+
+def detect_dyadic_structure(text: str, delimiter_pattern: str = None) -> dict:
+    """Detect binary opposition pairs and their convergence (Benardete conjunctive/disjunctive two).
+
+    Precedent: Benardete on myth vs logos, parts parading as wholes, phantom images.
+    """
+    sections = re.split(delimiter_pattern or r"\n\s*\n", text)
+    sections = [s for s in sections if len(s.strip()) > 50]
+
+    OPP_PATTERNS = [
+        r'\b(\w{3,})\s+(?:and|or|versus|vs\.?|against)\s+(\w{3,})',
+        r'\b(?:between|either)\s+(\w{3,})\s+(?:and|or)\s+(\w{3,})',
+    ]
+    UNITY_WORDS = {'same', 'one', 'identical', 'united', 'inseparable', 'both',
+                   'together', 'turns out', 'proves to be', 'is really', 'whole'}
+    EIDETIC = {'whole', 'part', 'parts', 'unity', 'one', 'many', 'same', 'other',
+               'being', 'becoming', 'appearance', 'reality', 'surface', 'depth',
+               'form', 'matter', 'eidos', 'idea', 'image', 'original', 'copy',
+               'shadow', 'reflection', 'dyad', 'monad'}
+    PHANTOM = {'phantom', 'image', 'apparition', 'double', 'split', 'divided',
+               'mask', 'disguise', 'semblance', 'seeming', 'illusion', 'mirror'}
+
+    pairs = []
+    pair_positions = defaultdict(list)
+    for i, sec in enumerate(sections):
+        for pat in OPP_PATTERNS:
+            for m in re.finditer(pat, sec.lower()):
+                pair = tuple(sorted([m.group(1), m.group(2)]))
+                if pair[0] != pair[1]:
+                    pairs.append(pair)
+                    pair_positions[pair].append(i)
+
+    pair_counts = Counter(pairs)
+    recurring = [(list(p), c) for p, c in pair_counts.items() if c >= 2]
+    recurring.sort(key=lambda x: -x[1])
+
+    convergences = []
+    for pair, positions in pair_positions.items():
+        if len(positions) >= 2:
+            for later in positions[1:]:
+                if later > positions[0] + 2:
+                    if any(w in sections[later].lower() for w in UNITY_WORDS):
+                        convergences.append({"pair": list(pair), "first": positions[0]+1,
+                                             "convergence": later+1})
+
+    all_words = re.findall(r'\b[a-zA-Z]{3,}\b', text.lower())
+    eidetic_density = sum(1 for w in all_words if w in EIDETIC) / max(len(all_words), 1)
+
+    phantom_passages = []
+    for i, sec in enumerate(sections):
+        hits = [w for w in PHANTOM if w in sec.lower()]
+        if len(hits) >= 2:
+            phantom_passages.append({"section": i+1, "terms": hits, "excerpt": sec[:150]})
+
+    return {
+        "total_pairs": len(pairs),
+        "recurring_pairs": [{"pair": p, "count": c} for p, c in recurring[:15]],
+        "convergences": convergences[:10],
+        "eidetic_density": round(eidetic_density, 5),
+        "phantom_passages": phantom_passages[:10],
+        "method": "Dyadic Structure (Benardete Conjunctive/Disjunctive Two)",
+        "precedent": "Benardete: conjunctive two (mythical pairing) vs disjunctive two (necessary relation)",
+        "interpretation": "Binary oppositions that later converge signal the philosophical 'turn' from myth to logos.",
+    }
+
+
+def detect_periagoge(text: str, delimiter_pattern: str = None) -> dict:
+    """Detect structural reversal between first and second halves (Benardete periagoge).
+
+    Precedent: Platonic periagoge (Cave allegory turning); pathei mathos (Aeschylus).
+    """
+    sections = re.split(delimiter_pattern or r"\n\s*\n", text)
+    sections = [s for s in sections if len(s.strip()) > 30]
+    if len(sections) < 4:
+        return {"score": 0, "method": "Periagoge Detection", "note": "Text too short"}
+
+    mid = len(sections) // 2
+    first_half = ' '.join(sections[:mid])
+    second_half = ' '.join(sections[mid:])
+
+    fh_words = re.findall(r'\b[a-zA-Z]{4,}\b', first_half.lower())
+    sh_words = re.findall(r'\b[a-zA-Z]{4,}\b', second_half.lower())
+    fh_words = [w for w in fh_words if w not in _STOPWORDS]
+    sh_words = [w for w in sh_words if w not in _STOPWORDS]
+
+    POSITIVE = {'good', 'true', 'beautiful', 'noble', 'just', 'wise', 'virtue',
+                'excellent', 'best', 'perfect', 'divine', 'sacred', 'right', 'worthy'}
+    NEGATIVE = {'bad', 'false', 'ugly', 'base', 'unjust', 'foolish', 'vice',
+                'terrible', 'worst', 'imperfect', 'corrupt', 'wrong', 'shameful'}
+
+    fh_pos = sum(1 for w in fh_words if w in POSITIVE)
+    fh_neg = sum(1 for w in fh_words if w in NEGATIVE)
+    sh_pos = sum(1 for w in sh_words if w in POSITIVE)
+    sh_neg = sum(1 for w in sh_words if w in NEGATIVE)
+
+    fh_polarity = (fh_pos - fh_neg) / max(fh_pos + fh_neg, 1)
+    sh_polarity = (sh_pos - sh_neg) / max(sh_pos + sh_neg, 1)
+    polarity_shift = sh_polarity - fh_polarity
+
+    # Vocabulary frequency shifts
+    fh_freq = Counter(fh_words)
+    sh_freq = Counter(sh_words)
+    shifts = []
+    for word in set(fh_freq) | set(sh_freq):
+        f1 = fh_freq.get(word, 0) / max(len(fh_words), 1)
+        f2 = sh_freq.get(word, 0) / max(len(sh_words), 1)
+        if max(f1, f2) > 0.0005:
+            diff = abs(f2 - f1)
+            if diff > 0.001:
+                shifts.append({"word": word, "first": round(f1, 5), "second": round(f2, 5),
+                               "shift": round(diff, 5), "direction": "increases" if f2 > f1 else "decreases"})
+    shifts.sort(key=lambda x: -x["shift"])
+
+    # Turning vocabulary in middle third
+    TURNING = {'however', 'yet', 'nevertheless', 'on the contrary', 'in truth', 'in reality',
+               'actually', 'in fact', 'turn', 'reverse', 'invert', 'conversion', 'transform',
+               'overcome', 'transcend', 'second sailing', 'reconsider', 'on reflection'}
+    third = len(sections) // 3
+    middle = ' '.join(sections[third:2*third]).lower()
+    mid_words = re.findall(r'\b[a-zA-Z]{3,}\b', middle)
+    turning_count = sum(1 for w in mid_words if w in TURNING)
+    turning_density = turning_count / max(len(mid_words), 1)
+
+    score = min(1.0, abs(polarity_shift) * 0.5 + turning_density * 30 + len(shifts[:10]) * 0.01)
+
+    return {
+        "polarity_shift": round(polarity_shift, 3),
+        "first_half_polarity": round(fh_polarity, 3),
+        "second_half_polarity": round(sh_polarity, 3),
+        "vocabulary_shifts": shifts[:20],
+        "turning_vocabulary_density": round(turning_density, 5),
+        "score": round(score, 3),
+        "method": "Periagoge Detection (Benardete Structural Reversal)",
+        "precedent": "Benardete: periagoge — the turning reproduced in every Platonic dialogue; pathei mathos",
+        "interpretation": "A text that leads to a conclusion in its first half then inverts it in the second reproduces the philosophical 'turning' — the reader must undergo error to understand truth.",
     }
