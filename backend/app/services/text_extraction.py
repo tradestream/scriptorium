@@ -374,6 +374,200 @@ async def _extract_epub_markdown(path: Path) -> str:
     return "\n\n".join(content_parts)
 
 
+async def _extract_epub_poetry(path: Path) -> str:
+    """Extract EPUB preserving verse line structure.
+
+    In poetry EPUBs, each <p> is a line of verse, not a paragraph.
+    This extractor:
+    - Treats each <p> as a single line (\\n not \\n\\n)
+    - Detects stanza breaks via empty <p> or blank lines
+    - Detects author headings (ALL CAPS + spaced letters)
+    - Preserves poem titles as markdown headings
+    - Strips line numbers (5, 10, 15, etc.)
+    """
+    try:
+        from ebooklib import epub
+        from bs4 import BeautifulSoup, Comment
+    except ImportError:
+        raise RuntimeError("ebooklib and beautifulsoup4 required")
+
+    def _is_author_heading(text: str) -> bool:
+        """Detect ALL CAPS or letter-spaced author names like 'R O B E R T  F R O S T'."""
+        stripped = text.strip()
+        if not stripped or len(stripped) < 5:
+            return False
+        # Letter-spaced: "R O B E R T  F R O S T" — only if it looks like a name
+        collapsed = stripped.replace(' ', '')
+        if (len(collapsed) >= 6 and collapsed.isupper() and collapsed.isalpha()
+                and stripped.count(' ') > len(collapsed) * 0.5
+                and len(collapsed.split()) <= 1):  # collapsed = single word = spaced name
+            return True
+        # ALL CAPS with at least 2 words: "ROBERT FROST" (not "CONTENTS")
+        words = stripped.split()
+        if (stripped.isupper() and len(words) >= 2 and len(stripped) <= 40
+                and all(w.isalpha() or w in ('.', '-', "'") for w in words)
+                and stripped not in ('CONTENTS', 'COPYRIGHT', 'ACKNOWLEDGMENTS', 'PERMISSIONS',
+                                     'INDEX', 'NOTES', 'PREFACE', 'INTRODUCTION', 'GLOSSARY')):
+            return True
+        return False
+
+    def _is_date_line(text: str) -> bool:
+        """Detect standalone date lines like '1874-1963' or 'b. 1931'."""
+        return bool(re.match(r'^\s*(?:b\.\s*)?\d{4}\s*[-–]\s*\d{0,4}\s*$', text.strip()))
+
+    def _is_poem_title(text: str, prev_was_blank: bool = False) -> bool:
+        """Detect poem titles — must follow a blank line and look like a title, not verse.
+
+        Key heuristic: poem titles appear AFTER stanza/poem breaks (blank lines)
+        and do NOT end with verse-continuation punctuation.
+        """
+        stripped = text.strip()
+        if not stripped or len(stripped) > 60:
+            return False
+        # Must follow a blank line (titles come after poem breaks)
+        if not prev_was_blank:
+            return False
+        # Must not end with verse punctuation (comma, semicolon, colon, dash)
+        if stripped[-1] in ',;:—-':
+            return False
+        # Must not end with period unless very short (abbreviations in titles)
+        if stripped.endswith('.') and len(stripped) > 20:
+            return False
+        # Must not contain line-number-like starts
+        if re.match(r'^\d+\s', stripped):
+            return False
+        # Must be mostly capitalized words (Title Case)
+        words = stripped.split()
+        if len(words) > 8:
+            return False
+        cap_words = sum(1 for w in words if w[0:1].isupper() or w.lower() in {'a', 'an', 'the', 'of', 'in', 'on', 'to', 'for', 'and', 'or', 'but'})
+        if cap_words / len(words) < 0.5:
+            return False
+        # Skip common boilerplate
+        if any(skip in stripped.upper() for skip in ['CONTENTS', 'COPYRIGHT', 'PRINTED', 'COMPOSITION', 'ALL RIGHTS']):
+            return False
+        return True
+
+    def _is_line_number(text: str) -> bool:
+        """Detect line numbers (5, 10, 15, etc.) and roman numeral line numbers."""
+        stripped = text.strip()
+        if re.match(r'^\d{1,3}$', stripped):
+            return int(stripped) % 5 == 0 or int(stripped) <= 3
+        # "io" = 10, common OCR
+        if stripped.lower() in ('io', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x'):
+            return True
+        return False
+
+    book = epub.read_epub(str(path), options={"ignore_ncx": True})
+    output_lines = []
+    current_author = ""
+
+    for item in book.get_items():
+        if item.media_type != 'application/xhtml+xml':
+            continue
+
+        soup = BeautifulSoup(item.get_content(), 'html.parser')
+        for tag in soup.find_all(['img', 'svg', 'script', 'style']):
+            tag.decompose()
+        for comment in soup.find_all(string=lambda t: isinstance(t, Comment)):
+            comment.extract()
+
+        body = soup.find('body') or soup
+
+        prev_was_blank = True  # Start of file counts as blank
+
+        for el in body.find_all(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'div', 'br']):
+            tag_name = el.name.lower()
+
+            # Headings → markdown headings
+            if tag_name in ('h1', 'h2', 'h3', 'h4', 'h5', 'h6'):
+                level = int(tag_name[1])
+                text = el.get_text(strip=True)
+                if text:
+                    output_lines.append('')
+                    output_lines.append(f'{"#" * level} {text}')
+                    output_lines.append('')
+                    prev_was_blank = True
+                continue
+
+            # BR → line break
+            if tag_name == 'br':
+                output_lines.append('')
+                prev_was_blank = True
+                continue
+
+            text = el.get_text(strip=True)
+            if not text:
+                # Empty <p> = stanza break
+                output_lines.append('')
+                prev_was_blank = True
+                continue
+
+            # Strip inline line numbers at start
+            text = re.sub(r'^\d{1,3}\s+', '', text)
+            # Strip trailing page numbers
+            text = re.sub(r'\s+\d{3,4}\s*$', '', text)
+
+            # Detect special elements
+            if _is_author_heading(text):
+                collapsed = text.replace(' ', '') if text.count(' ') > len(text.replace(' ', '')) * 0.5 else text
+                current_author = collapsed.title() if collapsed.isupper() else collapsed
+                output_lines.append('')
+                output_lines.append(f'## {current_author}')
+                output_lines.append('')
+                continue
+
+            if _is_date_line(text):
+                # Append to author heading
+                if output_lines and output_lines[-1] == '':
+                    output_lines[-2] = f'{output_lines[-2]} ({text.strip()})'
+                continue
+
+            if _is_line_number(text):
+                continue
+
+            # Check if this looks like a poem title (before a verse block)
+            if _is_poem_title(text, prev_was_blank):
+                output_lines.append('')
+                output_lines.append(f'### {text}')
+                output_lines.append('')
+                prev_was_blank = True
+                continue
+
+            # Bold text often = date or special marker
+            bold = el.find('b')
+            if bold and not el.find('b').find_next_sibling():
+                bold_text = bold.get_text(strip=True)
+                if re.match(r'^\d{4}$', bold_text):
+                    # Year marker — end of poem
+                    output_lines.append('')
+                    continue
+
+            # Regular line of verse
+            # Preserve italic markers
+            for i_tag in el.find_all('i'):
+                i_tag.replace_with(f'*{i_tag.get_text()}*')
+            for b_tag in el.find_all('b'):
+                b_tag.replace_with(f'**{b_tag.get_text()}**')
+
+            final_text = el.get_text()
+            # Strip leading line numbers again (may be inline)
+            final_text = re.sub(r'^\s*\d{1,3}\s{2,}', '', final_text)
+            final_text = final_text.rstrip()
+
+            if final_text:
+                output_lines.append(final_text)
+                prev_was_blank = False
+            else:
+                prev_was_blank = True
+
+    # Clean up: collapse 3+ blank lines to 2 (stanza break), but preserve single newlines (line breaks)
+    text = '\n'.join(output_lines)
+    text = re.sub(r'\n{4,}', '\n\n\n', text)  # Max triple newline (poem break)
+    text = normalize_unicode(text)
+    return text.strip()
+
+
 async def _extract_epub_plain(path: Path) -> str:
     """Fallback: extract plain text from EPUB using basic HTML parsing."""
     try:
@@ -846,6 +1040,16 @@ async def extract_text_from_book(
 
 
 # ── Sync wrappers for background threads ─────────────────────────
+
+
+def _extract_epub_poetry_sync(path: Path) -> str:
+    """Sync wrapper for poetry-aware EPUB extraction."""
+    import asyncio
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(_extract_epub_poetry(path))
+    finally:
+        loop.close()
 
 
 def _extract_epub_markdown_sync(path: Path) -> str:
