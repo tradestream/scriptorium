@@ -152,11 +152,24 @@ def remove_toc(text: str) -> str:
 
 
 def clean_whitespace(text: str) -> str:
-    """Normalize whitespace: collapse blank lines, strip trailing spaces."""
+    """Normalize whitespace: collapse blank lines, strip trailing spaces, merge tiny sections."""
     text = text.replace('\r\n', '\n').replace('\r', '\n')
     text = re.sub(r'\n{3,}', '\n\n', text)
     lines = [line.rstrip() for line in text.split('\n')]
-    return '\n'.join(lines).strip()
+    text = '\n'.join(lines).strip()
+
+    # Merge tiny orphan sections into neighbors
+    # Splits on double-newline, merges sections <50 chars into previous section
+    parts = text.split('\n\n')
+    merged = []
+    for part in parts:
+        if not part.strip():
+            continue
+        if merged and len(part.strip()) < 50 and not part.strip().startswith('#'):
+            merged[-1] = merged[-1] + ' ' + part.strip()
+        else:
+            merged.append(part)
+    return '\n\n'.join(merged)
 
 
 def clean_internal_links(text: str) -> str:
@@ -536,6 +549,69 @@ def _extract_pdf_pdfplumber_sync(path: Path) -> str:
             result_parts.append(" ".join(paragraph_lines))
             paragraph_lines.clear()
 
+    def _is_spaced_out(text: str) -> bool:
+        """Detect letter-spaced text like 'S E T H' or 'A R G U M E N T'."""
+        # If most characters are single letters separated by spaces
+        parts = text.split()
+        if len(parts) < 3:
+            return False
+        single_chars = sum(1 for p in parts if len(p) <= 2)
+        return single_chars / len(parts) > 0.6
+
+    def _collapse_spacing(text: str) -> str:
+        """Collapse 'S E T H' → 'SETH', 'A R G U M E N T' → 'ARGUMENT'."""
+        parts = text.split()
+        if all(len(p) <= 2 for p in parts):
+            return ''.join(parts)
+        # Mixed: collapse runs of single chars, keep multi-char words
+        result = []
+        buffer = []
+        for p in parts:
+            if len(p) <= 2 and p.isalpha():
+                buffer.append(p)
+            else:
+                if buffer:
+                    result.append(''.join(buffer))
+                    buffer = []
+                result.append(p)
+        if buffer:
+            result.append(''.join(buffer))
+        return ' '.join(result)
+
+    def _is_likely_heading(stripped: str, ratio: float) -> bool:
+        """Conservative heading detection to reduce false positives.
+
+        Only classify as heading if: large enough font AND short AND looks like a title.
+        """
+        if ratio < 1.05:
+            return False
+        # Must be short — real headings rarely exceed 80 chars
+        if len(stripped) > 80:
+            return False
+        # Skip if it contains multiple sentences (body text with larger font)
+        if stripped.count('.') > 1:
+            return False
+        # Skip if it contains common sentence-interior punctuation
+        if ',' in stripped and len(stripped) > 50:
+            return False
+        # Skip if it starts lowercase (continuation text)
+        if stripped[0].islower():
+            return False
+        # Skip footnote/reference numbers
+        if re.match(r'^\d+[\.\)]\s', stripped) and len(stripped) > 40:
+            return False
+        # Require significantly larger font for short-ish text to be a heading
+        if ratio < 1.15 and len(stripped) > 60:
+            return False
+        # Skip very short fragments (single words, numbers, Greek/Latin fragments)
+        if len(stripped) < 4:
+            return False
+        # Skip if mostly non-alpha (punctuation, numbers)
+        alpha_ratio = sum(1 for c in stripped if c.isalpha()) / max(len(stripped), 1)
+        if alpha_ratio < 0.5:
+            return False
+        return True
+
     for line_text, font_size in all_lines:
         stripped = line_text.strip()
         if not stripped:
@@ -545,6 +621,10 @@ def _extract_pdf_pdfplumber_sync(path: Path) -> str:
         if _is_page_artifact(stripped):
             continue
 
+        # Fix letter-spaced text from title pages
+        if _is_spaced_out(stripped):
+            stripped = _collapse_spacing(stripped)
+
         # Repeated short lines are likely running headers/footers
         if len(stripped) < 80:
             if stripped in seen_short:
@@ -553,15 +633,14 @@ def _extract_pdf_pdfplumber_sync(path: Path) -> str:
 
         ratio = font_size / body_size if body_size else 1.0
 
-        if ratio >= 1.4:
+        if _is_likely_heading(stripped, ratio):
             flush_paragraph()
-            result_parts.append(f"# {stripped}")
-        elif ratio >= 1.2:
-            flush_paragraph()
-            result_parts.append(f"## {stripped}")
-        elif ratio >= 1.05:
-            flush_paragraph()
-            result_parts.append(f"### {stripped}")
+            if ratio >= 1.4:
+                result_parts.append(f"# {stripped}")
+            elif ratio >= 1.2:
+                result_parts.append(f"## {stripped}")
+            else:
+                result_parts.append(f"### {stripped}")
         else:
             # Accumulate body lines into paragraphs
             if paragraph_lines:
@@ -575,6 +654,9 @@ def _extract_pdf_pdfplumber_sync(path: Path) -> str:
     text = "\n\n".join(result_parts)
     text = normalize_ligatures(text)
     text = fix_hyphenated_linebreaks(text)
+    # Clean up soft hyphens and broken hyphenation
+    text = text.replace('\u00ad', '')  # soft hyphen
+    text = re.sub(r'(\w)­\s*\n\s*(\w)', r'\1\2', text)  # hyphen at line break
     return text
 
 
