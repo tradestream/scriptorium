@@ -1972,6 +1972,37 @@ def run_full_esoteric_analysis(
         logger.error(f"Word Weight failed: {e}")
         results["word_weight"] = {"error": str(e)}
 
+    # Rosen methods (26-34)
+    ROSEN_TOOLS = [
+        ("rhetoric_of_concealment", detect_rhetoric_of_concealment),
+        ("transcendental_ambiguity", detect_transcendental_ambiguity),
+        ("rhetoric_of_frankness", detect_rhetoric_of_frankness),
+        ("intuition_analysis_dialectic", detect_intuition_analysis_dialectic),
+        ("logographic_necessity", detect_logographic_necessity),
+        ("theological_disavowal", detect_theological_disavowal),
+        ("defensive_writing", detect_defensive_writing),
+        ("nature_freedom_oscillation", detect_nature_freedom_oscillation),
+        ("postmodern_misreading", detect_postmodern_misreading),
+    ]
+    # Rosen Symposium methods (35-42)
+    SYMPOSIUM_TOOLS = [
+        ("dramatic_context", detect_dramatic_context),
+        ("speech_sequencing", detect_speech_sequencing),
+        ("philosophical_comedy", detect_philosophical_comedy),
+        ("daimonic_mediation", detect_daimonic_mediation),
+        ("medicinal_rhetoric", detect_medicinal_rhetoric),
+        ("poetry_philosophy_dialectic", detect_poetry_philosophy_dialectic),
+        ("aspiration_achievement_gap", detect_aspiration_achievement_gap),
+        ("synoptic_requirement", detect_synoptic_requirement),
+    ]
+
+    for name, func in ROSEN_TOOLS + SYMPOSIUM_TOOLS:
+        try:
+            results[name] = func(text=text, delimiter_pattern=config.delimiter_pattern)
+        except Exception as e:
+            logger.error(f"{name} failed: {e}")
+            results[name] = {"error": str(e)}
+
     return results
 
 
@@ -3435,3 +3466,1337 @@ def detect_word_weight(text: str, delimiter_pattern: str = None) -> dict:
         "precedent": "Benardete: every word choice in Plato is philosophically significant; Strauss: the rare statement is the true one",
         "interpretation": "Heavy words — rare, centrally placed, emphasized — are the ones the author chose with greatest care. They carry the argument's weight.",
     }
+
+
+# ─────────────────────────────────────────────────────
+# ROSEN METHODS + SYMPOSIUM METHODS (26-42)
+# ─────────────────────────────────────────────────────
+
+def detect_rhetoric_of_concealment(text: str, delimiter_pattern: str = None) -> dict:
+    """Rosen on Montesquieu: Detect rhetoric of concealment — hidden design beneath disorder."""
+    concealment_vocab = {
+        'conceal', 'hidden', 'beneath', 'disguise', 'mask', 'veil', 'cloak', 'cover',
+        'obscure', 'secret', 'design', 'plan', 'architecture', 'deceptive', 'misleading',
+        'apparent disorder', 'seeming confusion'
+    }
+    design_vocab = {
+        'design', 'inner plan', 'structure', 'order', 'system', 'deductive',
+        'logical progression', 'architecture', 'framework', 'skeleton'
+    }
+    defensive_vocab = {
+        'defensive', 'maneuver', 'charges', 'accusation', 'persecution', 'censorship',
+        'caution', 'prudence', 'index'
+    }
+
+    para_scores = []
+    for para in re.split(delimiter_pattern or r'\n\s*\n', text):
+        para_words = set(w.lower() for w in re.findall(r'\b[a-zA-Z]+\b', para) if w.isalpha())
+        c_hits = len(para_words & concealment_vocab)
+        d_hits = len(para_words & design_vocab)
+        def_hits = len(para_words & defensive_vocab)
+        co_occur = 1.0 if (c_hits > 0 and d_hits > 0) else 0.5 if (c_hits > 0 or d_hits > 0) else 0
+        para_scores.append({
+            'concealment': c_hits,
+            'design': d_hits,
+            'defensive': def_hits,
+            'co_occurrence_boost': co_occur,
+            'combined_score': c_hits + d_hits + def_hits + co_occur,
+        })
+
+    all_words = [w.lower() for w in re.findall(r'\b[a-zA-Z]{3,}\b', text.lower()) if w.isalpha()]
+    total = max(len(all_words), 1)
+    c_density = sum(1 for w in all_words if w in concealment_vocab) / total
+    d_density = sum(1 for w in all_words if w in design_vocab) / total
+    def_density = sum(1 for w in all_words if w in defensive_vocab) / total
+    avg_co_occur = sum(p['co_occurrence_boost'] for p in para_scores) / max(len(para_scores), 1)
+
+    score = min(1.0, (
+        c_density * 30 + d_density * 25 + def_density * 15 + avg_co_occur * 10
+    ))
+
+    return {
+        'score': round(score, 3),
+        'method': 'Rhetoric of Concealment (Rosen on Montesquieu)',
+        'concealment_density': round(c_density, 5),
+        'design_density': round(d_density, 5),
+        'defensive_density': round(def_density, 5),
+        'co_occurrence_boost': round(avg_co_occur, 5),
+        'precedent': (
+            "Rosen, 'The Elusiveness of the Ordinary': Montesquieu's Spirit of the Laws "
+            "conceals a deductive structure beneath a 'somewhat disheveled surface.' The "
+            "apparent disorder is a 'rhetoric of concealment.'"
+        ),
+        'interpretation': (
+            'High scores indicate the text employs deliberate surface disorder to conceal '
+            'an underlying logical structure. The author announces design while appearing '
+            'unsystematic—a defensive strategy distinguishing moderate Enlightenment from '
+            'revolutionary esotericism.'
+        ),
+    }
+
+
+
+def detect_transcendental_ambiguity(text: str, delimiter_pattern: str = None) -> dict:
+    """Rosen on Kant: Detect deliberately unresolved double meanings serving system."""
+    ambiguity_markers = {
+        'ambiguous', 'ambiguity', 'double meaning', 'two senses', 'equivocal',
+        'both', 'and', 'simultaneously', 'paradox', 'tension', 'oscillation'
+    }
+    resistance_vocab = {
+        'cannot be defined', 'resists definition', 'irreducible', 'not reducible',
+        'transcends', 'distinction'
+    }
+    multi_sense = {
+        'in one sense', 'in another', 'perspective', 'on the one hand', 'on the other'
+    }
+
+    ambig_passages = []
+    for i, para in enumerate(re.split(delimiter_pattern or r'\n\s*\n', text)):
+        para_words = set(w.lower() for w in re.findall(r'\b[a-zA-Z]+\b', para) if w.isalpha())
+        amb_hits = len(para_words & ambiguity_markers)
+        res_hits = len(para_words & resistance_vocab)
+        multi_hits = len(para_words & multi_sense)
+        if amb_hits > 0 or res_hits > 0 or multi_hits > 0:
+            ambig_passages.append({
+                'paragraph': i,
+                'ambiguity_markers': amb_hits,
+                'resistance_markers': res_hits,
+                'multi_sense_markers': multi_hits,
+                'excerpt': para[:200],
+            })
+
+    all_words = [w.lower() for w in re.findall(r'\b[a-zA-Z]{3,}\b', text.lower()) if w.isalpha()]
+    total = max(len(all_words), 1)
+    ambig_density = sum(1 for w in all_words if w in ambiguity_markers) / total
+    resist_density = sum(1 for w in all_words if w in resistance_vocab) / total
+    multi_density = sum(1 for w in all_words if w in multi_sense) / total
+
+    score = min(1.0, (
+        ambig_density * 35 + resist_density * 30 + multi_density * 20 +
+        len(ambig_passages) / max(len(re.split(delimiter_pattern or r'\n\s*\n', text)), 1) * 15
+    ))
+
+    return {
+        'score': round(score, 3),
+        'method': 'Transcendental Ambiguity (Rosen on Kant)',
+        'ambiguity_marker_density': round(ambig_density, 5),
+        'resistance_marker_density': round(resist_density, 5),
+        'multi_sense_density': round(multi_density, 5),
+        'ambiguous_passage_count': len(ambig_passages),
+        'ambiguous_passages': ambig_passages[:5],
+        'precedent': (
+            "Rosen, 'Hermeneutics as Politics': Kant's key terms (freedom, spontaneity, "
+            "autonomy) carry deliberately unresolved double meanings. The ambiguity is "
+            "'transcendental' because it is a condition of possibility for the system itself."
+        ),
+        'interpretation': (
+            'High scores indicate the text employs productive ambiguity as a structural '
+            'feature, not a flaw. Key terms remain equivocal because this ambiguity enables '
+            'the philosophical or political argument. The reader must hold multiple senses '
+            'in tension rather than collapsing them into univocity.'
+        ),
+    }
+
+
+
+def detect_rhetoric_of_frankness(text: str, delimiter_pattern: str = None) -> dict:
+    """Rosen: Detect performative transparency as a form of concealment."""
+    frankness_markers = {
+        'frankly', 'openly', 'honestly', 'candidly', 'confess', 'plainly',
+        'clear', 'conceal', 'disguise', 'transparent', 'straightforward'
+    }
+    self_ref_honesty = {
+        'being honest', 'truth is', 'openly', 'make no secret', 'everyone can see'
+    }
+    enlightenment_daring = {
+        'dare', 'courage', 'resolve', 'maturity', 'bold', 'fearless'
+    }
+    hedging = {
+        'perhaps', 'seems', 'one might', 'arguably', 'certain sense', 'in a way'
+    }
+
+    frank_passages = []
+    for i, para in enumerate(re.split(delimiter_pattern or r'\n\s*\n', text)):
+        para_words = set(w.lower() for w in re.findall(r'\b[a-zA-Z]+\b', para) if w.isalpha())
+        frank_hits = len(para_words & frankness_markers)
+        self_ref = len(para_words & self_ref_honesty)
+        dare_hits = len(para_words & enlightenment_daring)
+        hedge_hits = len(para_words & hedging)
+        performative = 1.5 if (frank_hits > 0 and hedge_hits > 0) else 1.0 if frank_hits > 0 else 0
+        if frank_hits > 0:
+            frank_passages.append({
+                'paragraph': i,
+                'frankness_markers': frank_hits,
+                'hedging_markers': hedge_hits,
+                'performative_score': performative,
+                'excerpt': para[:200],
+            })
+
+    all_words = [w.lower() for w in re.findall(r'\b[a-zA-Z]{3,}\b', text.lower()) if w.isalpha()]
+    total = max(len(all_words), 1)
+    frank_density = sum(1 for w in all_words if w in frankness_markers) / total
+    dare_density = sum(1 for w in all_words if w in enlightenment_daring) / total
+    hedge_density = sum(1 for w in all_words if w in hedging) / total
+    performative_count = sum(1 for p in frank_passages if p['hedging_markers'] > 0)
+
+    score = min(1.0, (
+        frank_density * 30 + dare_density * 20 + hedge_density * 5 +
+        performative_count / max(len(frank_passages), 1) * 20
+    ))
+
+    return {
+        'score': round(score, 3),
+        'method': 'Rhetoric of Frankness (Rosen)',
+        'frankness_density': round(frank_density, 5),
+        'daring_density': round(dare_density, 5),
+        'hedging_density': round(hedge_density, 5),
+        'frank_passage_count': len(frank_passages),
+        'performative_frankness_count': performative_count,
+        'frank_passages': frank_passages[:5],
+        'precedent': (
+            "Rosen, 'Hermeneutics as Politics': Kant's rhetoric of frankness ('dare to know') "
+            "is itself rhetorical. Declarations of openness can function as concealment by "
+            "deflecting attention from what remains hidden. The frank author says 'I am hiding "
+            "nothing'—which is itself a form of hiding."
+        ),
+        'interpretation': (
+            'High scores indicate the author uses performative transparency as a strategy. '
+            'Passages declaring frankness that are simultaneously hedged suggest ironic '
+            'self-awareness: the author announces honesty while actually concealing. This is '
+            'a sophisticated defensive maneuver appropriate to texts under potential scrutiny.'
+        ),
+    }
+
+
+
+def detect_intuition_analysis_dialectic(text: str, delimiter_pattern: str = None) -> dict:
+    """Rosen, The Limits of Analysis: Appeal to non-discursive knowing."""
+    intuition_vocab = {
+        'intuition', 'intuitive', 'see', 'seeing', 'vision', 'grasp', 'apprehend',
+        'perceive', 'self-evident', 'immediately', 'pre-analytical', 'pre-theoretical',
+        'given', 'anschauung'
+    }
+    analysis_limit = {
+        'cannot be analyzed', 'limits of analysis', 'cannot be defined', 'indefinable',
+        'primitive', 'logically simple', 'hint', 'cannot be formalized', 'resists formalization'
+    }
+    looking_metaphors = {
+        'look at', 'look into', 'gaze', 'contemplate', 'insight', 'see', 'vision'
+    }
+    reflexive = {
+        'concept of concept', 'definition of definition', 'analysis of analysis',
+        'knowledge of knowledge'
+    }
+
+    int_passages = []
+    for i, para in enumerate(re.split(delimiter_pattern or r'\n\s*\n', text)):
+        para_words = set(w.lower() for w in re.findall(r'\b[a-zA-Z]+\b', para) if w.isalpha())
+        int_hits = len(para_words & intuition_vocab)
+        lim_hits = len(para_words & analysis_limit)
+        look_hits = len(para_words & looking_metaphors)
+        refl_hits = len(para_words & reflexive)
+        if int_hits > 0 or lim_hits > 0:
+            int_passages.append({
+                'paragraph': i,
+                'intuition_markers': int_hits,
+                'limit_markers': lim_hits,
+                'looking_markers': look_hits,
+                'reflexive_markers': refl_hits,
+                'excerpt': para[:200],
+            })
+
+    all_words = [w.lower() for w in re.findall(r'\b[a-zA-Z]{3,}\b', text.lower()) if w.isalpha()]
+    total = max(len(all_words), 1)
+    int_density = sum(1 for w in all_words if w in intuition_vocab) / total
+    lim_density = sum(1 for w in all_words if w in analysis_limit) / total
+    refl_density = sum(1 for w in all_words if w in reflexive) / total
+
+    score = min(1.0, (
+        int_density * 25 + lim_density * 30 + refl_density * 35 +
+        len(int_passages) / max(len(re.split(delimiter_pattern or r'\n\s*\n', text)), 1) * 10
+    ))
+
+    return {
+        'score': round(score, 3),
+        'method': 'Intuition-Analysis Dialectic (Rosen)',
+        'intuition_density': round(int_density, 5),
+        'analysis_limit_density': round(lim_density, 5),
+        'reflexive_density': round(refl_density, 5),
+        'intuitive_passage_count': len(int_passages),
+        'intuitive_passages': int_passages[:5],
+        'precedent': (
+            "Rosen, 'The Limits of Analysis': All analysis depends on prior intuition "
+            "(non-discursive 'seeing'). The concept of 'concept' cannot itself be defined "
+            "conceptually. Frege acknowledged 'hints' (Winke) for logically simple primitives "
+            "that cannot be analyzed further."
+        ),
+        'interpretation': (
+            'High scores indicate the text acknowledges its own limits—the author appeals to '
+            'direct seeing, intuition, or primitive terms that resist further analysis. This '
+            'appeal to the non-discursive marks a boundary of rational argument and signals '
+            'that certain truths are pre-analytical or require contemplative seeing.'
+        ),
+    }
+
+
+
+def detect_logographic_necessity(text: str, delimiter_pattern: str = None) -> dict:
+    """Benardete: Dramatic/formal constraints carry philosophical content."""
+    constraint_vocab = {
+        'conditions for', 'constraints', 'necessity', 'had to be', 'could not be otherwise',
+        'required', 'demanded', 'forced', 'inevitable', 'dramatic necessity'
+    }
+    form_content = {
+        'form carries', 'structure reveals', 'shows rather', 'enacts', 'dramatizes',
+        'performs', 'embodies', 'the form', 'the structure'
+    }
+    narrative_vocab = {
+        'dialogue', 'interlocutor', 'dramatic', 'scene', 'setting', 'character',
+        'plot', 'narrative', 'dialogue form', 'exchange'
+    }
+
+    logo_passages = []
+    for i, para in enumerate(re.split(delimiter_pattern or r'\n\s*\n', text)):
+        para_words = set(w.lower() for w in re.findall(r'\b[a-zA-Z]+\b', para) if w.isalpha())
+        const_hits = len(para_words & constraint_vocab)
+        form_hits = len(para_words & form_content)
+        narr_hits = len(para_words & narrative_vocab)
+        if const_hits > 0 or form_hits > 0:
+            logo_passages.append({
+                'paragraph': i,
+                'constraint_markers': const_hits,
+                'form_content_markers': form_hits,
+                'narrative_markers': narr_hits,
+                'excerpt': para[:200],
+            })
+
+    all_words = [w.lower() for w in re.findall(r'\b[a-zA-Z]{3,}\b', text.lower()) if w.isalpha()]
+    total = max(len(all_words), 1)
+    const_density = sum(1 for w in all_words if w in constraint_vocab) / total
+    form_density = sum(1 for w in all_words if w in form_content) / total
+    narr_density = sum(1 for w in all_words if w in narrative_vocab) / total
+
+    score = min(1.0, (
+        const_density * 25 + form_density * 35 + narr_density * 20 +
+        len(logo_passages) / max(len(re.split(delimiter_pattern or r'\n\s*\n', text)), 1) * 20
+    ))
+
+    return {
+        'score': round(score, 3),
+        'method': 'Logographic Necessity (Benardete)',
+        'constraint_density': round(const_density, 5),
+        'form_content_density': round(form_density, 5),
+        'narrative_density': round(narr_density, 5),
+        'logographic_passage_count': len(logo_passages),
+        'logographic_passages': logo_passages[:5],
+        'precedent': (
+            "Benardete (Freedom and the Human Person): 'It is not the arguments in Plato "
+            "that convey the truth but the conditions for the arguments that carry the logos. "
+            "In the Platonic universe necessity is the teleology.' Dramatic/formal constraints "
+            "ARE the philosophical argument."
+        ),
+        'interpretation': (
+            'High scores indicate the text\'s formal features—dialogue structure, dramatic '
+            'constraints, narrative necessity—carry philosophical weight. What cannot be said '
+            'directly is shown through the form. The condition of possibility for the argument '
+            'IS the argument.'
+        ),
+    }
+
+
+
+def detect_theological_disavowal(text: str, delimiter_pattern: str = None) -> dict:
+    """Rosen: Theology disguised as philosophy through substitution."""
+    theological_vocab = {
+        'god', 'divine', 'providence', 'creation', 'grace', 'immortality', 'soul',
+        'redemption', 'salvation', 'sin', 'sacred', 'holy', 'revelation', 'faith',
+        'prayer', 'heaven', 'eternal life', 'blessed', 'damnation'
+    }
+    philosophical_subs = {
+        'first principle', 'ground', 'condition of possibility', 'transcendental',
+        'noumenal', 'absolute', 'unconditional', 'postulate', 'regulative idea',
+        'necessary presupposition', 'categorical imperative', 'in-itself'
+    }
+    disavowal_markers = {
+        'not theological', 'purely philosophical', 'without recourse to', 'independent of',
+        'faith', 'secular', 'rational grounds', 'reason alone'
+    }
+
+    theo_passages = []
+    for i, para in enumerate(re.split(delimiter_pattern or r'\n\s*\n', text)):
+        para_words = set(w.lower() for w in re.findall(r'\b[a-zA-Z]+\b', para) if w.isalpha())
+        theo_hits = len(para_words & theological_vocab)
+        phil_hits = len(para_words & philosophical_subs)
+        disav_hits = len(para_words & disavowal_markers)
+        co_occur = 1.5 if (theo_hits > 0 and disav_hits > 0) else 1.0 if theo_hits > 0 else 0
+        if theo_hits > 0:
+            theo_passages.append({
+                'paragraph': i,
+                'theological_terms': theo_hits,
+                'philosophical_subs_terms': phil_hits,
+                'disavowal_markers': disav_hits,
+                'co_occurrence_boost': co_occur,
+                'excerpt': para[:200],
+            })
+
+    all_words = [w.lower() for w in re.findall(r'\b[a-zA-Z]{3,}\b', text.lower()) if w.isalpha()]
+    total = max(len(all_words), 1)
+    theo_density = sum(1 for w in all_words if w in theological_vocab) / total
+    phil_density = sum(1 for w in all_words if w in philosophical_subs) / total
+    disav_density = sum(1 for w in all_words if w in disavowal_markers) / total
+    avg_co_occur = sum(p['co_occurrence_boost'] for p in theo_passages) / max(len(theo_passages), 1)
+
+    score = min(1.0, (
+        theo_density * 25 + phil_density * 20 + disav_density * 30 + avg_co_occur * 15
+    ))
+
+    return {
+        'score': round(score, 3),
+        'method': 'Theological Disavowal (Rosen)',
+        'theological_density': round(theo_density, 5),
+        'philosophical_substitute_density': round(phil_density, 5),
+        'disavowal_density': round(disav_density, 5),
+        'theo_passage_count': len(theo_passages),
+        'theological_passages': theo_passages[:5],
+        'precedent': (
+            "Rosen, 'Hermeneutics as Politics': Modern philosophy reproduces theological "
+            "structures (God, creation, grace, immortality) through philosophical terminology "
+            "without acknowledging religious origins. Kant's 'postulates of practical reason' "
+            "are theology in disguise."
+        ),
+        'interpretation': (
+            'High scores indicate theological vocabulary appears in the text, often paired '
+            'with claims of purely philosophical (non-theological) content. This suggests the '
+            'author is translating theological concepts into philosophical vocabulary—a '
+            'strategy common in texts seeking to evade religious censorship or dogmatism.'
+        ),
+    }
+
+
+
+def detect_defensive_writing(text: str, delimiter_pattern: str = None) -> dict:
+    """Rosen/Strauss: Detect preemptive rebuttals, disclaimers, and excessive qualification."""
+    defensive_markers = {
+        'i do not mean', 'let no one', 'far be it', 'hasten to add', 'should not be taken',
+        'would not wish', 'contrary to', 'i do not wish', 'understand me', 'no such thing'
+    }
+    orthodox_appeals = {
+        'in accordance with', 'tradition teaches', 'as the ancients', 'as the church',
+        'as scripture', 'as is well known', 'as everyone', 'no reasonable person',
+        'the wise', 'the learned'
+    }
+    qualification_vocab = {
+        'to be sure', 'of course', 'naturally', 'needless to say', 'goes without saying',
+        'admittedly', 'granted', 'certainly', 'undoubtedly', 'no doubt'
+    }
+    preempt_vocab = {
+        'one might object', 'some will say', 'it may seem', 'the objection', 'critics will',
+        'some argue', 'one might think', 'perhaps it will be objected'
+    }
+
+    def_passages = []
+    for i, para in enumerate(re.split(delimiter_pattern or r'\n\s*\n', text)):
+        para_words = set(w.lower() for w in re.findall(r'\b[a-zA-Z]+\b', para) if w.isalpha())
+        def_hits = len(para_words & defensive_markers)
+        orth_hits = len(para_words & orthodox_appeals)
+        qual_hits = len(para_words & qualification_vocab)
+        pree_hits = len(para_words & preempt_vocab)
+        total_hits = def_hits + orth_hits + qual_hits + pree_hits
+        if total_hits > 0:
+            def_passages.append({
+                'paragraph': i,
+                'defensive_markers': def_hits,
+                'orthodox_appeals': orth_hits,
+                'qualifications': qual_hits,
+                'preemptive_rebuttals': pree_hits,
+                'total_defensive_score': total_hits,
+                'excerpt': para[:200],
+            })
+
+    all_words = [w.lower() for w in re.findall(r'\b[a-zA-Z]{3,}\b', text.lower()) if w.isalpha()]
+    total = max(len(all_words), 1)
+    def_density = sum(1 for w in all_words if w in defensive_markers) / total
+    orth_density = sum(1 for w in all_words if w in orthodox_appeals) / total
+    qual_density = sum(1 for w in all_words if w in qualification_vocab) / total
+    pree_density = sum(1 for w in all_words if w in preempt_vocab) / total
+    multi_cat = sum(1 for p in def_passages if sum([
+        p['defensive_markers']>0, p['orthodox_appeals']>0, p['qualifications']>0, p['preemptive_rebuttals']>0
+    ]) > 1) / max(len(def_passages), 1)
+
+    score = min(1.0, (
+        def_density * 20 + orth_density * 20 + qual_density * 15 + pree_density * 25 + multi_cat * 20
+    ))
+
+    return {
+        'score': round(score, 3),
+        'method': 'Defensive Writing (Rosen/Strauss)',
+        'defensive_density': round(def_density, 5),
+        'orthodox_appeal_density': round(orth_density, 5),
+        'qualification_density': round(qual_density, 5),
+        'preemptive_density': round(pree_density, 5),
+        'defensive_passage_count': len(def_passages),
+        'multi_category_ratio': round(multi_cat, 5),
+        'defensive_passages': def_passages[:5],
+        'precedent': (
+            "Rosen, 'The Elusiveness of the Ordinary': Montesquieu's preface is a 'defensive "
+            "maneuver' against charges of atheism and amoralism. His work was placed on the Index. "
+            "The moderate Enlightenment required defensive strategies distinct from revolutionary "
+            "esotericism."
+        ),
+        'interpretation': (
+            'High scores indicate the author employs multiple defensive strategies simultaneously: '
+            'disclaimers, appeals to orthodoxy, excessive qualification, and preemptive rebuttals. '
+            'This defensive layering suggests the text addresses a potentially hostile audience—a '
+            'hallmark of texts written under threat of censorship or doctrinal persecution.'
+        ),
+    }
+
+
+
+def detect_nature_freedom_oscillation(text: str, delimiter_pattern: str = None) -> dict:
+    """Rosen on Montesquieu: Systematic oscillation between necessity and freedom."""
+    nature_vocab = {
+        'nature', 'natural law', 'determined', 'necessity', 'determined by', 'law of nature',
+        'universal', 'invariable', 'fixed', 'regularity', 'instinct', 'mechanism',
+        'cause', 'effect', 'natural', 'inevitable', 'necessary'
+    }
+    freedom_vocab = {
+        'freedom', 'free', 'choice', 'will', 'voluntary', 'contingent', 'historical',
+        'circumstance', 'diversity', 'culture', 'convention', 'arbitrary', 'open',
+        'flexibility', 'autonomy', 'agent'
+    }
+
+    # Detect paragraph-level dominance
+    nature_paras = []
+    freedom_paras = []
+    oscillations = 0
+
+    for i, para in enumerate(re.split(delimiter_pattern or r'\n\s*\n', text)):
+        para_words = set(w.lower() for w in re.findall(r'\b[a-zA-Z]+\b', para) if w.isalpha())
+        nat_count = len(para_words & nature_vocab)
+        free_count = len(para_words & freedom_vocab)
+
+        if nat_count > free_count and nat_count > 0:
+            nature_paras.append(i)
+        elif free_count > nat_count and free_count > 0:
+            freedom_paras.append(i)
+
+    # Count alternations
+    for i in range(len(re.split(delimiter_pattern or r'\n\s*\n', text)) - 1):
+        para_i = set(w.lower() for w in re.findall(r'\b[a-zA-Z]+\b', re.split(delimiter_pattern or r'\n\s*\n', text)[i]) if w.isalpha())
+        para_next = set(w.lower() for w in re.findall(r'\b[a-zA-Z]+\b', re.split(delimiter_pattern or r'\n\s*\n', text)[i+1]) if w.isalpha())
+        nat_i = len(para_i & nature_vocab)
+        free_i = len(para_i & freedom_vocab)
+        nat_next = len(para_next & nature_vocab)
+        free_next = len(para_next & freedom_vocab)
+
+        if (nat_i > free_i and free_next > nat_next) or (free_i > nat_i and nat_next > free_next):
+            oscillations += 1
+
+    all_words = [w.lower() for w in re.findall(r'\b[a-zA-Z]{3,}\b', text.lower()) if w.isalpha()]
+    total = max(len(all_words), 1)
+    nat_density = sum(1 for w in all_words if w in nature_vocab) / total
+    free_density = sum(1 for w in all_words if w in freedom_vocab) / total
+    switch_frequency = oscillations / max(len(re.split(delimiter_pattern or r'\n\s*\n', text)) - 1, 1)
+
+    # Detect explicit tension acknowledgments
+    tension_detected = False
+    for sent in re.split(r'[.!?]+', text):
+        sent_words = sent.lower()
+        if any(phrase in sent_words for phrase in ['tension', 'paradox', 'freedom and necessity', 'necessity and freedom']):
+            tension_detected = True
+            break
+
+    score = min(1.0, (
+        switch_frequency * 40 + nat_density * 15 + free_density * 15 +
+        (1.5 if tension_detected else 1.0) * 10
+    ))
+
+    return {
+        'score': round(score, 3),
+        'method': 'Nature-Freedom Oscillation (Rosen on Montesquieu)',
+        'nature_density': round(nat_density, 5),
+        'freedom_density': round(free_density, 5),
+        'oscillation_frequency': round(switch_frequency, 5),
+        'oscillation_count': oscillations,
+        'nature_dominant_paragraphs': len(nature_paras),
+        'freedom_dominant_paragraphs': len(freedom_paras),
+        'explicit_tension_acknowledged': tension_detected,
+        'precedent': (
+            "Rosen, 'The Elusiveness of the Ordinary': Montesquieu systematically oscillates "
+            "between treating human behavior as determined by natural law and as free/open. "
+            "This oscillation reflects genuine tension in human nature between necessity and "
+            "freedom."
+        ),
+        'interpretation': (
+            'High scores indicate the text alternates between deterministic and freedom-oriented '
+            'vocabulary in a systematic pattern. Rather than resolving the tension between nature '
+            'and freedom, the author highlights and maintains the oscillation—suggesting both are '
+            'necessary and irreducible aspects of the human condition.'
+        ),
+    }
+
+# ------------------------------------------------------------------
+# METHOD 34: POSTMODERN MISREADING VULNERABILITY (Rosen)
+# ------------------------------------------------------------------
+
+
+
+def detect_postmodern_misreading(text: str, delimiter_pattern: str = None) -> dict:
+    """
+    METHOD: Postmodern Misreading Vulnerability Analysis
+    PRECEDENT: Rosen, "Hermeneutics as Politics" and "Plato's Symposium" —
+               Rosen argues that postmodern/deconstructionist reading commits
+               specific hermeneutic errors: (1) importing Heidegger's "metaphysics
+               of presence" critique into texts where it doesn't apply, (2) reducing
+               silence and noetic perception to textuality, (3) dissolving authorial
+               intention into "play of signifiers", (4) treating rhetorical
+               accommodation as evidence of conceptual instability, (5) collapsing
+               the esoteric/exoteric distinction into undecidability.
+
+    Technique: Two-track analysis. Track A identifies features of the text that
+    postmodernism would latch onto (paradox, absence, metaphor, "presence"
+    language) and predict where misreading is likeliest. Track B identifies
+    features that postmodernism would miss (intentional design, audience
+    accommodation, esoteric layers, noetic content, formal constraints as
+    philosophical content). The ratio between the two produces a "misreading
+    vulnerability" score.
+    """
+    # ---- TRACK A: What postmodernism would latch onto ----
+    # Features that invite deconstruction/misreading
+
+    pm_latch_vocab = {
+        # presence/absence language postmodernism would seize on
+        'presence', 'present', 'absent', 'absence', 'appear', 'appearance',
+        'manifest', 'revelation', 'disclosed', 'disclose', 'visible',
+        'invisible', 'hidden', 'concealed', 'surface', 'depth',
+        # binary oppositions postmodernism would "deconstruct"
+        'origin', 'original', 'copy', 'image', 'imitation', 'representation',
+        'truth', 'illusion', 'reality', 'appearance', 'being', 'becoming',
+        'same', 'other', 'identity', 'difference', 'one', 'many',
+        # metaphors of writing/speech postmodernism would privilege
+        'writing', 'written', 'text', 'speech', 'voice', 'silence',
+        'sign', 'signify', 'meaning', 'interpretation', 'reading',
+        # paradox/aporia language
+        'paradox', 'contradiction', 'aporia', 'impossible', 'undecidable',
+        'cannot be decided', 'indeterminate',
+    }
+
+    pm_misread_vocab = {
+        # Derrida/Heidegger vocabulary — when found IN the analysis
+        # (not in the primary text), signals postmodern reading
+        'differance', 'différance', 'trace', 'traces', 'supplement',
+        'supplementarity', 'dissemination', 'deconstruction', 'deconstructive',
+        'archi-writing', 'logocentrism', 'logocentric', 'phonocentrism',
+        'phallogocentrism', 'metaphysics of presence', 'onto-theology',
+        'closure', 'under erasure', 'sous rature', 'play of signifiers',
+        'iterability', 'undecidability', 'aporia',
+    }
+
+    # ---- TRACK B: What postmodernism would miss ----
+    # Features Rosen identifies as invisible to postmodern reading
+
+    pm_miss_vocab = {
+        # Intentional design vocabulary
+        'design', 'intention', 'purpose', 'deliberate', 'carefully',
+        'constructed', 'planned', 'arranged', 'architecture', 'structure',
+        'author', 'authored', 'composed',
+        # Audience accommodation
+        'audience', 'reader', 'listener', 'accommodate', 'adapted',
+        'adjusted', 'addressed', 'suitable', 'appropriate', 'persuade',
+        'medicinal', 'therapeutic', 'pedagogical',
+        # Esoteric/exoteric distinction
+        'esoteric', 'exoteric', 'concealment', 'caution', 'prudence',
+        'persecution', 'censorship', 'dangerous', 'heterodox',
+        # Noetic/intuitive perception
+        'intuition', 'noetic', 'intellectual perception', 'direct apprehension',
+        'insight', 'contemplation', 'recollection', 'anamnesis',
+        # Formal constraints as content
+        'dramatic', 'dialogue', 'interlocutor', 'character', 'setting',
+        'dramatic context', 'formal constraint', 'form carries',
+        # Nature/hierarchy
+        'nature', 'natural', 'hierarchy', 'rank', 'order', 'eternal',
+        'permanent', 'unchanging', 'universal',
+    }
+
+    # ---- SCAN TEXT ----
+    latch_count = 0
+    miss_count = 0
+    misread_count = 0
+    latch_paras = []
+    miss_paras = []
+    misread_paras = []
+
+    for i, para in enumerate(re.split(delimiter_pattern or r'\n\s*\n', text)):
+        words = set(w.lower() for w in re.findall(r'\b[a-zA-Z]+\b', para) if w.isalpha())
+        text_lower = para.lower()
+
+        # Count latch-on features
+        latch_hits = words & pm_latch_vocab
+        # Also check multi-word phrases
+        for phrase in ['metaphysics of presence', 'play of signifiers',
+                       'cannot be decided', 'under erasure']:
+            if phrase in text_lower:
+                latch_hits.add(phrase)
+
+        # Count miss features
+        miss_hits = words & pm_miss_vocab
+        for phrase in ['intellectual perception', 'direct apprehension',
+                       'dramatic context', 'formal constraint', 'form carries']:
+            if phrase in text_lower:
+                miss_hits.add(phrase)
+
+        # Count explicit postmodern vocabulary (already present)
+        misread_hits = words & pm_misread_vocab
+        for phrase in ['metaphysics of presence', 'play of signifiers',
+                       'under erasure', 'sous rature', 'archi-writing']:
+            if phrase in text_lower:
+                misread_hits.add(phrase)
+
+        if len(latch_hits) >= 3:
+            latch_count += 1
+            latch_paras.append({
+                'paragraph': i + 1,
+                'latch_terms': list(latch_hits)[:10],
+                'excerpt': para[:200],
+            })
+
+        if len(miss_hits) >= 2:
+            miss_count += 1
+            miss_paras.append({
+                'paragraph': i + 1,
+                'miss_terms': list(miss_hits)[:10],
+                'excerpt': para[:200],
+            })
+
+        if misread_hits:
+            misread_count += 1
+            misread_paras.append({
+                'paragraph': i + 1,
+                'postmodern_terms': list(misread_hits),
+                'excerpt': para[:200],
+            })
+
+    n = max(len(re.split(delimiter_pattern or r'\n\s*\n', text)), 1)
+
+    # Vulnerability: high latch-on density + low miss-feature density
+    latch_ratio = latch_count / n
+    miss_ratio = miss_count / n
+    misread_ratio = misread_count / n
+
+    # Vulnerability = features PM would exploit / features PM would miss
+    # High score = text is very vulnerable to postmodern misreading
+    # (many "deconstructible" features, few signals of intentional design)
+    if miss_ratio > 0:
+        vulnerability_ratio = latch_ratio / miss_ratio
+    else:
+        vulnerability_ratio = latch_ratio * 10  # no miss-features = high vulnerability
+
+    # Already-postmodern score: does the text itself use PM vocabulary?
+    already_pm = min(1.0, misread_ratio * 5)
+
+    # Overall score: combines vulnerability + already-PM
+    score = min(1.0, vulnerability_ratio * 0.3 + already_pm * 0.3 + latch_ratio * 2)
+
+    return {
+        'score': round(score, 3),
+        'latch_on_density': round(latch_ratio, 4),
+        'missed_feature_density': round(miss_ratio, 4),
+        'vulnerability_ratio': round(vulnerability_ratio, 3),
+        'already_postmodern_density': round(already_pm, 3),
+        'latch_paragraphs': latch_paras[:10],
+        'miss_paragraphs': miss_paras[:10],
+        'postmodern_vocabulary_paragraphs': misread_paras[:10],
+        'total_latch_paragraphs': latch_count,
+        'total_miss_paragraphs': miss_count,
+        'total_postmodern_paragraphs': misread_count,
+        'method': 'Postmodern Misreading Vulnerability (Rosen Method)',
+        'precedent': (
+            "Rosen, 'Hermeneutics as Politics' and 'Plato's Symposium': Postmodern/deconstructionist "
+            "reading commits five hermeneutic errors: (1) importing the Heideggerian 'metaphysics of "
+            "presence' critique where it does not apply; (2) reducing silence and noetic perception to "
+            "textuality; (3) dissolving authorial intention into 'play of signifiers'; (4) treating "
+            "rhetorical accommodation as evidence of conceptual instability; (5) collapsing the "
+            "esoteric/exoteric distinction into undecidability. Derrida 'does not seem to notice that "
+            "there is a pregnant absence here, about to fill itself up with a poetic episteme, to say "
+            "nothing of the silence of noetic perception.'"
+        ),
+        'interpretation': (
+            'Track A (latch-on features) measures how much material the text provides for '
+            'postmodern "deconstruction" — presence/absence language, binary oppositions, writing '
+            'metaphors, paradoxes. Track B (missed features) measures intentional design signals, '
+            'audience accommodation, esoteric layering, noetic vocabulary, and formal-constraint-as-'
+            'content markers that postmodern reading systematically ignores. High vulnerability ratio '
+            'means the text has many deconstructible features but few signals that would correct a '
+            'postmodern misreading. A Rosenian reader would recognize that the "deconstructible" '
+            'features are DELIBERATE authorial strategies (not conceptual instabilities) precisely '
+            'because the missed features reveal intentional design.'
+        ),
+    }
+
+
+
+def detect_dramatic_context(text: str, delimiter_pattern: str = None) -> dict:
+    """Rosen on Plato's Symposium: Speaker identity, setting, and occasion shape meaning."""
+    speaker_vocab = {
+        'speaker', 'says', 'replied', 'asked', 'argued', 'claims', 'addresses',
+        'audience', 'listener', 'speaker identification', 'uttered', 'remarked'
+    }
+    setting_vocab = {
+        'occasion', 'dinner', 'feast', 'gathering', 'trial', 'assembly', 'symposium',
+        'scene', 'dramatic', 'setting', 'venue', 'place', 'location', 'where'
+    }
+    persona_vocab = {
+        'character', 'role', 'mask', 'persona', 'voice', 'perspective', 'position',
+        'stands', 'viewpoint', 'stance', 'speaks as', 'assumes'
+    }
+
+    dramatic_passages = []
+    for i, para in enumerate(re.split(delimiter_pattern or r'\n\s*\n', text)):
+        para_words = set(w.lower() for w in re.findall(r'\b[a-zA-Z]+\b', para) if w.isalpha())
+        speaker_hits = len(para_words & speaker_vocab)
+        setting_hits = len(para_words & setting_vocab)
+        persona_hits = len(para_words & persona_vocab)
+        combined = speaker_hits + setting_hits + persona_hits
+        if combined > 0:
+            dramatic_passages.append({
+                'paragraph': i,
+                'speaker_markers': speaker_hits,
+                'setting_markers': setting_hits,
+                'persona_markers': persona_hits,
+                'combined_score': combined,
+                'excerpt': para[:200],
+            })
+
+    all_words = [w.lower() for w in re.findall(r'\b[a-zA-Z]{3,}\b', text.lower()) if w.isalpha()]
+    total = max(len(all_words), 1)
+    speaker_density = sum(1 for w in all_words if w in speaker_vocab) / total
+    setting_density = sum(1 for w in all_words if w in setting_vocab) / total
+    persona_density = sum(1 for w in all_words if w in persona_vocab) / total
+
+    # Attribution patterns (quoted speech markers)
+    attribution_patterns = sum(1 for para in re.split(delimiter_pattern or r'\n\s*\n', text) if 'said' in para.lower() or '"' in para)
+    attribution_density = attribution_patterns / max(len(re.split(delimiter_pattern or r'\n\s*\n', text)), 1)
+
+    score = min(1.0, (
+        speaker_density * 25 + setting_density * 25 + persona_density * 20 +
+        attribution_density * 15 + len(dramatic_passages) / max(len(re.split(delimiter_pattern or r'\n\s*\n', text)), 1) * 15
+    ))
+
+    return {
+        'score': round(score, 3),
+        'method': 'Dramatic Context (Rosen on Plato\'s Symposium)',
+        'speaker_vocabulary_density': round(speaker_density, 5),
+        'setting_vocabulary_density': round(setting_density, 5),
+        'persona_vocabulary_density': round(persona_density, 5),
+        'attribution_density': round(attribution_density, 5),
+        'dramatic_passage_count': len(dramatic_passages),
+        'dramatic_passages': dramatic_passages[:5],
+        'precedent': (
+            "Rosen, 'Plato's Symposium': Speaker identity, audience composition, setting, "
+            "and occasion all shape philosophical meaning. Arguments cannot be separated from "
+            "who speaks them, to whom, and under what circumstances."
+        ),
+        'interpretation': (
+            'High scores indicate the text foregrounds dramatic framing as essential to meaning. '
+            'Philosophical content is inseparable from speaker, setting, and audience. The reader '
+            'must attend to who speaks, where, to whom, and when to grasp the full argument.'
+        ),
+    }
+
+
+
+def detect_speech_sequencing(text: str, delimiter_pattern: str = None) -> dict:
+    """Rosen on Plato's Symposium: Successive speeches build and transform each other."""
+    ordinal_vocab = {
+        'first', 'second', 'third', 'next', 'then', 'finally', 'last', 'preceding',
+        'following', 'after', 'before', 'earlier', 'later', 'subsequently'
+    }
+    response_vocab = {
+        'responds', 'replies', 'corrects', 'challenges', 'agrees', 'disagrees',
+        'builds on', 'transforms', 'surpasses', 'transcends', 'supersedes', 'reverses',
+        'reaction', 'response', 'objection', 'counter', 'address'
+    }
+    progression_vocab = {
+        'ascent', 'descent', 'higher', 'lower', 'better', 'worse', 'advance',
+        'progress', 'regress', 'culminates', 'culmination', 'peak', 'apex', 'upward',
+        'downward', 'elevation', 'decline'
+    }
+
+    sequential_passages = []
+    for i, para in enumerate(re.split(delimiter_pattern or r'\n\s*\n', text)):
+        para_words = set(w.lower() for w in re.findall(r'\b[a-zA-Z]+\b', para) if w.isalpha())
+        ordinal_hits = len(para_words & ordinal_vocab)
+        response_hits = len(para_words & response_vocab)
+        progression_hits = len(para_words & progression_vocab)
+        combined = ordinal_hits + response_hits + progression_hits
+        if combined > 0:
+            sequential_passages.append({
+                'paragraph': i,
+                'ordinal_markers': ordinal_hits,
+                'response_markers': response_hits,
+                'progression_markers': progression_hits,
+                'combined_score': combined,
+                'excerpt': para[:200],
+            })
+
+    all_words = [w.lower() for w in re.findall(r'\b[a-zA-Z]{3,}\b', text.lower()) if w.isalpha()]
+    total = max(len(all_words), 1)
+    ordinal_density = sum(1 for w in all_words if w in ordinal_vocab) / total
+    response_density = sum(1 for w in all_words if w in response_vocab) / total
+    progression_density = sum(1 for w in all_words if w in progression_vocab) / total
+
+    score = min(1.0, (
+        ordinal_density * 20 + response_density * 30 + progression_density * 25 +
+        len(sequential_passages) / max(len(re.split(delimiter_pattern or r'\n\s*\n', text)), 1) * 25
+    ))
+
+    return {
+        'score': round(score, 3),
+        'method': 'Speech Sequencing (Rosen on Plato\'s Symposium)',
+        'ordinal_density': round(ordinal_density, 5),
+        'response_density': round(response_density, 5),
+        'progression_density': round(progression_density, 5),
+        'sequential_passage_count': len(sequential_passages),
+        'sequential_passages': sequential_passages[:5],
+        'precedent': (
+            "Rosen, 'Plato's Symposium': Successive speeches in a dialogue build, contradict, "
+            "or transform each other. The ORDER matters: each speech responds to and modifies "
+            "what came before. Later speeches don't simply supersede earlier ones."
+        ),
+        'interpretation': (
+            'High scores indicate the text is fundamentally dialogical and sequential. Understanding '
+            'requires tracking the order of arguments and responses. The progression—ascent, descent, '
+            'transformation—is not incidental but constitutive of philosophical meaning.'
+        ),
+    }
+
+
+
+def detect_philosophical_comedy(text: str, delimiter_pattern: str = None) -> dict:
+    """Rosen on Plato's Symposium: Serious philosophy delivered through comic form."""
+    comic_vocab = {
+        'laugh', 'comic', 'joke', 'jest', 'humor', 'ridicule', 'absurd', 'funny',
+        'witty', 'playful', 'ludicrous', 'farce', 'mock', 'parody', 'satire', 'hiccup',
+        'belch', 'snore', 'comedy', 'laughter'
+    }
+    serious_vocab = {
+        'truth', 'justice', 'good', 'being', 'essence', 'soul', 'immortality', 'virtue',
+        'wisdom', 'knowledge', 'beauty', 'form', 'reality', 'idea', 'serious', 'earnest'
+    }
+    juxtaposition_vocab = {
+        'serious', 'earnest', 'joke', 'play', 'gravity', 'levity', 'laughter', 'tears',
+        'both', 'and', 'yet', 'though', 'despite', 'nonetheless', 'simultaneously'
+    }
+
+    comic_philosophy_passages = []
+    for i, para in enumerate(re.split(delimiter_pattern or r'\n\s*\n', text)):
+        para_words = set(w.lower() for w in re.findall(r'\b[a-zA-Z]+\b', para) if w.isalpha())
+        comic_hits = len(para_words & comic_vocab)
+        serious_hits = len(para_words & serious_vocab)
+        juxtaposition_hits = len(para_words & juxtaposition_vocab)
+
+        # High score when both comic and serious appear together
+        combo_boost = 2.0 if (comic_hits > 0 and serious_hits > 0) else 1.0
+        combined = (comic_hits + serious_hits) * combo_boost + juxtaposition_hits
+
+        if comic_hits > 0 and serious_hits > 0:
+            comic_philosophy_passages.append({
+                'paragraph': i,
+                'comic_markers': comic_hits,
+                'serious_markers': serious_hits,
+                'juxtaposition_markers': juxtaposition_hits,
+                'combined_score': combined,
+                'excerpt': para[:200],
+            })
+
+    all_words = [w.lower() for w in re.findall(r'\b[a-zA-Z]{3,}\b', text.lower()) if w.isalpha()]
+    total = max(len(all_words), 1)
+    comic_density = sum(1 for w in all_words if w in comic_vocab) / total
+    serious_density = sum(1 for w in all_words if w in serious_vocab) / total
+    juxtaposition_density = sum(1 for w in all_words if w in juxtaposition_vocab) / total
+
+    score = min(1.0, (
+        comic_density * 20 + serious_density * 25 + juxtaposition_density * 20 +
+        len(comic_philosophy_passages) / max(len(re.split(delimiter_pattern or r'\n\s*\n', text)), 1) * 35
+    ))
+
+    return {
+        'score': round(score, 3),
+        'method': 'Philosophical Comedy (Rosen on Plato\'s Symposium)',
+        'comic_density': round(comic_density, 5),
+        'serious_density': round(serious_density, 5),
+        'juxtaposition_density': round(juxtaposition_density, 5),
+        'comic_philosophy_passage_count': len(comic_philosophy_passages),
+        'comic_philosophy_passages': comic_philosophy_passages[:5],
+        'precedent': (
+            "Rosen, 'Plato's Symposium': Serious philosophical content delivered through comic "
+            "form. The comedy IS the philosophy; reducing to either pure seriousness or pure jest "
+            "misses the point. Aristophanes' speech is both the funniest AND contains essential "
+            "philosophical content."
+        ),
+        'interpretation': (
+            'High scores indicate comedy is not ornamental but constitutive of philosophical meaning. '
+            'The text uses humor as a vehicle for truth, allowing truths that cannot be stated directly. '
+            'The reader must learn to laugh while learning.'
+        ),
+    }
+
+
+
+def detect_daimonic_mediation(text: str, delimiter_pattern: str = None) -> dict:
+    """Rosen on Plato's Symposium: Eros as daimon mediates between mortal and divine."""
+    mediation_vocab = {
+        'between', 'intermediate', 'mediator', 'daimon', 'demon', 'messenger', 'bridge',
+        'link', 'middle', 'neither', 'nor', 'both', 'and', 'participate', 'partake', 'share'
+    }
+    boundary_vocab = {
+        'threshold', 'boundary', 'limit', 'border', 'edge', 'margin', 'horizon', 'liminal',
+        'passage', 'crossing', 'transition', 'divide', 'separation', 'junction'
+    }
+    transformation_vocab = {
+        'become', 'transform', 'ascend', 'elevate', 'transcend', 'aspire', 'strive', 'reach',
+        'desire', 'longing', 'yearning', 'eros', 'love', 'lack', 'poverty', 'resource',
+        'pregnant', 'birth', 'generation'
+    }
+
+    daimonic_passages = []
+    for i, para in enumerate(re.split(delimiter_pattern or r'\n\s*\n', text)):
+        para_words = set(w.lower() for w in re.findall(r'\b[a-zA-Z]+\b', para) if w.isalpha())
+        mediation_hits = len(para_words & mediation_vocab)
+        boundary_hits = len(para_words & boundary_vocab)
+        transformation_hits = len(para_words & transformation_vocab)
+        combined = mediation_hits + boundary_hits + transformation_hits
+        if combined > 0:
+            daimonic_passages.append({
+                'paragraph': i,
+                'mediation_markers': mediation_hits,
+                'boundary_markers': boundary_hits,
+                'transformation_markers': transformation_hits,
+                'combined_score': combined,
+                'excerpt': para[:200],
+            })
+
+    all_words = [w.lower() for w in re.findall(r'\b[a-zA-Z]{3,}\b', text.lower()) if w.isalpha()]
+    total = max(len(all_words), 1)
+    mediation_density = sum(1 for w in all_words if w in mediation_vocab) / total
+    boundary_density = sum(1 for w in all_words if w in boundary_vocab) / total
+    transformation_density = sum(1 for w in all_words if w in transformation_vocab) / total
+
+    score = min(1.0, (
+        mediation_density * 30 + boundary_density * 25 + transformation_density * 25 +
+        len(daimonic_passages) / max(len(re.split(delimiter_pattern or r'\n\s*\n', text)), 1) * 20
+    ))
+
+    return {
+        'score': round(score, 3),
+        'method': 'Daimonic Mediation (Rosen on Plato\'s Symposium)',
+        'mediation_density': round(mediation_density, 5),
+        'boundary_density': round(boundary_density, 5),
+        'transformation_density': round(transformation_density, 5),
+        'daimonic_passage_count': len(daimonic_passages),
+        'daimonic_passages': daimonic_passages[:5],
+        'precedent': (
+            "Rosen, 'Plato's Symposium': Eros is a daimon, intermediate between mortal and divine. "
+            "Philosophy itself is daimonic—it mediates between ignorance and wisdom, between the human "
+            "and the divine. Texts deploying intermediate/mediating figures embody this tradition."
+        ),
+        'interpretation': (
+            'High scores indicate the text structures meaning through mediation and intermediate concepts. '
+            'Neither/nor and both/and logic prevail. Transformation occurs at boundaries and thresholds. '
+            'The reader encounters a middle ground that enables passage between opposites.'
+        ),
+    }
+
+
+
+def detect_medicinal_rhetoric(text: str, delimiter_pattern: str = None) -> dict:
+    """Rosen on Plato's Symposium: Rhetoric as medicine adapted to the soul."""
+    medical_vocab = {
+        'medicine', 'heal', 'cure', 'remedy', 'disease', 'illness', 'healthy', 'sick',
+        'physician', 'doctor', 'therapy', 'treatment', 'diagnosis', 'prescription', 'dose',
+        'poison', 'drug', 'pharmakon', 'symptom', 'pathology'
+    }
+    pedagogical_vocab = {
+        'teach', 'student', 'learn', 'educate', 'instruct', 'lesson', 'pupil', 'guide',
+        'mentor', 'prepare', 'initiate', 'accommodate', 'adapt', 'tailor', 'training',
+        'education', 'instruction', 'discipline'
+    }
+    soul_vocab = {
+        'soul', 'psyche', 'character', 'temperament', 'disposition', 'nature', 'capacity',
+        'readiness', 'worthy', 'unworthy', 'able', 'unable', 'condition', 'state'
+    }
+
+    medicinal_passages = []
+    for i, para in enumerate(re.split(delimiter_pattern or r'\n\s*\n', text)):
+        para_words = set(w.lower() for w in re.findall(r'\b[a-zA-Z]+\b', para) if w.isalpha())
+        medical_hits = len(para_words & medical_vocab)
+        pedagogical_hits = len(para_words & pedagogical_vocab)
+        soul_hits = len(para_words & soul_vocab)
+        combined = medical_hits + pedagogical_hits + soul_hits
+        if combined > 0:
+            medicinal_passages.append({
+                'paragraph': i,
+                'medical_markers': medical_hits,
+                'pedagogical_markers': pedagogical_hits,
+                'soul_vocabulary': soul_hits,
+                'combined_score': combined,
+                'excerpt': para[:200],
+            })
+
+    all_words = [w.lower() for w in re.findall(r'\b[a-zA-Z]{3,}\b', text.lower()) if w.isalpha()]
+    total = max(len(all_words), 1)
+    medical_density = sum(1 for w in all_words if w in medical_vocab) / total
+    pedagogical_density = sum(1 for w in all_words if w in pedagogical_vocab) / total
+    soul_density = sum(1 for w in all_words if w in soul_vocab) / total
+
+    score = min(1.0, (
+        medical_density * 25 + pedagogical_density * 30 + soul_density * 25 +
+        len(medicinal_passages) / max(len(re.split(delimiter_pattern or r'\n\s*\n', text)), 1) * 20
+    ))
+
+    return {
+        'score': round(score, 3),
+        'method': 'Medicinal Rhetoric (Rosen on Plato\'s Symposium)',
+        'medical_density': round(medical_density, 5),
+        'pedagogical_density': round(pedagogical_density, 5),
+        'soul_vocabulary_density': round(soul_density, 5),
+        'medicinal_rhetoric_passage_count': len(medicinal_passages),
+        'medicinal_rhetoric_passages': medicinal_passages[:5],
+        'precedent': (
+            "Rosen, 'Plato's Symposium': Eryximachus treats rhetoric as medicine; speech must be "
+            "adapted to the condition of the listener/patient. Different souls need different speeches. "
+            "The philosopher as physician administers truth in measured doses, tailoring form to recipient."
+        ),
+        'interpretation': (
+            'High scores indicate the text deploys rhetoric as therapeutic intervention. Meaning adapts '
+            'to audience condition; the same truth requires different formulations for different souls. '
+            'The author functions as physician, diagnosing and treating through carefully measured speech.'
+        ),
+    }
+
+
+
+def detect_poetry_philosophy_dialectic(text: str, delimiter_pattern: str = None) -> dict:
+    """Rosen on Plato's Symposium: Reconciling the ancient quarrel between poetry and philosophy."""
+    poetry_vocab = {
+        'poem', 'poetry', 'poet', 'verse', 'song', 'sing', 'muse', 'inspiration', 'image',
+        'imagination', 'myth', 'story', 'narrative', 'beautiful', 'beauty', 'sublime',
+        'tragic', 'tragedy', 'comedy', 'drama', 'art', 'artistic', 'aesthetic', 'craft'
+    }
+    philosophy_vocab = {
+        'reason', 'argument', 'proof', 'logic', 'dialectic', 'definition', 'concept',
+        'analysis', 'demonstration', 'syllogism', 'principle', 'hypothesis', 'premise',
+        'conclusion', 'refute', 'examine', 'investigate', 'inquiry', 'method', 'truth'
+    }
+    quarrel_vocab = {
+        'quarrel', 'tension', 'rivalry', 'opposition', 'ancient quarrel', 'contest',
+        'compete', 'reconcile', 'synthesize', 'unite', 'both', 'together', 'integrate',
+        'interdepend', 'complement', 'mutual', 'reciprocal'
+    }
+
+    dialectic_passages = []
+    for i, para in enumerate(re.split(delimiter_pattern or r'\n\s*\n', text)):
+        para_words = set(w.lower() for w in re.findall(r'\b[a-zA-Z]+\b', para) if w.isalpha())
+        poetry_hits = len(para_words & poetry_vocab)
+        philosophy_hits = len(para_words & philosophy_vocab)
+        quarrel_hits = len(para_words & quarrel_vocab)
+
+        # Boost when poetry and philosophy co-occur
+        combo_boost = 1.5 if (poetry_hits > 0 and philosophy_hits > 0) else 1.0
+        combined = (poetry_hits + philosophy_hits) * combo_boost + quarrel_hits
+
+        if combined > 0:
+            dialectic_passages.append({
+                'paragraph': i,
+                'poetry_markers': poetry_hits,
+                'philosophy_markers': philosophy_hits,
+                'quarrel_markers': quarrel_hits,
+                'combined_score': combined,
+                'excerpt': para[:200],
+            })
+
+    all_words = [w.lower() for w in re.findall(r'\b[a-zA-Z]{3,}\b', text.lower()) if w.isalpha()]
+    total = max(len(all_words), 1)
+    poetry_density = sum(1 for w in all_words if w in poetry_vocab) / total
+    philosophy_density = sum(1 for w in all_words if w in philosophy_vocab) / total
+    quarrel_density = sum(1 for w in all_words if w in quarrel_vocab) / total
+
+    score = min(1.0, (
+        poetry_density * 25 + philosophy_density * 25 + quarrel_density * 25 +
+        len(dialectic_passages) / max(len(re.split(delimiter_pattern or r'\n\s*\n', text)), 1) * 25
+    ))
+
+    return {
+        'score': round(score, 3),
+        'method': 'Poetry-Philosophy Dialectic (Rosen on Plato\'s Symposium)',
+        'poetry_density': round(poetry_density, 5),
+        'philosophy_density': round(philosophy_density, 5),
+        'quarrel_density': round(quarrel_density, 5),
+        'dialectic_passage_count': len(dialectic_passages),
+        'dialectic_passages': dialectic_passages[:5],
+        'precedent': (
+            "Rosen, 'Plato's Symposium': Socrates demands that the same person write both comedy "
+            "and tragedy. The ancient quarrel between poetry and philosophy is resolved not by eliminating "
+            "one side but by showing their deep interdependence. Texts operating at this intersection embody this."
+        ),
+        'interpretation': (
+            'High scores indicate the text refuses to separate poetic from philosophical meaning. Poetry is not '
+            'decoration for philosophy; philosophy is not the essence with poetry as vehicle. Instead, they are '
+            'mutually constitutive. The quarrel itself is transcended through dialectical integration.'
+        ),
+    }
+
+
+
+def detect_aspiration_achievement_gap(text: str, delimiter_pattern: str = None) -> dict:
+    """Rosen on Plato's Symposium: Philosophy as permanent unfulfilled desire."""
+    aspiration_vocab = {
+        'aspire', 'strive', 'seek', 'desire', 'long', 'yearn', 'hope', 'aim', 'reach',
+        'pursue', 'quest', 'dream', 'wish', 'want', 'need', 'lack', 'poverty', 'deficiency',
+        'hunger', 'thirst', 'searching', 'seeking', 'striving'
+    }
+    achievement_vocab = {
+        'possess', 'attain', 'achieve', 'arrive', 'complete', 'fulfill', 'grasp', 'hold',
+        'have', 'obtain', 'master', 'accomplish', 'succeed', 'triumph', 'full', 'whole',
+        'perfect', 'sufficient', 'complete', 'finish', 'end', 'resolution'
+    }
+    gap_vocab = {
+        'gap', 'tension', 'between', 'never', 'always', 'permanent', 'eternal', 'unending',
+        'perpetual', 'ongoing', 'cannot', 'impossible', 'incomplete', 'partial', 'approach',
+        'approximate', 'asymptotic', 'forever', 'endless', 'unfulfilled'
+    }
+
+    aspiration_passages = []
+    for i, para in enumerate(re.split(delimiter_pattern or r'\n\s*\n', text)):
+        para_words = set(w.lower() for w in re.findall(r'\b[a-zA-Z]+\b', para) if w.isalpha())
+        aspiration_hits = len(para_words & aspiration_vocab)
+        achievement_hits = len(para_words & achievement_vocab)
+        gap_hits = len(para_words & gap_vocab)
+
+        # Unresolved aspiration: aspiration + gap, penalizing if achievement dominates
+        unresolved = 1.0 if (aspiration_hits > 0 and gap_hits > 0) else 0.5 if aspiration_hits > 0 else 0
+        resolved = 0.3 if achievement_hits > aspiration_hits else 0
+        combined = aspiration_hits + gap_hits - resolved
+
+        if aspiration_hits > 0 or gap_hits > 0:
+            aspiration_passages.append({
+                'paragraph': i,
+                'aspiration_markers': aspiration_hits,
+                'achievement_markers': achievement_hits,
+                'gap_markers': gap_hits,
+                'unresolved_score': unresolved,
+                'excerpt': para[:200],
+            })
+
+    all_words = [w.lower() for w in re.findall(r'\b[a-zA-Z]{3,}\b', text.lower()) if w.isalpha()]
+    total = max(len(all_words), 1)
+    aspiration_density = sum(1 for w in all_words if w in aspiration_vocab) / total
+    achievement_density = sum(1 for w in all_words if w in achievement_vocab) / total
+    gap_density = sum(1 for w in all_words if w in gap_vocab) / total
+
+    # Unresolved aspiration ratio: high when gap co-occurs with aspiration, low when achievement dominates
+    unresolved_passages = sum(1 for p in aspiration_passages if p['unresolved_score'] > 0.5)
+    unresolved_ratio = unresolved_passages / max(len(aspiration_passages), 1)
+
+    score = min(1.0, (
+        aspiration_density * 30 + gap_density * 30 - achievement_density * 15 +
+        unresolved_ratio * 25
+    ))
+
+    return {
+        'score': round(score, 3),
+        'method': 'Aspiration-Achievement Gap (Rosen on Plato\'s Symposium)',
+        'aspiration_density': round(aspiration_density, 5),
+        'achievement_density': round(achievement_density, 5),
+        'gap_density': round(gap_density, 5),
+        'unresolved_aspiration_ratio': round(unresolved_ratio, 5),
+        'aspiration_passage_count': len(aspiration_passages),
+        'aspiration_passages': aspiration_passages[:5],
+        'precedent': (
+            "Rosen, 'Plato's Symposium': Eros is desire for what one lacks. Philosophy is permanent "
+            "loving of wisdom without possessing it. The gap between aspiration and achievement is not "
+            "a defect to overcome but the essential condition of philosophy itself."
+        ),
+        'interpretation': (
+            'High scores indicate the text maintains the tension between desire and fulfillment without '
+            'resolving it. Philosophy appears not as achievement but as perpetual striving. The reader '
+            'learns that the gap IS the truth, and closure would be philosophical death.'
+        ),
+    }
+
+
+
+def detect_synoptic_requirement(text: str, delimiter_pattern: str = None) -> dict:
+    """Rosen on Plato's Symposium: Full understanding requires knowledge of wider corpus."""
+    cross_reference_vocab = {
+        'elsewhere', 'other work', 'as we have seen', 'as i have argued', 'compare', 'cf',
+        'see also', 'in the republic', 'in the phaedrus', 'already shown', 'previously',
+        'later', 'another place', 'other dialogue', 'other writing', 'earlier', 'reminds',
+        'recalls', 'anticipates', 'echoes', 'mentioned', 'noted'
+    }
+    intertextual_vocab = {
+        'allusion', 'reference', 'echo', 'parallel', 'analogy', 'correspond', 'similar',
+        'passage', 'compare', 'contrast', 'intertext', 'quotation', 'citation', 'invoke',
+        'evoke', 'reference', 'point to', 'gesture toward'
+    }
+    incompleteness_vocab = {
+        'partial', 'incomplete', 'fuller treatment', 'cannot be treated here', 'beyond our scope',
+        'on another occasion', 'requires', 'presupposes', 'assumes familiarity', 'reader who knows',
+        'further discussion', 'elsewhere explained', 'not here addressed', 'reserved for', 'separate study'
+    }
+
+    synoptic_passages = []
+    for i, para in enumerate(re.split(delimiter_pattern or r'\n\s*\n', text)):
+        para_words = set(w.lower() for w in re.findall(r'\b[a-zA-Z]+\b', para) if w.isalpha())
+        cross_ref_hits = len(para_words & cross_reference_vocab)
+        intertextual_hits = len(para_words & intertextual_vocab)
+        incompleteness_hits = len(para_words & incompleteness_vocab)
+        combined = cross_ref_hits + intertextual_hits + incompleteness_hits
+        if combined > 0:
+            synoptic_passages.append({
+                'paragraph': i,
+                'cross_reference_markers': cross_ref_hits,
+                'intertextual_markers': intertextual_hits,
+                'incompleteness_markers': incompleteness_hits,
+                'combined_score': combined,
+                'excerpt': para[:200],
+            })
+
+    all_words = [w.lower() for w in re.findall(r'\b[a-zA-Z]{3,}\b', text.lower()) if w.isalpha()]
+    total = max(len(all_words), 1)
+    cross_reference_density = sum(1 for w in all_words if w in cross_reference_vocab) / total
+    intertextual_density = sum(1 for w in all_words if w in intertextual_vocab) / total
+    incompleteness_density = sum(1 for w in all_words if w in incompleteness_vocab) / total
+
+    score = min(1.0, (
+        cross_reference_density * 30 + intertextual_density * 25 + incompleteness_density * 25 +
+        len(synoptic_passages) / max(len(re.split(delimiter_pattern or r'\n\s*\n', text)), 1) * 20
+    ))
+
+    return {
+        'score': round(score, 3),
+        'method': 'Synoptic Requirement (Rosen on Plato\'s Symposium)',
+        'cross_reference_density': round(cross_reference_density, 5),
+        'intertextual_density': round(intertextual_density, 5),
+        'incompleteness_density': round(incompleteness_density, 5),
+        'synoptic_passage_count': len(synoptic_passages),
+        'synoptic_passages': synoptic_passages[:5],
+        'precedent': (
+            "Rosen, 'Plato's Symposium': Full understanding of any dialogue requires knowledge of the "
+            "wider Platonic corpus. Rosen constantly cross-references other dialogues. Texts demanding "
+            "external knowledge for full comprehension deploy this technique intentionally."
+        ),
+        'interpretation': (
+            'High scores indicate the text cannot be understood in isolation. Its meaning depends on the '
+            'reader\'s familiarity with related works. Incompleteness is deliberate: it signals that full '
+            'understanding requires synoptic grasp of a larger body of work.'
+        ),
+    }
+
+# ------------------------------------------------------------------
+# FULL ANALYSIS
+# ------------------------------------------------------------------
+
+
+
