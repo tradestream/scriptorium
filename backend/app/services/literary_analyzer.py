@@ -2971,7 +2971,64 @@ class LiteraryAnalyzer:
                     })
 
         if len(poems) < 3:
-            # Fallback 2: split on triple+ newlines
+            # Fallback 2: Anthology format — author headings in ALL CAPS with dates
+            # Pattern: "SYLVIA PLATH (1932-1963)" followed by poem titles + page numbers
+            author_pattern = re.compile(
+                r'^([A-Z][A-Z\s\.\-\']{3,})\s*\(\s*(?:b\.\s*)?\d{4}\s*[-–]\s*(?:\d{4})?\s*\)',
+                re.MULTILINE,
+            )
+            author_matches = list(author_pattern.finditer(self.text))
+
+            if len(author_matches) >= 5:
+                poems = []
+                for i, am in enumerate(author_matches):
+                    author_name = am.group(1).strip().title()
+                    start = am.end()
+                    end = author_matches[i + 1].start() if i + 1 < len(author_matches) else len(self.text)
+                    author_section = self.text[start:end].strip()
+
+                    if not author_section or len(author_section) < 50:
+                        continue
+
+                    # Within each author's section, split on lines that look like poem titles
+                    # Pattern: Title Case words followed by a page number
+                    # "Daddy 1840" or "Morning Song 1837" or "The Colossus 1836"
+                    title_pattern = re.compile(
+                        r'^([A-Z][A-Za-z\s\'\"\,\-\.\:\;\!\?]+?)\s+\d{3,4}\s*$',
+                        re.MULTILINE,
+                    )
+                    title_matches = list(title_pattern.finditer(author_section))
+
+                    if title_matches:
+                        for j, tm in enumerate(title_matches):
+                            poem_title = tm.group(1).strip()
+                            # Skip if it's just the author name repeated or TOC-like
+                            if poem_title.upper() == poem_title or len(poem_title) < 3:
+                                continue
+                            p_start = tm.end()
+                            p_end = title_matches[j + 1].start() if j + 1 < len(title_matches) else len(author_section)
+                            body = author_section[p_start:p_end].strip()
+                            # Remove trailing page numbers
+                            body = re.sub(r'\s+\d{3,4}\s*$', '', body, flags=re.MULTILINE)
+                            if len(body) < 20:
+                                continue
+                            poems.append({
+                                "title": f"{poem_title} ({author_name})",
+                                "text": body,
+                                "index": len(poems),
+                                "author": author_name,
+                            })
+                    else:
+                        # No individual poem titles found — treat entire section as one entry
+                        poems.append({
+                            "title": f"Poems by {author_name}",
+                            "text": author_section,
+                            "index": len(poems),
+                            "author": author_name,
+                        })
+
+        if len(poems) < 3:
+            # Fallback 3: split on triple+ newlines
             chunks = re.split(r'\n{3,}', self.text)
             poems = []
             for i, chunk in enumerate(chunks):
