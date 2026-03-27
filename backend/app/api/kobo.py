@@ -195,9 +195,12 @@ async def kobo_book_metadata(
 
     return {
         "Title": book.title,
+        "Subtitle": getattr(book, 'subtitle', '') or "",
         "Contributors": author_name,
         "Description": book.description or "",
         "Language": book.language or "en",
+        "Isbn": getattr(book, 'isbn', '') or "",
+        "Publisher": {"Name": getattr(book, 'publisher', '') or ""},
         "EntitlementId": book.uuid,
         "CrossRevisionId": book.uuid,
         "RevisionId": book.uuid,

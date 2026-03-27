@@ -531,6 +531,7 @@ def _build_edition_entry(
                 "Publisher": {"Name": edition.publisher or ""},
                 "RevisionId": edition.uuid,
                 "Title": work.title if work else edition.uuid,
+                "Subtitle": work.subtitle if work and hasattr(work, 'subtitle') and work.subtitle else "",
                 "WorkId": edition.uuid,
             },
         }
@@ -621,6 +622,7 @@ def _build_book_entry(
                 "Publisher": {"Name": ""},
                 "RevisionId": book.uuid,
                 "Title": book.title,
+                "Subtitle": getattr(book, 'subtitle', '') or "",
                 "WorkId": book.uuid,
             },
         }
