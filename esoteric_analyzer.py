@@ -30,6 +30,9 @@ METHODS DETECTED:
   15. Commentary Divergence Analysis — where commentary departs from source
   16. Polysemy Detection — words operating across multiple semantic domains (Dante)
   17. Aphoristic Fragmentation — compression, mask-shifts, self-contradiction (Nietzsche)
+  18. Trapdoor Detection — local inconsistencies planted to force deeper reading (Benardete)
+  19. Dyadic Structure — conjunctive/disjunctive twos, phantom images, eidetic analysis (Benardete)
+  20. Periagoge Detection — structural reversal/turning, pathei mathos (Benardete/Plato)
 
 Usage:
   analyzer = EsotericAnalyzer()
@@ -1944,6 +1947,465 @@ class EsotericAnalyzer:
         }
 
     # ------------------------------------------------------------------
+    # BENARDETE METHODS (from "The Argument of the Action")
+    # ------------------------------------------------------------------
+
+    def analyze_trapdoors(self) -> dict:
+        """
+        METHOD: Trapdoor Detection
+        PRECEDENT: Seth Benardete's concept of "trapdoors" — intentional flaws
+                   in the apparent argument that induce the reader to "drop beneath
+                   the surface to uncover the source of movement that reveals the
+                   real argument" (Burger & Davis, Introduction, p. xi).
+
+        Unlike global contradiction analysis (which detects semantic tension between
+        distant passages), trapdoor analysis detects LOCAL impossibilities and
+        narrative inconsistencies within short windows — temporal impossibilities,
+        factual self-contradictions, logical non-sequiturs signaled by hedging
+        near strong claims — that a careful reader would notice as deliberately
+        planted flaws.
+
+        Technique:
+        1. Temporal impossibility: detect impossible time references within narrative
+        2. Local self-contradiction: within small windows, detect claim + negation
+        3. Hedging near absolutes: confident claims immediately qualified/undercut
+        4. Premise-conclusion mismatch: premises that don't actually support conclusions
+        """
+        # 1. Hedging near absolutes — a trapdoor signature
+        absolute_markers = {
+            'all', 'every', 'always', 'never', 'none', 'certainly', 'undoubtedly',
+            'obviously', 'clearly', 'indisputably', 'unquestionably', 'absolutely',
+            'must', 'necessarily', 'proven', 'established', 'beyond doubt',
+            'no one denies', 'everyone agrees', 'it is certain', 'without exception',
+        }
+        hedge_markers = {
+            'perhaps', 'maybe', 'possibly', 'might', 'could', 'seems', 'appears',
+            'apparently', 'arguably', 'supposedly', 'one might say', 'in a sense',
+            'so to speak', 'as it were', 'not entirely', 'not quite', 'almost',
+            'nearly', 'somewhat', 'rather', 'fairly', 'to some extent',
+            'it is not clear', 'one wonders', 'it remains to be seen',
+            'however', 'yet', 'but', 'although', 'though', 'nevertheless',
+            'notwithstanding', 'on the other hand', 'admittedly',
+        }
+
+        trapdoor_candidates = []
+        window = 3  # Check sentences within this window for hedge-near-absolute
+
+        for i, sent in enumerate(self.sentences):
+            words_lower = sent.lower()
+            has_absolute = any(m in words_lower for m in absolute_markers)
+            if has_absolute:
+                # Check if nearby sentences hedge or qualify
+                start = max(0, i - window)
+                end = min(len(self.sentences), i + window + 1)
+                nearby_hedges = []
+                for j in range(start, end):
+                    if j == i:
+                        continue
+                    nearby_lower = self.sentences[j].lower()
+                    hedges_found = [h for h in hedge_markers if h in nearby_lower]
+                    if hedges_found:
+                        nearby_hedges.append({
+                            'sentence_index': j + 1,
+                            'hedges': hedges_found[:3],
+                        })
+                if nearby_hedges:
+                    trapdoor_candidates.append({
+                        'type': 'hedge_near_absolute',
+                        'absolute_sentence_index': i + 1,
+                        'absolute_text': sent[:200],
+                        'nearby_hedges': nearby_hedges,
+                        'position_in_text': round(i / max(len(self.sentences), 1), 3),
+                    })
+
+        # 2. Local self-contradiction: within small sentence windows
+        local_contradictions = []
+        negation_words = {'not', 'no', 'never', 'neither', 'nor', 'nothing',
+                          'nowhere', 'hardly', 'scarcely', 'barely', 'deny',
+                          'denied', 'denies', 'impossible', 'false', 'untrue'}
+
+        for i in range(len(self.sentences) - 2):
+            s1_words = set(w.lower() for w in word_tokenize(self.sentences[i]) if w.isalpha())
+            s1_content = s1_words - self.stop_words
+            s1_neg = bool(s1_words & negation_words)
+
+            for j in range(i + 1, min(i + 4, len(self.sentences))):
+                s2_words = set(w.lower() for w in word_tokenize(self.sentences[j]) if w.isalpha())
+                s2_content = s2_words - self.stop_words
+                s2_neg = bool(s2_words & negation_words)
+
+                # Same topic (high content overlap) but opposite polarity
+                overlap = len(s1_content & s2_content)
+                if overlap >= 3 and s1_neg != s2_neg:
+                    local_contradictions.append({
+                        'type': 'local_self_contradiction',
+                        'sentence_a': i + 1,
+                        'sentence_b': j + 1,
+                        'text_a': self.sentences[i][:150],
+                        'text_b': self.sentences[j][:150],
+                        'shared_content': list(s1_content & s2_content)[:5],
+                        'position': round(i / max(len(self.sentences), 1), 3),
+                    })
+
+        # 3. Non-sequitur markers: conclusion language without adequate premises
+        conclusion_markers = {
+            'therefore', 'thus', 'hence', 'consequently', 'it follows',
+            'we conclude', 'this proves', 'this shows', 'accordingly',
+            'so we see', 'from this it is clear', 'q.e.d.',
+        }
+        non_sequitur_candidates = []
+        for i, sent in enumerate(self.sentences):
+            words_lower = sent.lower()
+            has_conclusion = any(m in words_lower for m in conclusion_markers)
+            if has_conclusion and i >= 2:
+                # Check if preceding sentences actually provided premises
+                # (very rough heuristic: do preceding sentences share key nouns?)
+                conclusion_nouns = set(w.lower() for w in word_tokenize(sent)
+                                       if w.isalpha() and w.lower() not in self.stop_words
+                                       and len(w) > 3)
+                premise_nouns = set()
+                for k in range(max(0, i - 3), i):
+                    premise_nouns |= set(w.lower() for w in word_tokenize(self.sentences[k])
+                                         if w.isalpha() and w.lower() not in self.stop_words
+                                         and len(w) > 3)
+                shared = conclusion_nouns & premise_nouns
+                if len(shared) < 2:
+                    non_sequitur_candidates.append({
+                        'type': 'potential_non_sequitur',
+                        'conclusion_sentence': i + 1,
+                        'text': sent[:200],
+                        'shared_with_premises': list(shared),
+                        'position': round(i / max(len(self.sentences), 1), 3),
+                    })
+
+        total_trapdoors = len(trapdoor_candidates) + len(local_contradictions) + len(non_sequitur_candidates)
+        density = total_trapdoors / max(len(self.sentences), 1)
+
+        score = min(1.0, density * 50 + len(local_contradictions) * 0.05)
+
+        return {
+            'score': round(score, 3),
+            'total_trapdoors': total_trapdoors,
+            'hedge_near_absolute': trapdoor_candidates[:15],
+            'local_contradictions': local_contradictions[:15],
+            'non_sequiturs': non_sequitur_candidates[:10],
+            'trapdoor_density': round(density, 5),
+            'method': 'Trapdoor Detection (Benardete Method)',
+            'precedent': (
+                "Benardete's concept of 'trapdoors' — intentional flaws in the "
+                "apparent argument that induce the reader to drop beneath the surface. "
+                "Burger & Davis: 'an intentional flaw in the flow of the apparent "
+                "argument — Plato's trapdoor — induces us to drop beneath the surface "
+                "to uncover the source of movement that reveals the real argument.' "
+                "This method detects local inconsistencies (as opposed to global "
+                "contradictions): hedged absolutes, nearby negation reversals, and "
+                "conclusions without adequate premises."
+            ),
+            'interpretation': (
+                'Trapdoors are locally planted inconsistencies that a careful reader '
+                'notices as impossible — temporal impossibilities, claims immediately '
+                'undercut, conclusions that do not follow from their premises. Unlike '
+                'global contradictions (which may reflect different aspects of a complex '
+                'position), trapdoors are deliberately placed to force the attentive '
+                'reader to look deeper. The density of hedge-near-absolute patterns '
+                'is especially diagnostic: an author who confidently asserts X and then '
+                'immediately qualifies it is signaling the reader to question X.'
+            ),
+        }
+
+    def analyze_dyadic_structure(self) -> dict:
+        """
+        METHOD: Dyadic Structure Analysis (Conjunctive/Disjunctive Two)
+        PRECEDENT: Seth Benardete's distinction between "conjunctive two" and
+                   "disjunctive two" — adapted from Plato's use of myth vs. logos.
+
+        Conjunctive two: two seemingly independent elements presented together
+        as if their conjunction requires external explanation (myth, narrative).
+        Disjunctive two: two elements that are mutually determining parts of a
+        single whole — their apparent independence is an illusion.
+
+        The movement from conjunctive to disjunctive is the philosophical
+        "turn" (periagoge) at the heart of Platonic dialectic.
+
+        Technique: Detect binary opposition pairs in the text (X and Y, X or Y,
+        X vs Y), track whether they converge later, and measure the text's
+        overall binary-opposition density as a marker of dialectical structure.
+        """
+        # Binary opposition markers
+        opposition_patterns = [
+            r'\b(\w+)\s+(?:and|or|versus|vs\.?|against|rather than)\s+(\w+)',
+            r'\b(?:between|either)\s+(\w+)\s+(?:and|or)\s+(\w+)',
+            r'\b(\w+)\s+(?:is not|are not|cannot be|differs from|opposes)\s+(\w+)',
+        ]
+
+        # Collect binary pairs across the text
+        binary_pairs = []
+        pair_positions = defaultdict(list)
+        for i, para in enumerate(self.paragraphs):
+            for pattern in opposition_patterns:
+                matches = re.finditer(pattern, para.lower())
+                for m in matches:
+                    pair = tuple(sorted([m.group(1), m.group(2)]))
+                    if pair[0] != pair[1] and all(len(w) > 2 for w in pair):
+                        binary_pairs.append(pair)
+                        pair_positions[pair].append(i)
+
+        # Count recurring pairs (same opposition mentioned in multiple locations)
+        pair_counts = Counter(binary_pairs)
+        recurring_pairs = [(pair, count) for pair, count in pair_counts.items() if count >= 2]
+        recurring_pairs.sort(key=lambda x: -x[1])
+
+        # Check for convergence: do pair terms appear in same sentence later?
+        convergence_markers = []
+        for pair, positions in pair_positions.items():
+            if len(positions) >= 2:
+                # Check if in later occurrences the terms collapse
+                first_pos = positions[0]
+                for later_pos in positions[1:]:
+                    if later_pos > first_pos + 2:  # Must be significantly later
+                        later_text = self.paragraphs[later_pos].lower()
+                        # Check for unity/identity language near the pair
+                        unity_words = {'same', 'one', 'identical', 'united',
+                                       'inseparable', 'both', 'together',
+                                       'cannot be separated', 'are one',
+                                       'turns out to be', 'proves to be',
+                                       'is really', 'nothing but', 'whole'}
+                        has_unity = any(w in later_text for w in unity_words)
+                        if has_unity:
+                            convergence_markers.append({
+                                'pair': list(pair),
+                                'first_position': first_pos + 1,
+                                'convergence_position': later_pos + 1,
+                                'convergence_excerpt': self.paragraphs[later_pos][:200],
+                            })
+
+        # Eidetic analysis markers: parts-wholes language
+        eidetic_vocab = {
+            'whole', 'part', 'parts', 'wholes', 'unity', 'manifold',
+            'one', 'many', 'same', 'other', 'being', 'becoming',
+            'appearance', 'reality', 'surface', 'depth', 'form', 'matter',
+            'eidos', 'idea', 'image', 'original', 'copy', 'phantom',
+            'shadow', 'reflection', 'dyad', 'monad', 'triad',
+        }
+        eidetic_count = sum(1 for w in self.words if w in eidetic_vocab)
+        eidetic_density = eidetic_count / max(len(self.words), 1)
+
+        # Phantom image detection: where the text discusses split appearances
+        phantom_vocab = {
+            'phantom', 'phantasm', 'image', 'apparition', 'ghost',
+            'double', 'split', 'divided', 'fractured', 'mask',
+            'disguise', 'semblance', 'seeming', 'mirage', 'illusion',
+            'deceptive', 'misleading', 'distorted', 'mirror',
+        }
+        phantom_passages = []
+        for i, para in enumerate(self.paragraphs):
+            para_words = set(w.lower() for w in word_tokenize(para) if w.isalpha())
+            phantom_hits = para_words & phantom_vocab
+            if len(phantom_hits) >= 2:
+                phantom_passages.append({
+                    'paragraph': i + 1,
+                    'phantom_terms': list(phantom_hits),
+                    'excerpt': para[:200],
+                })
+
+        total_pairs = len(binary_pairs)
+        binary_density = total_pairs / max(len(self.paragraphs), 1)
+
+        score = min(1.0, (
+            binary_density * 0.2 +
+            len(recurring_pairs) * 0.05 +
+            len(convergence_markers) * 0.1 +
+            eidetic_density * 20 +
+            len(phantom_passages) * 0.03
+        ))
+
+        return {
+            'score': round(score, 3),
+            'total_binary_pairs': total_pairs,
+            'binary_pair_density': round(binary_density, 3),
+            'recurring_pairs': [{'pair': list(p), 'count': c} for p, c in recurring_pairs[:15]],
+            'convergence_markers': convergence_markers[:10],
+            'eidetic_vocabulary_density': round(eidetic_density, 5),
+            'phantom_passages': phantom_passages[:10],
+            'method': 'Dyadic Structure Analysis (Benardete Conjunctive/Disjunctive Two)',
+            'precedent': (
+                "Benardete's distinction between 'conjunctive two' (mythical pairing "
+                "of independent elements) and 'disjunctive two' (necessary relation "
+                "between mutually determining parts of a whole). The movement from "
+                "conjunctive to disjunctive is the philosophical turn (periagoge) "
+                "at the heart of Platonic dialectic. Also incorporates Benardete's "
+                "'eidetic analysis' (account of being revealing parts parading as "
+                "wholes) and 'phantom images' (split appearances hiding a single reality)."
+            ),
+            'interpretation': (
+                'Binary oppositions are the scaffolding of dialectical argument. A high '
+                'density of recurring pairs that later converge signals the conjunctive-'
+                'to-disjunctive movement characteristic of Platonic dialogue: what began '
+                'as two independent entities is revealed to be two aspects of a single '
+                'thing. Phantom image passages — where the text explicitly discusses split '
+                'appearances, doubles, or distorted mirrors — are especially significant '
+                'as metacommentary on the text\'s own dialectical structure.'
+            ),
+        }
+
+    def analyze_periagoge(self) -> dict:
+        """
+        METHOD: Periagoge (Structural Reversal/Turning) Detection
+        PRECEDENT: Benardete's concept of periagoge — the conversion or "turning"
+                   that every Platonic dialogue reproduces in itself (cf. the Cave
+                   allegory, Republic 514a-521b). Also: pathei mathos (learning
+                   through suffering/error) from Aeschylus Agamemnon 177.
+
+        The periagoge structure: the text leads the reader to a conclusion in
+        the first half, then undermines, inverts, or deepens that conclusion in
+        the second half. The reader must undergo the error to understand the truth.
+
+        Technique:
+        1. Compare key vocabulary between first and second halves
+        2. Detect claim-inversion: assertions in the first half negated in the second
+        3. Measure the "reversal index" — how much the second half contradicts the first
+        4. Track evaluative language (good/bad, true/false) polarity shifts
+        """
+        if len(self.paragraphs) < 4:
+            return {'score': 0, 'method': 'Periagoge Detection', 'note': 'Text too short'}
+
+        mid = len(self.paragraphs) // 2
+        first_half = ' '.join(self.paragraphs[:mid])
+        second_half = ' '.join(self.paragraphs[mid:])
+
+        # 1. Vocabulary comparison between halves
+        fh_words = [w.lower() for w in word_tokenize(first_half) if w.isalpha() and w.lower() not in self.stop_words]
+        sh_words = [w.lower() for w in word_tokenize(second_half) if w.isalpha() and w.lower() not in self.stop_words]
+
+        fh_freq = Counter(fh_words)
+        sh_freq = Counter(sh_words)
+
+        # Words that shift dramatically in frequency
+        all_words = set(fh_freq.keys()) | set(sh_freq.keys())
+        freq_shifts = []
+        for word in all_words:
+            f1 = fh_freq.get(word, 0) / max(len(fh_words), 1)
+            f2 = sh_freq.get(word, 0) / max(len(sh_words), 1)
+            if max(f1, f2) > 0.0005:  # Only track words with meaningful frequency
+                shift = abs(f2 - f1)
+                if shift > 0.001:
+                    freq_shifts.append({
+                        'word': word,
+                        'first_half_freq': round(f1, 5),
+                        'second_half_freq': round(f2, 5),
+                        'shift': round(shift, 5),
+                        'direction': 'increases' if f2 > f1 else 'decreases',
+                    })
+        freq_shifts.sort(key=lambda x: -x['shift'])
+
+        # 2. Evaluative polarity comparison
+        positive_words = {
+            'good', 'true', 'beautiful', 'noble', 'just', 'wise', 'virtue',
+            'excellent', 'best', 'perfect', 'divine', 'sacred', 'blessed',
+            'right', 'correct', 'proper', 'worthy', 'admirable', 'praise',
+        }
+        negative_words = {
+            'bad', 'false', 'ugly', 'base', 'unjust', 'foolish', 'vice',
+            'terrible', 'worst', 'imperfect', 'corrupt', 'profane', 'cursed',
+            'wrong', 'incorrect', 'improper', 'unworthy', 'shameful', 'blame',
+        }
+
+        fh_pos = sum(1 for w in fh_words if w in positive_words)
+        fh_neg = sum(1 for w in fh_words if w in negative_words)
+        sh_pos = sum(1 for w in sh_words if w in positive_words)
+        sh_neg = sum(1 for w in sh_words if w in negative_words)
+
+        fh_polarity = (fh_pos - fh_neg) / max(fh_pos + fh_neg, 1)
+        sh_polarity = (sh_pos - sh_neg) / max(sh_pos + sh_neg, 1)
+        polarity_shift = sh_polarity - fh_polarity
+
+        # 3. Reversal detection: sentences in second half that negate first-half claims
+        # Build a set of key first-half claims (sentences with assertion markers)
+        assertion_markers = {'is', 'are', 'must', 'should', 'always', 'never'}
+        negation_markers = {'not', 'no', 'never', 'neither', 'cannot', 'impossible',
+                            'false', 'wrong', 'deny', 'denies', 'fails', 'failed'}
+
+        first_half_sents = sent_tokenize(first_half)
+        second_half_sents = sent_tokenize(second_half)
+
+        reversals = []
+        for i, fh_sent in enumerate(first_half_sents):
+            fh_content = set(w.lower() for w in word_tokenize(fh_sent)
+                             if w.isalpha() and w.lower() not in self.stop_words and len(w) > 3)
+            if len(fh_content) < 3:
+                continue
+            for j, sh_sent in enumerate(second_half_sents):
+                sh_words_set = set(w.lower() for w in word_tokenize(sh_sent) if w.isalpha())
+                sh_content = sh_words_set - self.stop_words
+                overlap = fh_content & sh_content
+                has_negation = bool(sh_words_set & negation_markers)
+                if len(overlap) >= 3 and has_negation:
+                    reversals.append({
+                        'first_half_sentence': fh_sent[:150],
+                        'second_half_sentence': sh_sent[:150],
+                        'shared_terms': list(overlap)[:5],
+                        'first_position': round(i / max(len(first_half_sents), 1), 3),
+                        'second_position': round(j / max(len(second_half_sents), 1), 3),
+                    })
+
+        # 4. Turning-point language detection
+        turning_vocab = {
+            'however', 'but', 'yet', 'nevertheless', 'on the contrary',
+            'in truth', 'in reality', 'actually', 'in fact', 'really',
+            'turn', 'turning', 'reverse', 'invert', 'conversion', 'transform',
+            'overcome', 'transcend', 'sublate', 'aufheben', 'periagoge',
+            'second sailing', 'begin again', 'reconsider', 'on reflection',
+        }
+        # Count turning vocabulary in the middle third
+        third = len(self.paragraphs) // 3
+        middle_third = ' '.join(self.paragraphs[third:2*third])
+        middle_words = [w.lower() for w in word_tokenize(middle_third) if w.isalpha()]
+        turning_count = sum(1 for w in middle_words if w in turning_vocab)
+        turning_density = turning_count / max(len(middle_words), 1)
+
+        reversal_index = len(reversals) / max(len(first_half_sents), 1)
+        score = min(1.0, (
+            abs(polarity_shift) * 0.5 +
+            reversal_index * 10 +
+            turning_density * 30 +
+            len(freq_shifts[:10]) * 0.01
+        ))
+
+        return {
+            'score': round(score, 3),
+            'polarity_shift': round(polarity_shift, 3),
+            'first_half_polarity': round(fh_polarity, 3),
+            'second_half_polarity': round(sh_polarity, 3),
+            'reversal_count': len(reversals),
+            'reversal_index': round(reversal_index, 5),
+            'reversals': reversals[:10],
+            'vocabulary_shifts': freq_shifts[:20],
+            'turning_vocabulary_density': round(turning_density, 5),
+            'method': 'Periagoge Detection (Benardete Structural Reversal)',
+            'precedent': (
+                "Benardete's periagoge — the conversion or 'turning' reproduced in "
+                "every Platonic dialogue (cf. Cave allegory, Republic 514a-521b); "
+                "Aeschylus's pathei mathos (Agamemnon 177); Aristotle's complex plot "
+                "with reversal (peripeteia) and recognition (anagnorisis). The text "
+                "leads the reader through an error that must be undergone before the "
+                "truth can emerge. The second half inverts or deepens the first half's "
+                "conclusions — not merely contradicting them but revealing the hidden "
+                "necessity behind the original error."
+            ),
+            'interpretation': (
+                'A text exhibiting periagoge structure leads the reader to a conclusion '
+                'in its first half that is undermined, inverted, or radically deepened '
+                'in the second half. A positive polarity shift means the text moves from '
+                'critique to affirmation; a negative shift from affirmation to critique. '
+                'High reversal counts (same-topic sentences with opposite polarity) signal '
+                'that the text literally takes back what it first asserted. Turning '
+                'vocabulary concentrated at the structural center marks the point of '
+                'periagoge — the philosophical "turn" analogous to the cave-dweller\'s '
+                'wrenching from shadow to light.'
+            ),
+        }
+
+    # ------------------------------------------------------------------
     # FULL ANALYSIS
     # ------------------------------------------------------------------
 
@@ -1978,6 +2440,9 @@ class EsotericAnalyzer:
             ('commentary_divergence', self.analyze_commentary_divergence),
             ('polysemy', self.analyze_polysemy),
             ('aphoristic_fragmentation', self.analyze_aphoristic_fragmentation),
+            ('trapdoor', self.analyze_trapdoors),
+            ('dyadic_structure', self.analyze_dyadic_structure),
+            ('periagoge', self.analyze_periagoge),
         ]
 
         scores = []
@@ -1987,25 +2452,28 @@ class EsotericAnalyzer:
             scores.append(result.get('score', 0))
 
         # Composite esoteric probability (weighted)
-        # Weights sum to 1.0; original 9 methods slightly reduced to accommodate new 8
+        # Weights sum to 1.0; rebalanced to accommodate 20 methods total
         weights = {
-            'contradiction': 0.14,
-            'central_placement': 0.10,
-            'numerology': 0.06,
-            'silence': 0.07,
-            'repetition': 0.07,
-            'symmetry': 0.06,
-            'irony': 0.07,
-            'digression': 0.05,
+            'contradiction': 0.12,
+            'central_placement': 0.08,
+            'numerology': 0.05,
+            'silence': 0.06,
+            'repetition': 0.06,
+            'symmetry': 0.05,
+            'irony': 0.06,
+            'digression': 0.04,
             'lexical_density': 0.04,
-            'acrostic': 0.05,
-            'hapax_legomena': 0.04,
-            'voice_consistency': 0.06,
-            'register': 0.05,
-            'logos_mythos': 0.05,
+            'acrostic': 0.04,
+            'hapax_legomena': 0.03,
+            'voice_consistency': 0.05,
+            'register': 0.04,
+            'logos_mythos': 0.04,
             'commentary_divergence': 0.03,
             'polysemy': 0.03,
             'aphoristic_fragmentation': 0.03,
+            'trapdoor': 0.06,
+            'dyadic_structure': 0.04,
+            'periagoge': 0.05,
         }
 
         composite = 0
@@ -2089,6 +2557,24 @@ class EsotericAnalyzer:
             approx_para = min(sent_idx * len(self.paragraphs) // max(len(self.sentences), 1),
                               len(self.paragraphs) - 1)
             flagged_paragraphs.add(approx_para)
+
+        # Flag trapdoor passages (Benardete method)
+        trapdoor_data = self.results['analyses'].get('trapdoor', {})
+        for td in trapdoor_data.get('local_contradictions', []):
+            sent_idx = td.get('sentence_a', 1) - 1
+            approx_para = min(sent_idx * len(self.paragraphs) // max(len(self.sentences), 1),
+                              len(self.paragraphs) - 1)
+            flagged_paragraphs.add(approx_para)
+        for td in trapdoor_data.get('non_sequiturs', []):
+            sent_idx = td.get('conclusion_sentence', 1) - 1
+            approx_para = min(sent_idx * len(self.paragraphs) // max(len(self.sentences), 1),
+                              len(self.paragraphs) - 1)
+            flagged_paragraphs.add(approx_para)
+
+        # Flag phantom image passages (Benardete dyadic method)
+        dyadic_data = self.results['analyses'].get('dyadic_structure', {})
+        for pp in dyadic_data.get('phantom_passages', []):
+            flagged_paragraphs.add(pp.get('paragraph', 1) - 1)
 
         # Separate layers
         esoteric_passages = []
@@ -2279,6 +2765,48 @@ class EsotericAnalyzer:
             findings_summary += f"\n### High Aphoristic Fragmentation\n"
             findings_summary += f"- Fragmentation index: {frag_idx}\n"
 
+        # Benardete method findings
+        trapdoor_data = self.results['analyses'].get('trapdoor', {})
+        local_contras = trapdoor_data.get('local_contradictions', [])
+        hedge_abs = trapdoor_data.get('hedge_near_absolute', [])
+        non_seqs = trapdoor_data.get('non_sequiturs', [])
+        if local_contras or hedge_abs or non_seqs:
+            findings_summary += f"\n### Trapdoor Detection (Benardete)\n"
+            findings_summary += f"- Total trapdoors: {trapdoor_data.get('total_trapdoors', 0)}\n"
+            for lc in local_contras[:3]:
+                findings_summary += (f"- Local contradiction: sentences {lc['sentence_a']} vs {lc['sentence_b']}: "
+                                     f"\"{lc['text_a'][:100]}...\" vs \"{lc['text_b'][:100]}...\"\n")
+            for ha in hedge_abs[:3]:
+                findings_summary += f"- Hedged absolute at sentence {ha['absolute_sentence_index']}: \"{ha['absolute_text'][:100]}...\"\n"
+            for ns in non_seqs[:3]:
+                findings_summary += f"- Non-sequitur at sentence {ns['conclusion_sentence']}: \"{ns['text'][:100]}...\"\n"
+
+        dyadic_data = self.results['analyses'].get('dyadic_structure', {})
+        recurring = dyadic_data.get('recurring_pairs', [])
+        convergences = dyadic_data.get('convergence_markers', [])
+        phantoms = dyadic_data.get('phantom_passages', [])
+        if recurring or convergences or phantoms:
+            findings_summary += f"\n### Dyadic Structure (Benardete)\n"
+            findings_summary += f"- Eidetic vocabulary density: {dyadic_data.get('eidetic_vocabulary_density', 0)}\n"
+            for rp in recurring[:5]:
+                findings_summary += f"- Recurring binary pair: {rp['pair'][0]}/{rp['pair'][1]} ({rp['count']}x)\n"
+            for cm in convergences[:3]:
+                findings_summary += f"- Convergence of {cm['pair']}: para {cm['first_position']} -> {cm['convergence_position']}\n"
+            for ph in phantoms[:3]:
+                findings_summary += f"- Phantom image passage at para {ph['paragraph']}: {ph['phantom_terms']}\n"
+
+        periagoge_data = self.results['analyses'].get('periagoge', {})
+        pol_shift = periagoge_data.get('polarity_shift', 0)
+        reversals_list = periagoge_data.get('reversals', [])
+        if abs(pol_shift) > 0.1 or reversals_list:
+            findings_summary += f"\n### Periagoge / Structural Reversal (Benardete)\n"
+            findings_summary += f"- Polarity shift (1st->2nd half): {pol_shift}\n"
+            findings_summary += f"- Reversal count: {periagoge_data.get('reversal_count', 0)}\n"
+            findings_summary += f"- Turning vocabulary density (middle third): {periagoge_data.get('turning_vocabulary_density', 0)}\n"
+            for rv in reversals_list[:3]:
+                findings_summary += (f"- Reversal: \"{rv['first_half_sentence'][:80]}...\" "
+                                     f"-> \"{rv['second_half_sentence'][:80]}...\"\n")
+
         if absent_topics:
             silence_section = f'The following topics were expected but absent or rare: {", ".join(absent_topics)}.'
         else:
@@ -2404,8 +2932,44 @@ Examine any computationally detected acrostic/telestic patterns:
   (chapter numbers, sentence counts) that align with gematria, isopsephy,
   or Pythagorean symbolism?
 
-## STAGE 14: THE ESOTERIC ARGUMENT
-Based on ALL of the above (Stages 1-13), attempt to reconstruct the text's
+## STAGE 14: TRAPDOOR ANALYSIS (BENARDETE METHOD)
+Examine the computationally detected trapdoors — local inconsistencies, hedged absolutes,
+and non-sequiturs:
+- Are there passages where a confident assertion is immediately qualified or
+  undercut? Per Benardete: "an intentional flaw in the flow of the apparent
+  argument induces us to drop beneath the surface to uncover the source of
+  movement that reveals the real argument."
+- Do apparent non-sequiturs (conclusions without adequate premises) signal that
+  the stated conclusion is NOT what the argument actually demonstrates?
+- Are there "impossible time-frames" or factual impossibilities (as in the
+  Gorgias, whose dramatic setting spans the entire Peloponnesian War)?
+- When you fall through a trapdoor, what deeper argument do you find beneath it?
+
+## STAGE 15: DYADIC STRUCTURE (BENARDETE METHOD)
+Examine the binary oppositions detected in the text:
+- Are key pairs (e.g., body/soul, knowledge/opinion, one/many) presented as
+  independent entities that later prove to be aspects of a single thing?
+- Per Benardete: the movement from "conjunctive two" (mythical pairing of
+  independent elements) to "disjunctive two" (mutually determining parts of
+  a whole) IS the philosophical turn. Track this movement in the text.
+- Do "phantom images" appear — split appearances (like sophist + statesman)
+  that hide a single reality (the philosopher)?
+- What is the "indeterminate dyad" at work in the text — the one that splits
+  off part of itself or lies hidden behind its fractured appearances?
+
+## STAGE 16: PERIAGOGE / STRUCTURAL REVERSAL (BENARDETE METHOD)
+Examine whether the text exhibits the periagoge structure:
+- Does the second half of the text invert, undermine, or radically deepen
+  the conclusions of the first half?
+- Per Benardete: every Platonic dialogue "reproduces in itself the conversion
+  (periagoge) of the philosopher in the cave." Where is this turning point?
+- Is there a "pathei mathos" structure — does the reader NEED to undergo the
+  error of the first reading in order to understand the truth of the second?
+- If the text were read backwards from the conclusion, would the argument
+  appear entirely different from a sequential reading?
+
+## STAGE 17: THE ESOTERIC ARGUMENT
+Based on ALL of the above (Stages 1-16), attempt to reconstruct the text's
 ESOTERIC argument — the teaching that the careful reader is meant to discover
 beneath the surface. Structure your reconstruction as:
 
@@ -2424,7 +2988,7 @@ beneath the surface. Structure your reconstruction as:
    defensive, protective, pedagogical, or political esotericism?)
 6. **Confidence level** (how strong is the case? What alternative readings exist?)
 
-## STAGE 15: SAFEGUARDS AGAINST OVER-READING
+## STAGE 18: SAFEGUARDS AGAINST OVER-READING
 Finally, critically evaluate your own esoteric reading:
 - Does it produce a MORE coherent interpretation than the surface reading, or merely
   a different one?
@@ -2579,6 +3143,164 @@ analysis now.
                         lines.append(f"- Ch. {c['chapter']} ({c['title']}): "
                                      f"TTR {c['type_token_ratio']}, z={c.get('ttr_z_score', 0)}")
                     lines.append("")
+
+            elif name == 'acrostic':
+                seqs = analysis.get('letter_sequences', {})
+                if seqs:
+                    lines.append("### Letter Sequences Extracted")
+                    for label, seq in seqs.items():
+                        if seq:
+                            lines.append(f"- **{label}**: `{seq[:80]}`")
+                    lines.append("")
+                if analysis.get('words_found'):
+                    lines.append("### Words Found in Acrostic/Telestic Positions")
+                    for w in analysis['words_found'][:10]:
+                        lines.append(f"- '{w['word']}' in {w['source']} at position {w['position']}")
+                    lines.append("")
+
+            elif name == 'hapax_legomena':
+                if analysis.get('philosophical_hapax'):
+                    lines.append(f"### Philosophically Loaded Hapax: {', '.join(analysis['philosophical_hapax'])}")
+                    lines.append("")
+                lines.append(f"- Total hapax legomena: {analysis.get('total_hapax', 0)}")
+                lines.append(f"- Hapax ratio: {analysis.get('hapax_ratio', 0)}")
+                if analysis.get('positional_density'):
+                    lines.append("### Hapax Positional Distribution")
+                    for pos, density in analysis['positional_density'].items():
+                        marker = " <<<" if pos == 'center' else ""
+                        lines.append(f"- {pos}: {density}{marker}")
+                lines.append("")
+
+            elif name == 'voice_consistency':
+                if analysis.get('voice_shifts'):
+                    lines.append("### Detected Voice/Persona Shifts")
+                    for vs in analysis['voice_shifts']:
+                        lines.append(f"- Ch. {vs['chapter']} ({vs['title']}): "
+                                     f"stylistic distance z={vs['z_score']}")
+                    lines.append("")
+                lines.append(f"- Overall stylistic variance: {analysis.get('overall_stylistic_variance', 0)}")
+                lines.append("")
+
+            elif name == 'register':
+                if analysis.get('chapter_registers'):
+                    lines.append("### Register Profile by Chapter")
+                    for cr in analysis['chapter_registers']:
+                        lines.append(f"- Ch. {cr['chapter']} ({cr['title']}): **{cr['dominant_register']}** "
+                                     f"(rhet:{cr['rhetorical_pct']} dial:{cr['dialectical_pct']} "
+                                     f"demo:{cr['demonstrative_pct']})")
+                    lines.append("")
+                if analysis.get('register_transitions'):
+                    lines.append("### Register Transitions")
+                    for rt in analysis['register_transitions']:
+                        lines.append(f"- Ch. {rt['from_chapter']} ({rt['from_register']}) -> "
+                                     f"Ch. {rt['to_chapter']} ({rt['to_register']})")
+                    lines.append("")
+
+            elif name == 'logos_mythos':
+                mc = analysis.get('mode_counts', {})
+                lines.append(f"- Logos paragraphs: {mc.get('logos', 0)}, "
+                             f"Mythos: {mc.get('mythos', 0)}, Mixed: {mc.get('mixed', 0)}")
+                lines.append(f"- Dominant mode: {analysis.get('dominant_mode', 'unknown')}")
+                if analysis.get('transitions'):
+                    lines.append("### Logos/Mythos Transitions")
+                    for lt in analysis['transitions'][:10]:
+                        lines.append(f"- Para {lt['paragraph']} at {lt['position']}: "
+                                     f"{lt['from']} -> {lt['to']}")
+                lines.append("")
+
+            elif name == 'commentary_divergence':
+                if analysis.get('divergences'):
+                    lines.append("### Most Divergent Sections")
+                    for d in analysis['divergences'][:10]:
+                        lines.append(f"- Ch. {d['chapter']} ({d['title']}): "
+                                     f"divergence={d['divergence_score']}, "
+                                     f"similarity={d['similarity_to_source']}")
+                    lines.append("")
+
+            elif name == 'polysemy':
+                if analysis.get('polysemous_paragraphs'):
+                    lines.append("### Multi-Domain Passages")
+                    for pp in analysis['polysemous_paragraphs'][:10]:
+                        lines.append(f"- Para {pp['paragraph']}: {pp['domain_count']} domains "
+                                     f"({', '.join(pp['domains_present'])})")
+                    lines.append("")
+                if analysis.get('cross_domain_words_in_text'):
+                    lines.append("### Cross-Domain Words")
+                    for w, doms in list(analysis['cross_domain_words_in_text'].items())[:10]:
+                        lines.append(f"- '{w}': {', '.join(doms)}")
+                    lines.append("")
+
+            elif name == 'aphoristic_fragmentation':
+                lines.append(f"- Fragmentation index: {analysis.get('fragmentation_index', 0)}")
+                lines.append(f"- Mask vocabulary density: {analysis.get('mask_vocabulary_density', 0)}")
+                lines.append(f"- Meta vocabulary density: {analysis.get('meta_vocabulary_density', 0)}")
+                if analysis.get('mask_sentences'):
+                    lines.append("### Mask/Concealment Self-References")
+                    for ms in analysis['mask_sentences'][:5]:
+                        lines.append(f"- [#{ms['sentence_index']}] \"{ms['text'][:200]}\"")
+                if analysis.get('sharp_breaks'):
+                    lines.append("### Sharpest Topical Breaks")
+                    for sb in analysis['sharp_breaks'][:5]:
+                        lines.append(f"- Between paragraphs {sb['between_paragraphs']}: "
+                                     f"similarity={sb['similarity']}")
+                lines.append("")
+
+            elif name == 'trapdoor':
+                lines.append(f"- Total trapdoors detected: {analysis.get('total_trapdoors', 0)}")
+                lines.append(f"- Trapdoor density: {analysis.get('trapdoor_density', 0)}")
+                if analysis.get('local_contradictions'):
+                    lines.append("### Local Self-Contradictions")
+                    for lc in analysis['local_contradictions'][:5]:
+                        lines.append(f"- Sent. {lc['sentence_a']} vs {lc['sentence_b']}: "
+                                     f"shared={lc['shared_content']}")
+                if analysis.get('hedge_near_absolute'):
+                    lines.append("### Hedged Absolutes")
+                    for ha in analysis['hedge_near_absolute'][:5]:
+                        lines.append(f"- Sent. {ha['absolute_sentence_index']}: "
+                                     f"\"{ha['absolute_text'][:150]}\"")
+                if analysis.get('non_sequiturs'):
+                    lines.append("### Potential Non-Sequiturs")
+                    for ns in analysis['non_sequiturs'][:5]:
+                        lines.append(f"- Sent. {ns['conclusion_sentence']}: "
+                                     f"\"{ns['text'][:150]}\"")
+                lines.append("")
+
+            elif name == 'dyadic_structure':
+                lines.append(f"- Total binary pairs: {analysis.get('total_binary_pairs', 0)}")
+                lines.append(f"- Binary pair density: {analysis.get('binary_pair_density', 0)}")
+                lines.append(f"- Eidetic vocabulary density: {analysis.get('eidetic_vocabulary_density', 0)}")
+                if analysis.get('recurring_pairs'):
+                    lines.append("### Recurring Binary Oppositions")
+                    for rp in analysis['recurring_pairs'][:10]:
+                        lines.append(f"- {rp['pair'][0]} / {rp['pair'][1]}: {rp['count']}x")
+                if analysis.get('convergence_markers'):
+                    lines.append("### Convergence Markers (Conjunctive -> Disjunctive)")
+                    for cm in analysis['convergence_markers'][:5]:
+                        lines.append(f"- {cm['pair']}: para {cm['first_position']} -> "
+                                     f"para {cm['convergence_position']}")
+                if analysis.get('phantom_passages'):
+                    lines.append("### Phantom Image Passages")
+                    for ph in analysis['phantom_passages'][:5]:
+                        lines.append(f"- Para {ph['paragraph']}: {ph['phantom_terms']}")
+                lines.append("")
+
+            elif name == 'periagoge':
+                lines.append(f"- Polarity shift (1st->2nd half): {analysis.get('polarity_shift', 0)}")
+                lines.append(f"- 1st half polarity: {analysis.get('first_half_polarity', 0)}")
+                lines.append(f"- 2nd half polarity: {analysis.get('second_half_polarity', 0)}")
+                lines.append(f"- Reversal count: {analysis.get('reversal_count', 0)}")
+                lines.append(f"- Turning vocabulary density: {analysis.get('turning_vocabulary_density', 0)}")
+                if analysis.get('reversals'):
+                    lines.append("### Detected Reversals")
+                    for rv in analysis['reversals'][:5]:
+                        lines.append(f"- \"{rv['first_half_sentence'][:100]}...\" -> "
+                                     f"\"{rv['second_half_sentence'][:100]}...\"")
+                if analysis.get('vocabulary_shifts'):
+                    lines.append("### Largest Vocabulary Shifts (1st vs 2nd Half)")
+                    for vs in analysis['vocabulary_shifts'][:10]:
+                        lines.append(f"- '{vs['word']}': {vs['first_half_freq']} -> "
+                                     f"{vs['second_half_freq']} ({vs['direction']})")
+                lines.append("")
 
             lines.append("---")
             lines.append("")

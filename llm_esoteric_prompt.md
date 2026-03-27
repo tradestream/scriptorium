@@ -13,7 +13,7 @@ You are analyzing the following text: "On Virtue, Soul, and Political Order"
 
 A computational pre-analysis has been performed and yielded the following findings:
 
-Composite esoteric score: 0.471
+Composite esoteric score: 0.509
 
 ### Key Sentences at the Structural Center
 - [Sentence 17]: "The philosopher, having knowledge of
@@ -59,6 +59,20 @@ some and not by others...."
 
 ### Ring/Chiastic Structure Signal
 - Mirror-to-baseline ratio: 1.32
+
+### Philosophically Loaded Hapax Legomena
+- Words used exactly once: nature, eternal, form, death, knowledge, immortal
+
+### Register Transitions (Averroes Three-Tier)
+- Ch. 2 (dialectical) -> Ch. 3 (rhetorical)
+
+### Multi-Domain (Polysemous) Passages
+- Paragraph 2: domains=['philosophical', 'physical', 'spiritual']
+- Paragraph 5: domains=['philosophical', 'physical', 'spiritual']
+- Paragraph 8: domains=['philosophical', 'physical', 'political']
+
+### High Aphoristic Fragmentation
+- Fragmentation index: 0.928
 
 
 ---
@@ -114,21 +128,81 @@ If the text cites, quotes, or retells sources:
 - What has been omitted from the source material?
 - Do the distortions point in a consistent interpretive direction?
 
-## STAGE 8: THE ESOTERIC ARGUMENT
-Based on all of the above, attempt to reconstruct the text's ESOTERIC argument —
-the teaching that the careful reader is meant to discover beneath the surface.
-Structure your reconstruction as:
+## STAGE 8: VOICE AND PERSONA ANALYSIS (KIERKEGAARD METHOD)
+Examine the computationally detected voice/persona shifts:
+- Does the text speak in a single consistent voice, or do different sections
+  exhibit detectably different stylistic profiles?
+- If multiple voices: do they hold contradictory positions (as Kierkegaard's
+  pseudonyms do)? Is the reader meant to choose between them, or to recognize
+  that no single voice represents the author's position?
+- Does the author use characters, fictional speakers, or narrative frames
+  to create distance from particular claims?
+
+## STAGE 9: REGISTER ANALYSIS (AVERROES THREE-TIER METHOD)
+Examine the computationally detected register transitions:
+- Does the text shift between rhetorical (persuasive/imagistic), dialectical
+  (argumentative/theological), and demonstrative (strict philosophical proof) modes?
+- Where does the demonstrative register appear? Per Averroes, this is where
+  the author speaks to the philosophical reader alone.
+- Are there passages where the author seems to "dumb down" an argument
+  (shifting to rhetorical register) or suddenly become more rigorous
+  (shifting to demonstrative)? These transitions may mark the exoteric/esoteric boundary.
+
+## STAGE 10: LOGOS/MYTHOS TRANSITIONS (PLATO METHOD)
+Examine the detected shifts between argumentative and narrative/mythic modes:
+- Where does the author abandon discursive argument and resort to story,
+  myth, allegory, or image?
+- Per Plato: these transitions signal the boundary of what reason can directly
+  demonstrate. The mythos passages may carry the deepest philosophical content
+  precisely BECAUSE it resists propositional statement.
+- Do the mythos passages cluster at structurally significant locations?
+
+## STAGE 11: MULTI-LEVEL READING (DANTE/KABBALISTIC METHOD)
+Examine the computationally flagged polysemous passages:
+- Can key passages be read simultaneously on multiple levels: literal,
+  allegorical, moral, and anagogical (Dante) or Peshat/Remez/Derash/Sod (Kabbalah)?
+- Are there words that function as hinges between physical and spiritual meaning
+  (e.g., "light," "path," "fire," "water")?
+- Does the text reward reading at each successive level with a more profound
+  but also more dangerous interpretation?
+
+## STAGE 12: MASK AND SELF-REFERENCE (NIETZSCHE METHOD)
+Examine the detected mask/concealment vocabulary and self-referential passages:
+- Does the author discuss concealment, surfaces, masks, or the act of writing itself?
+- Per Nietzsche (BGE 40): "Every profound spirit needs a mask." Does the text
+  ANNOUNCE its own concealment while still concealing?
+- Is the text's fragmentation (rapid topic shifts, aphoristic compression)
+  a deliberate strategy to prevent systematic appropriation of its teaching?
+
+## STAGE 13: ACROSTIC AND STEGANOGRAPHIC PATTERNS
+Examine any computationally detected acrostic/telestic patterns:
+- Do the first or last letters of sentences, paragraphs, or chapters spell
+  words, names, or meaningful sequences?
+- Are there numerologically significant patterns in structural counts
+  (chapter numbers, sentence counts) that align with gematria, isopsephy,
+  or Pythagorean symbolism?
+
+## STAGE 14: THE ESOTERIC ARGUMENT
+Based on ALL of the above (Stages 1-13), attempt to reconstruct the text's
+ESOTERIC argument — the teaching that the careful reader is meant to discover
+beneath the surface. Structure your reconstruction as:
 
 1. **The exoteric teaching** (what the text appears to say)
 2. **The esoteric teaching** (what the text actually communicates to the careful reader)
 3. **The methods of concealment** (which specific techniques from the tradition
-   the author employs — name each method and cite the historical precedent)
+   the author employs — name each method and cite the historical precedent from
+   this list: Maimonides' 7 causes, Strauss's contradiction principle, Al-Farabi's
+   exoteric/esoteric division, Averroes' three tiers, Kierkegaard's indirect
+   communication, Nietzsche's mask theory, Dante's four levels, Plato's
+   logos/mythos boundary, Bacon's acroamatique method, Pythagorean numerology,
+   Kabbalistic gematria, Diderot's cross-references, the commentary form as
+   concealment)
 4. **The evidence** (the specific textual passages that support this reading)
 5. **The motive** (why did the author conceal? Which of Melzer's four types applies:
    defensive, protective, pedagogical, or political esotericism?)
 6. **Confidence level** (how strong is the case? What alternative readings exist?)
 
-## STAGE 9: SAFEGUARDS AGAINST OVER-READING
+## STAGE 15: SAFEGUARDS AGAINST OVER-READING
 Finally, critically evaluate your own esoteric reading:
 - Does it produce a MORE coherent interpretation than the surface reading, or merely
   a different one?

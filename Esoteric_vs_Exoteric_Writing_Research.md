@@ -306,6 +306,38 @@ Writing in compressed, enigmatic fragments that resist systematic interpretation
 
 Writing simultaneously for two audiences: the general public, who receive a message appropriate to their capacities and needs (typically moral, political, or theological), and the philosophical elite, who perceive the deeper argument. Al-Farabi theorized this as the relationship between religion (symbolic truth) and philosophy (demonstrative truth). Spinoza's "accommodation theory" applies the same framework to biblical interpretation—and, on some readings, to his own writing.
 
+### 16. Acrostic and Telestic Encoding
+
+Embedding messages in the first letters (acrostic), last letters (telestic), or both (double acrostic) of sequential lines, verses, sentences, or chapters. Fourteen alphabetic acrostic poems have been identified in the Hebrew Bible (Psalms, Proverbs, Lamentations, Nahum). The practice extends through medieval Jewish liturgical poetry (piyyut), classical Latin verse (Virgil may embed acrostics in the *Aeneid*), and Renaissance steganography. Unlike most other esoteric methods, acrostics are directly computationally detectable by extracting initial and terminal letters and checking for patterns.
+
+### 17. Hapax Legomena as Deliberate Markers
+
+In a carefully composed text, words used exactly once (hapax legomena) may be deliberate markers or signals. Biblical scholars have catalogued over 1,500 hapax legomena in the Hebrew Bible, and the tradition of attending to them as hermeneutically significant is ancient. When a philosophically loaded term appears only once in a major work, the reader should ask why: was the author reserving it for a single critical moment?
+
+### 18. Pseudonymous Authorship and Indirect Communication (Kierkegaard)
+
+Søren Kierkegaard published entire books under fictional author-names — Johannes Climacus, Anti-Climacus, Johannes de Silentio, Victor Eremita, Constantin Constantius, Judge William, and others — each holding different and often contradictory philosophical positions. Simultaneously, he published "edifying discourses" under his own name. The pseudonymous works constitute "indirect communication," inspired by Socrates and designed so that the reader cannot extract a doctrine from the text but is forced into self-examination. The signed discourses are "direct communication." The two series run in parallel and comment on each other. Kierkegaard described the whole pseudonymous production as "maieutic" — Socratic midwifery, drawing truth out of the reader rather than pouring it in. In *On My Work as an Author*, he revealed the structure retrospectively, calling it "a literary act in which the whole was present from the first." Computationally, this method can be detected by analyzing stylistic fingerprints across sections — vocabulary profiles, sentence-length distributions, punctuation patterns, pronoun usage, and hedging frequency — to identify detectably different "voices" within an ostensibly single-authored work.
+
+### 19. The Three-Tier Register (Averroes / Ibn Rushd)
+
+In the *Decisive Treatise* (Fasl al-Maqal), Averroes (1126–1198) argued that truth must be communicated at three levels corresponding to three classes of human understanding: *rhetorical* (persuasive imagery and stories for the masses), *dialectical* (theological argument and probable reasoning for scholars), and *demonstrative* (strict philosophical proof for philosophers). Crucially, Averroes held that it is *forbidden* to share demonstrative interpretation with those capable only of rhetorical understanding — "to explain the inner meaning to people unable to understand it is to destroy their belief in the apparent meaning without putting anything in its place." This three-tier framework goes beyond the simple exoteric/esoteric binary and provides a more granular account of how a single text can address multiple audiences. A text that shifts between persuasive, argumentative, and demonstrative registers may be operating on all three tiers simultaneously.
+
+### 20. Logos/Mythos Transitions (Plato)
+
+In Plato's dialogues, the shift from discursive argument (*logos*) to narrative myth (*mythos*) signals a boundary where reason reaches its limit and the author resorts to indirect, symbolic communication. The Allegory of the Cave, the Allegory of Er, the myth of the Charioteer in the *Phaedrus*, and the Allegory of the Allegory in the *Symposium* are all moments where Plato abandons propositional statement for imagistic expression — and these are precisely the passages that carry the deepest philosophical content. The transition itself is the signal: when an author who has been arguing rationally suddenly shifts to storytelling, the reader should ask what truth is being communicated that resists direct statement.
+
+### 21. The Commentary Form as Concealment
+
+Writing a "commentary" on an earlier authority — Aristotle, scripture, a revered predecessor — as a vehicle for one's own philosophy. Al-Farabi, Averroes, and Aquinas all employed this technique. The commentary form provides cover: the author can say "Aristotle means X" when what they really mean is "I believe X but cannot say so directly." The divergence between the commentary's language and the source text's language — novel vocabulary, shifted emphasis, topics the source never discussed — marks where the commentator is importing their own ideas.
+
+### 22. Polysemy and Multi-Level Meaning (Dante / Kabbalah / Origen)
+
+Dante, in the *Convivio* and the *Letter to Can Grande della Scala*, describes four levels of meaning: literal, allegorical, moral, and anagogical. The Kabbalistic tradition provides a parallel framework: PaRDeS — *Peshat* (plain meaning), *Remez* (hint/allusion), *Derash* (homiletical interpretation), and *Sod* (secret/mystical meaning). Origen's *De Principiis* distinguishes three levels: somatic (literal), psychic (moral), and pneumatic (spiritual). In all three systems, the text is designed to be read at each successive level, with the deeper levels accessible only to the more philosophically or spiritually prepared reader. Words that bridge semantic domains — "light" (physical and spiritual), "path" (geographical and ethical), "fire" (material and purificatory) — function as hinges between levels.
+
+### 23. The Mask Theory and Aphoristic Fragmentation (Nietzsche)
+
+Friedrich Nietzsche explicitly theorized concealment as a philosophical practice. In *Beyond Good and Evil* §40: "Every profound spirit needs a mask; nay, more, around every profound spirit there continually grows a mask, owing to the constantly false, that is to say, *superficial* interpretation of every word he utters." Nietzsche's methods include: aphoristic compression (forcing the reader to unpack and supply connections); self-contradiction between and within works; multiple voices (Zarathustra, Dionysus, the "free spirit"); deliberate coarsening of the surface meaning to protect the deeper one from casual appropriation; and explicit metacommentary on the act of concealment itself. His method differs from classical esotericism (Strauss's account) because Nietzsche *announces* his masking — the mask is displayed as a mask, creating a paradox the reader must negotiate.
+
 ---
 
 ## Part IX: The Danger of Over-Reading
@@ -338,3 +370,10 @@ The safeguards against over-reading include: the requirement that the surface te
 - **Sefer Yetzirah** (Book of Creation), for the foundations of gematria
 - **Iamblichus**, *On the Pythagorean Way of Life*, for Pythagorean institutional esotericism
 - **Quentin Skinner**, *Visions of Politics*, Vol. 1 (for the Cambridge School alternative)
+- **Averroes (Ibn Rushd)**, *The Decisive Treatise* (Fasl al-Maqal), on the three tiers of communication
+- **Søren Kierkegaard**, *Concluding Unscientific Postscript* (1846); *On My Work as an Author* (1851)
+- **Friedrich Nietzsche**, *Beyond Good and Evil* (1886), especially §40 and §30; *Thus Spoke Zarathustra*
+- **Dante Alighieri**, *Convivio*, especially Treatise II; *Letter to Can Grande della Scala*
+- **Origen**, *De Principiis* (On First Principles), Book IV, on the three levels of scriptural meaning
+- **Mary Douglas**, *Thinking in Circles: An Essay on Ring Composition* (2007)
+- **Robert Darnton**, *The Business of Enlightenment* (1979), on the Encyclopédie's cross-reference system

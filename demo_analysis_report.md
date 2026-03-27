@@ -1,6 +1,6 @@
 # Esoteric Writing Analysis: On Virtue, Soul, and Political Order
 
-**Composite Esoteric Score: 0.471**
+**Composite Esoteric Score: 0.509**
 
 *ELEVATED — Multiple converging signals. The text shows statistically notable patterns across several esoteric methods. Close reading with attention to contradiction, central placement, and structural patterns is strongly recommended.*
 
@@ -163,16 +163,127 @@ A truth stated plainly to those who cannot bear it "
 
 ---
 
+## Acrostic & Telestic Detection
+**Score: 0.5**
+
+*Historical precedent: Hebrew Bible alphabetic acrostics (Psalms, Lamentations); medieval Jewish liturgical poetry; classical Latin acrostics (Virgil); Renaissance steganography*
+
+> Words spelled out by first or last letters of sequential sentences, paragraphs, or chapters may be deliberate steganographic signals. Alphabetic runs suggest intentional ordering. Non-random letter frequency distributions in acrostic positions suggest the author constrained word choice to encode a pattern. NOTE: short texts produce many false positives — findings are significant primarily in longer, carefully composed works.
+
+### Letter Sequences Extracted
+- **sentence_acrostic**: `catilpibcttwystcttyttwctwttattit`
+- **sentence_telestic**: `dshesrrsltyyhtstsnetscdtklsesyyn`
+- **paragraph_acrostic**: `cvpctycttcttt`
+- **paragraph_telestic**: `esslysrectksn`
+- **chapter_acrostic**: `vttt`
+- **chapter_telestic**: `sscn`
+
+---
+
+## Hapax Legomena Analysis
+**Score: 1.0**
+
+*Historical precedent: Biblical scholarship (1,500+ hapax legomena in the Hebrew Bible); the principle that in carefully composed texts, words used exactly once may serve as deliberate markers or signals*
+
+> A high hapax ratio suggests a text with unusual lexical range. When hapax legomena cluster at the structural center or carry philosophical weight, they may be deliberate markers — words the author chose specifically for a single critical moment. Philosophically loaded hapax (e.g., a key term used only once) deserve especially close attention.
+
+### Philosophically Loaded Hapax: nature, eternal, form, death, knowledge, immortal
+
+- Total hapax legomena: 146
+- Hapax ratio: 0.6293
+### Hapax Positional Distribution
+- opening: 0.5536
+- early: 0.5652
+- center: 0.4487 <<<
+- late: 0.5
+- closing: 0.5
+
+---
+
+## Voice / Persona Consistency Analysis
+**Score: 1.0**
+
+*Historical precedent: Kierkegaard's pseudonymous authorship; Plato's dialogue characters; Nietzsche's multiple voices; the principle that a single 'author' speaking in detectably different voices may be communicating indirectly*
+
+> Chapters with sharply different stylistic profiles from their neighbors may indicate the author shifting "voice" or persona. In the Kierkegaardian tradition, this signals indirect communication: the author distributes different (and potentially contradictory) positions across different voices to prevent the reader from simply appropriating a doctrine. High overall variance suggests a polyphonic text.
+
+- Overall stylistic variance: 3.708
+
+---
+
+## Three-Tier Register Analysis (Averroes Method)
+**Score: 0.4**
+
+*Historical precedent: Averroes (Ibn Rushd), Decisive Treatise: three classes of men require three modes of communication — rhetorical (persuasive imagery), dialectical (theological argument), demonstrative (philosophical proof). It is 'forbidden' to share demonstrative interpretation with those capable only of rhetorical understanding.*
+
+> A text operating across multiple registers may be addressing different audiences simultaneously. Transitions from rhetorical to demonstrative register may mark the boundary between exoteric and esoteric content. Sections in demonstrative register embedded within a predominantly rhetorical text are especially significant — they may be the moments where the author speaks to the philosophical reader alone.
+
+### Register Profile by Chapter
+- Ch. 1 (Chapter 1: On the Nature of Virtue): **dialectical** (rhet:0.333 dial:0.667 demo:0.0)
+- Ch. 2 (Chapter 2: On the Soul): **dialectical** (rhet:0.0 dial:1.0 demo:0.0)
+- Ch. 3 (Chapter 3: On Political Order): **rhetorical** (rhet:0.667 dial:0.333 demo:0.0)
+- Ch. 4 (Chapter 4: On the Uses of Concealment): **rhetorical** (rhet:0.333 dial:0.333 demo:0.333)
+
+### Register Transitions
+- Ch. 2 (dialectical) -> Ch. 3 (rhetorical)
+
+---
+
+## Logos / Mythos Transition Detection
+**Score: 0.05**
+
+*Historical precedent: Plato's dialogue transitions from argument to myth (Cave allegory, Allegory of Er, Allegory of the Charioteer); the principle that the shift to mythos signals the boundary of what reason can directly demonstrate — the author resorts to indirect, symbolic communication*
+
+> Transitions from logos to mythos mark moments where the author shifts from direct argument to indirect, symbolic communication. In Plato, these are precisely the passages that carry the deepest philosophical content — truths that resist propositional statement and require imagistic expression. Mythos passages embedded in a predominantly logos text deserve special interpretive attention.
+
+- Logos paragraphs: 3, Mythos: 1, Mixed: 9
+- Dominant mode: logos
+
+---
+
+## Commentary Divergence Analysis
+**Score: 0**
+
+---
+
+## Polysemy Detection (Dante Four-Levels Method)
+**Score: 0.923**
+
+*Historical precedent: Dante's four levels (literal, allegorical, moral, anagogical) from the Convivio and Letter to Can Grande; the Kabbalistic PaRDeS method (Peshat/Remez/Derash/Sod); Origen's three levels (somatic/psychic/pneumatic)*
+
+> Paragraphs operating across 3+ semantic domains simultaneously are candidates for multi-level reading. Words that bridge physical and spiritual domains (e.g., "light," "path," "fire") may function as hinges between literal and allegorical readings. High polysemy density suggests a text designed to reward reading at multiple levels — precisely the structure Dante, Origen, and the Kabbalists described.
+
+### Multi-Domain Passages
+- Para 2: 3 domains (philosophical, physical, spiritual)
+- Para 5: 3 domains (philosophical, physical, spiritual)
+- Para 8: 3 domains (philosophical, physical, political)
+- Para 9: 3 domains (philosophical, physical, political)
+
+---
+
+## Aphoristic Fragmentation Analysis (Nietzsche Mask Method)
+**Score: 0.709**
+
+*Historical precedent: Nietzsche BGE §40: 'Every profound spirit needs a mask'; the aphoristic style of Human All Too Human, BGE, Twilight; Pythagorean symbola; Bacon's aphoristic method; the principle that compressed, enigmatic fragments force the reader to actively reconstruct the argument*
+
+> High fragmentation (low adjacent-paragraph similarity) combined with mask/concealment vocabulary suggests a text that deliberately resists systematic reading. Sharp topical breaks between paragraphs force the reader to supply connections the author has withheld. Self-referential "mask" language — where the author discusses concealment, surfaces, or the act of writing itself — may be metacommentary on the text's own esoteric structure.
+
+- Fragmentation index: 0.928
+- Mask vocabulary density: 0.00204
+- Meta vocabulary density: 0.01227
+
+---
+
 ## Esoteric vs. Exoteric Layer Comparison
-- Esoteric (flagged) passages: 2
-- Exoteric (surface) passages: 11
-- Layer ratio: 0.182
+- Esoteric (flagged) passages: 6
+- Exoteric (surface) passages: 7
+- Layer ratio: 0.857
 
 ### Vocabulary Distinctive to Esoteric Layer
-uses, clarity, lacked, enlightenment, dangerous, stated, therefore, bear, riddles, concealment, parables, understood, produces, others, spoke
+truth, city, highest, gods, blessed, philosophers, philosopher, others, must, divine, question, pious, order, wise, understood
 
 ### Vocabulary Distinctive to Exoteric Layer
-would, teaching, every, truths, wisdom, man, good, philosopher, highest, philosophers, injustice, order, student, soul, gods
+virtuous, wicked, apparent, thing, perhaps, note, saying, teacher, rewards, injustice, often, chapter, suffer, every, truths
 
 ---
 
@@ -192,7 +303,7 @@ You are analyzing the following text: "On Virtue, Soul, and Political Order"
 
 A computational pre-analysis has been performed and yielded the following findings:
 
-Composite esoteric score: 0.471
+Composite esoteric score: 0.509
 
 ### Key Sentences at the Structural Center
 - [Sentence 17]: "The philosopher, having knowledge of
@@ -238,6 +349,20 @@ some and not by others...."
 
 ### Ring/Chiastic Structure Signal
 - Mirror-to-baseline ratio: 1.32
+
+### Philosophically Loaded Hapax Legomena
+- Words used exactly once: nature, eternal, form, death, knowledge, immortal
+
+### Register Transitions (Averroes Three-Tier)
+- Ch. 2 (dialectical) -> Ch. 3 (rhetorical)
+
+### Multi-Domain (Polysemous) Passages
+- Paragraph 2: domains=['philosophical', 'physical', 'spiritual']
+- Paragraph 5: domains=['philosophical', 'physical', 'spiritual']
+- Paragraph 8: domains=['philosophical', 'physical', 'political']
+
+### High Aphoristic Fragmentation
+- Fragmentation index: 0.928
 
 
 ---
@@ -293,21 +418,81 @@ If the text cites, quotes, or retells sources:
 - What has been omitted from the source material?
 - Do the distortions point in a consistent interpretive direction?
 
-## STAGE 8: THE ESOTERIC ARGUMENT
-Based on all of the above, attempt to reconstruct the text's ESOTERIC argument —
-the teaching that the careful reader is meant to discover beneath the surface.
-Structure your reconstruction as:
+## STAGE 8: VOICE AND PERSONA ANALYSIS (KIERKEGAARD METHOD)
+Examine the computationally detected voice/persona shifts:
+- Does the text speak in a single consistent voice, or do different sections
+  exhibit detectably different stylistic profiles?
+- If multiple voices: do they hold contradictory positions (as Kierkegaard's
+  pseudonyms do)? Is the reader meant to choose between them, or to recognize
+  that no single voice represents the author's position?
+- Does the author use characters, fictional speakers, or narrative frames
+  to create distance from particular claims?
+
+## STAGE 9: REGISTER ANALYSIS (AVERROES THREE-TIER METHOD)
+Examine the computationally detected register transitions:
+- Does the text shift between rhetorical (persuasive/imagistic), dialectical
+  (argumentative/theological), and demonstrative (strict philosophical proof) modes?
+- Where does the demonstrative register appear? Per Averroes, this is where
+  the author speaks to the philosophical reader alone.
+- Are there passages where the author seems to "dumb down" an argument
+  (shifting to rhetorical register) or suddenly become more rigorous
+  (shifting to demonstrative)? These transitions may mark the exoteric/esoteric boundary.
+
+## STAGE 10: LOGOS/MYTHOS TRANSITIONS (PLATO METHOD)
+Examine the detected shifts between argumentative and narrative/mythic modes:
+- Where does the author abandon discursive argument and resort to story,
+  myth, allegory, or image?
+- Per Plato: these transitions signal the boundary of what reason can directly
+  demonstrate. The mythos passages may carry the deepest philosophical content
+  precisely BECAUSE it resists propositional statement.
+- Do the mythos passages cluster at structurally significant locations?
+
+## STAGE 11: MULTI-LEVEL READING (DANTE/KABBALISTIC METHOD)
+Examine the computationally flagged polysemous passages:
+- Can key passages be read simultaneously on multiple levels: literal,
+  allegorical, moral, and anagogical (Dante) or Peshat/Remez/Derash/Sod (Kabbalah)?
+- Are there words that function as hinges between physical and spiritual meaning
+  (e.g., "light," "path," "fire," "water")?
+- Does the text reward reading at each successive level with a more profound
+  but also more dangerous interpretation?
+
+## STAGE 12: MASK AND SELF-REFERENCE (NIETZSCHE METHOD)
+Examine the detected mask/concealment vocabulary and self-referential passages:
+- Does the author discuss concealment, surfaces, masks, or the act of writing itself?
+- Per Nietzsche (BGE 40): "Every profound spirit needs a mask." Does the text
+  ANNOUNCE its own concealment while still concealing?
+- Is the text's fragmentation (rapid topic shifts, aphoristic compression)
+  a deliberate strategy to prevent systematic appropriation of its teaching?
+
+## STAGE 13: ACROSTIC AND STEGANOGRAPHIC PATTERNS
+Examine any computationally detected acrostic/telestic patterns:
+- Do the first or last letters of sentences, paragraphs, or chapters spell
+  words, names, or meaningful sequences?
+- Are there numerologically significant patterns in structural counts
+  (chapter numbers, sentence counts) that align with gematria, isopsephy,
+  or Pythagorean symbolism?
+
+## STAGE 14: THE ESOTERIC ARGUMENT
+Based on ALL of the above (Stages 1-13), attempt to reconstruct the text's
+ESOTERIC argument — the teaching that the careful reader is meant to discover
+beneath the surface. Structure your reconstruction as:
 
 1. **The exoteric teaching** (what the text appears to say)
 2. **The esoteric teaching** (what the text actually communicates to the careful reader)
 3. **The methods of concealment** (which specific techniques from the tradition
-   the author employs — name each method and cite the historical precedent)
+   the author employs — name each method and cite the historical precedent from
+   this list: Maimonides' 7 causes, Strauss's contradiction principle, Al-Farabi's
+   exoteric/esoteric division, Averroes' three tiers, Kierkegaard's indirect
+   communication, Nietzsche's mask theory, Dante's four levels, Plato's
+   logos/mythos boundary, Bacon's acroamatique method, Pythagorean numerology,
+   Kabbalistic gematria, Diderot's cross-references, the commentary form as
+   concealment)
 4. **The evidence** (the specific textual passages that support this reading)
 5. **The motive** (why did the author conceal? Which of Melzer's four types applies:
    defensive, protective, pedagogical, or political esotericism?)
 6. **Confidence level** (how strong is the case? What alternative readings exist?)
 
-## STAGE 9: SAFEGUARDS AGAINST OVER-READING
+## STAGE 15: SAFEGUARDS AGAINST OVER-READING
 Finally, critically evaluate your own esoteric reading:
 - Does it produce a MORE coherent interpretation than the surface reading, or merely
   a different one?

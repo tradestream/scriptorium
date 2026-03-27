@@ -1832,6 +1832,62 @@ def run_full_esoteric_analysis(
         logger.error(f"Numerological Significance failed: {e}")
         results["numerology"] = {"error": str(e)}
 
+    # Acrostic & Telestic Detection
+    try:
+        results["acrostics"] = detect_acrostics(text=text, delimiter_pattern=config.delimiter_pattern)
+    except Exception as e:
+        logger.error(f"Acrostic Detection failed: {e}")
+        results["acrostics"] = {"error": str(e)}
+
+    # Hapax Legomena Analysis
+    try:
+        results["hapax_legomena"] = detect_hapax_legomena(text=text, delimiter_pattern=config.delimiter_pattern)
+    except Exception as e:
+        logger.error(f"Hapax Legomena failed: {e}")
+        results["hapax_legomena"] = {"error": str(e)}
+
+    # Voice / Persona Shifts
+    try:
+        results["voice_shifts"] = detect_voice_shifts(text=text, delimiter_pattern=config.delimiter_pattern)
+    except Exception as e:
+        logger.error(f"Voice Shifts failed: {e}")
+        results["voice_shifts"] = {"error": str(e)}
+
+    # Register Tiers (Averroes)
+    try:
+        results["register_tiers"] = detect_register_tiers(text=text, delimiter_pattern=config.delimiter_pattern)
+    except Exception as e:
+        logger.error(f"Register Tiers failed: {e}")
+        results["register_tiers"] = {"error": str(e)}
+
+    # Logos / Mythos Transitions
+    try:
+        results["logos_mythos"] = detect_logos_mythos(text=text, delimiter_pattern=config.delimiter_pattern)
+    except Exception as e:
+        logger.error(f"Logos/Mythos failed: {e}")
+        results["logos_mythos"] = {"error": str(e)}
+
+    # Commentary Divergence
+    try:
+        results["commentary_divergence"] = detect_commentary_divergence(text=text, delimiter_pattern=config.delimiter_pattern)
+    except Exception as e:
+        logger.error(f"Commentary Divergence failed: {e}")
+        results["commentary_divergence"] = {"error": str(e)}
+
+    # Polysemy Detection
+    try:
+        results["polysemy"] = detect_polysemy(text=text, delimiter_pattern=config.delimiter_pattern)
+    except Exception as e:
+        logger.error(f"Polysemy Detection failed: {e}")
+        results["polysemy"] = {"error": str(e)}
+
+    # Aphoristic Fragmentation
+    try:
+        results["aphoristic_fragmentation"] = detect_aphoristic_fragmentation(text=text, delimiter_pattern=config.delimiter_pattern)
+    except Exception as e:
+        logger.error(f"Aphoristic Fragmentation failed: {e}")
+        results["aphoristic_fragmentation"] = {"error": str(e)}
+
     return results
 
 
@@ -2099,4 +2155,480 @@ def check_numerological_significance(
         "counts": counts,
         "significant_matches": matches[:20],
         "interpretation": "Structural counts matching traditionally significant numbers may indicate deliberate numerological construction (Pythagorean, Kabbalistic, Straussian on Machiavelli).",
+    }
+
+
+# ─────────────────────────────────────────────────────
+# METHODS 10-17: Advanced Esoteric Detection
+# ─────────────────────────────────────────────────────
+
+_STOPWORDS = {
+    'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of',
+    'with', 'by', 'from', 'is', 'was', 'are', 'were', 'be', 'been', 'being',
+    'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should',
+    'may', 'might', 'shall', 'can', 'this', 'that', 'these', 'those', 'it', 'its',
+    'he', 'she', 'they', 'we', 'you', 'i', 'me', 'my', 'his', 'her', 'their',
+    'our', 'your', 'not', 'no', 'if', 'then', 'than', 'as', 'so', 'up', 'out',
+    'about', 'into', 'over', 'after', 'before', 'between', 'through', 'during',
+    'without', 'again', 'further', 'once',
+}
+
+_SIGNAL_WORDS = {
+    'god', 'die', 'sin', 'law', 'war', 'man', 'lie', 'eye', 'one', 'end', 'key',
+    'love', 'hate', 'true', 'lies', 'soul', 'mind', 'free', 'hide', 'veil', 'mask',
+    'dead', 'evil', 'good', 'king', 'fool', 'wise', 'fire', 'dark', 'self', 'void',
+    'fear', 'hope', 'fate', 'lord', 'name', 'truth', 'death', 'light', 'power',
+    'slave', 'false', 'secret', 'hidden', 'nature', 'reason', 'divine',
+}
+
+_PHILOSOPHICAL_TERMS = {
+    'truth', 'being', 'essence', 'nature', 'soul', 'god', 'divine', 'reason',
+    'justice', 'virtue', 'freedom', 'knowledge', 'wisdom', 'death', 'immortal',
+    'eternal', 'power', 'law', 'good', 'evil', 'beauty', 'love', 'existence',
+    'substance', 'form', 'matter', 'spirit', 'mind', 'cosmos', 'creation',
+    'revelation', 'prophecy', 'sacred', 'profane', 'hidden', 'secret', 'mystery',
+}
+
+
+def detect_acrostics(text: str, delimiter_pattern: str = None) -> dict:
+    """Detect acrostic/telestic patterns in first/last letters of sentences and sections.
+
+    Precedent: Hebrew Bible alphabetic acrostics, Virgil, Renaissance steganography.
+    """
+    sents = re.split(r'[.!?]+', text)
+    sents = [s.strip() for s in sents if len(s.strip()) > 10]
+
+    sections = re.split(delimiter_pattern or r"\n\s*\n", text)
+    sections = [s.strip() for s in sections if len(s.strip()) > 30]
+
+    def first_letter(t):
+        m = re.search(r'[a-zA-Z]', t)
+        return m.group(0).lower() if m else ''
+
+    def last_letter(t):
+        letters = re.findall(r'[a-zA-Z]', t)
+        return letters[-1].lower() if letters else ''
+
+    sent_firsts = ''.join(first_letter(s) for s in sents)
+    sent_lasts = ''.join(last_letter(s) for s in sents)
+    sect_firsts = ''.join(first_letter(s) for s in sections)
+
+    def find_patterns(seq, label):
+        findings = []
+        if len(seq) < 3:
+            return findings
+        # Alphabetic runs
+        for i in range(len(seq) - 2):
+            run = 1
+            for j in range(i + 1, len(seq)):
+                if ord(seq[j]) == ord(seq[j-1]) + 1:
+                    run += 1
+                else:
+                    break
+            if run >= 3:
+                findings.append({"type": "alphabetic_run", "position": i,
+                                 "length": run, "sequence": seq[i:i+run], "source": label})
+        # Signal words
+        for wlen in range(3, min(8, len(seq) + 1)):
+            for i in range(len(seq) - wlen + 1):
+                cand = seq[i:i+wlen]
+                if cand in _SIGNAL_WORDS:
+                    findings.append({"type": "word_found", "position": i,
+                                     "word": cand, "source": label})
+        # Palindromes 4+
+        for plen in range(4, min(10, len(seq) + 1)):
+            for i in range(len(seq) - plen + 1):
+                sub = seq[i:i+plen]
+                if sub == sub[::-1]:
+                    findings.append({"type": "palindrome", "position": i,
+                                     "sequence": sub, "source": label})
+        return findings
+
+    all_findings = []
+    all_findings.extend(find_patterns(sent_firsts, "sentence_first_letters"))
+    all_findings.extend(find_patterns(sent_lasts, "sentence_last_letters"))
+    all_findings.extend(find_patterns(sect_firsts, "section_first_letters"))
+
+    return {
+        "total_findings": len(all_findings),
+        "findings": all_findings[:30],
+        "sequences": {
+            "sentence_firsts": sent_firsts[:100],
+            "sentence_lasts": sent_lasts[:100],
+            "section_firsts": sect_firsts[:100],
+        },
+        "method": "Acrostic & Telestic Detection",
+        "precedent": "Hebrew Bible acrostics, Virgil, Renaissance steganography",
+        "interpretation": "Patterns in first/last letters may encode hidden words or signals.",
+    }
+
+
+def detect_hapax_legomena(text: str, delimiter_pattern: str = None) -> dict:
+    """Find words used exactly once — potential deliberate markers.
+
+    Precedent: Biblical scholarship (1,500+ hapax in Hebrew Bible).
+    """
+    words = re.findall(r'\b[a-zA-Z]{4,}\b', text.lower())
+    freq = Counter(words)
+    content_words = {w: c for w, c in freq.items() if w not in _STOPWORDS}
+
+    hapax = {w for w, c in content_words.items() if c == 1}
+    total_content = len([w for w in words if w not in _STOPWORDS])
+    hapax_ratio = len(hapax) / total_content if total_content else 0
+
+    # Philosophical hapax
+    phil_hapax = sorted(hapax & _PHILOSOPHICAL_TERMS)
+
+    # Positional analysis (quintiles)
+    sents = re.split(r'[.!?]+', text)
+    sents = [s.strip() for s in sents if len(s.strip()) > 10]
+    n = len(sents)
+    pos_counts = {q: 0 for q in range(5)}
+    pos_totals = {q: 0 for q in range(5)}
+    for i, sent in enumerate(sents):
+        q = min(4, int((i / max(n, 1)) * 5))
+        sw = re.findall(r'\b[a-zA-Z]{4,}\b', sent.lower())
+        sw = [w for w in sw if w not in _STOPWORDS]
+        pos_totals[q] += len(sw)
+        pos_counts[q] += sum(1 for w in sw if w in hapax)
+
+    labels = {0: "opening", 1: "early", 2: "center", 3: "late", 4: "closing"}
+    pos_density = {labels[q]: round(pos_counts[q] / pos_totals[q], 4) if pos_totals[q] else 0 for q in range(5)}
+
+    return {
+        "total_hapax": len(hapax),
+        "hapax_ratio": round(hapax_ratio, 4),
+        "philosophical_hapax": phil_hapax,
+        "positional_density": pos_density,
+        "sample": sorted(hapax)[:30],
+        "method": "Hapax Legomena Analysis",
+        "precedent": "Biblical scholarship; words used once may be deliberate markers",
+        "interpretation": "Philosophically loaded hapax at the structural center deserve close attention.",
+    }
+
+
+def detect_voice_shifts(text: str, delimiter_pattern: str = None) -> dict:
+    """Detect stylistic shifts between sections (Kierkegaard pseudonym method).
+
+    Precedent: Kierkegaard, Plato's character voices, Nietzsche's multiple registers.
+    """
+    sections = re.split(delimiter_pattern or r"\n\s*\n", text)
+    sections = [s for s in sections if len(s.strip()) > 100]
+
+    HEDGE = {'perhaps', 'maybe', 'possibly', 'seemingly', 'apparently', 'might', 'could'}
+    CERTAINTY = {'certainly', 'surely', 'undoubtedly', 'clearly', 'obviously', 'must', 'always', 'never'}
+    FIRST_PERSON = {'i', 'me', 'my', 'mine', 'we', 'us', 'our'}
+    THIRD_PERSON = {'he', 'she', 'it', 'they', 'him', 'her', 'them', 'his', 'its', 'their'}
+
+    profiles = []
+    for i, sec in enumerate(sections):
+        words = re.findall(r'\b[a-zA-Z]+\b', sec.lower())
+        sents = re.split(r'[.!?]+', sec)
+        sents = [s for s in sents if s.strip()]
+        if len(words) < 20:
+            continue
+        sent_lens = [len(re.findall(r'\b\w+\b', s)) for s in sents if s.strip()]
+        avg_sent = sum(sent_lens) / len(sent_lens) if sent_lens else 0
+        q_density = sec.count('?') / max(len(sents), 1)
+        fp_ratio = sum(1 for w in words if w in FIRST_PERSON) / len(words)
+        tp_ratio = sum(1 for w in words if w in THIRD_PERSON) / len(words)
+        hedge_r = sum(1 for w in words if w in HEDGE) / len(words)
+        cert_r = sum(1 for w in words if w in CERTAINTY) / len(words)
+        ttr = len(set(words)) / len(words)
+
+        profiles.append({
+            "section": i + 1, "avg_sent_len": round(avg_sent, 1),
+            "question_density": round(q_density, 3),
+            "first_person": round(fp_ratio, 4), "third_person": round(tp_ratio, 4),
+            "hedge_ratio": round(hedge_r, 4), "certainty_ratio": round(cert_r, 4),
+            "ttr": round(ttr, 4),
+        })
+
+    shifts = []
+    if len(profiles) >= 3:
+        for i in range(1, len(profiles)):
+            p, c = profiles[i-1], profiles[i]
+            features = ['avg_sent_len', 'question_density', 'first_person', 'hedge_ratio', 'ttr']
+            diff = sum(abs(c[f] - p[f]) for f in features)
+            if diff > 0.3:
+                shifts.append({"from_section": p["section"], "to_section": c["section"],
+                               "divergence": round(diff, 3)})
+
+    shifts.sort(key=lambda x: x["divergence"], reverse=True)
+    return {
+        "total_shifts": len(shifts),
+        "shifts": shifts[:15],
+        "profiles": profiles[:20],
+        "method": "Voice / Persona Consistency",
+        "precedent": "Kierkegaard pseudonyms; Plato dialogue characters; Nietzsche multiple voices",
+        "interpretation": "Sharp stylistic shifts between sections may indicate the author adopting different personae.",
+    }
+
+
+def detect_register_tiers(text: str, delimiter_pattern: str = None) -> dict:
+    """Classify passages into Averroes' three tiers: rhetorical, dialectical, demonstrative.
+
+    Precedent: Averroes (Decisive Treatise) — three levels of audience.
+    """
+    RHETORICAL = {'imagine', 'picture', 'behold', 'consider', 'story', 'tale', 'once',
+                  'beautiful', 'glorious', 'terrible', 'wonderful', 'sacred', 'holy',
+                  'blessed', 'wretched', 'magnificent', 'alas', 'o ', 'lo ', 'beloved'}
+    DIALECTICAL = {'argument', 'objection', 'reply', 'granted', 'premise', 'conclusion',
+                   'follows', 'therefore', 'hence', 'thus', 'consequently', 'reason',
+                   'however', 'nevertheless', 'although', 'contrary', 'refute', 'prove'}
+    DEMONSTRATIVE = {'necessary', 'sufficient', 'impossible', 'axiom', 'theorem',
+                     'definition', 'proposition', 'demonstration', 'quod erat',
+                     'evidently', 'self-evident', 'analytic', 'synthetic', 'a priori',
+                     'deduction', 'induction', 'syllogism', 'corollary'}
+
+    sections = re.split(delimiter_pattern or r"\n\s*\n", text)
+    sections = [s for s in sections if len(s.strip()) > 50]
+
+    classified = []
+    transitions = []
+    prev_tier = None
+
+    for i, sec in enumerate(sections):
+        s_lower = sec.lower()
+        r_count = sum(1 for w in RHETORICAL if w in s_lower)
+        d_count = sum(1 for w in DIALECTICAL if w in s_lower)
+        m_count = sum(1 for w in DEMONSTRATIVE if w in s_lower)
+        total = r_count + d_count + m_count
+        if total == 0:
+            tier = "unclassified"
+        elif r_count >= d_count and r_count >= m_count:
+            tier = "rhetorical"
+        elif d_count >= m_count:
+            tier = "dialectical"
+        else:
+            tier = "demonstrative"
+
+        classified.append({"section": i + 1, "tier": tier,
+                           "rhetorical": r_count, "dialectical": d_count, "demonstrative": m_count})
+
+        if prev_tier and tier != prev_tier and tier != "unclassified" and prev_tier != "unclassified":
+            transitions.append({"from_section": i, "to_section": i + 1,
+                                "from_tier": prev_tier, "to_tier": tier})
+        if tier != "unclassified":
+            prev_tier = tier
+
+    tier_counts = Counter(c["tier"] for c in classified if c["tier"] != "unclassified")
+
+    return {
+        "tier_distribution": dict(tier_counts),
+        "transitions": transitions[:20],
+        "sections": classified[:30],
+        "method": "Three-Tier Register Analysis (Averroes)",
+        "precedent": "Averroes Decisive Treatise: rhetorical (masses), dialectical (scholars), demonstrative (philosophers)",
+        "interpretation": "Texts mixing tiers may address multiple audiences simultaneously — the esoteric teaching lives in the demonstrative tier.",
+    }
+
+
+def detect_logos_mythos(text: str, delimiter_pattern: str = None) -> dict:
+    """Detect shifts between rational argument (logos) and myth/narrative (mythos).
+
+    Precedent: Plato's deliberate shifts from dialectic to myth at critical moments.
+    """
+    LOGOS = {'therefore', 'it follows', 'we must conclude', 'the argument shows',
+             'necessarily', 'logically', 'demonstrably', 'proof', 'evidence',
+             'from this we see', 'it is clear that', 'reason demands', 'rationally'}
+    MYTHOS = {'once upon', 'there was a', 'the story tells', 'according to the myth',
+              'legend has it', 'the tale', 'in ancient times', 'the gods', 'the hero',
+              'the oracle', 'the prophecy', 'descended from', 'born of', 'spoke thus',
+              'the vision', 'the dream', 'revealed to', 'divine', 'sacred grove'}
+
+    sents = re.split(r'[.!?]+', text)
+    sents = [s.strip() for s in sents if len(s.strip()) > 20]
+
+    labeled = []
+    transitions = []
+    prev = None
+
+    for i, sent in enumerate(sents):
+        s_lower = sent.lower()
+        logos_score = sum(1 for m in LOGOS if m in s_lower)
+        mythos_score = sum(1 for m in MYTHOS if m in s_lower)
+
+        if logos_score > mythos_score and logos_score > 0:
+            mode = "logos"
+        elif mythos_score > logos_score and mythos_score > 0:
+            mode = "mythos"
+        else:
+            mode = "neutral"
+
+        if mode != "neutral":
+            labeled.append({"sentence": i + 1, "mode": mode, "excerpt": sent[:100]})
+            if prev and prev != mode:
+                transitions.append({"at_sentence": i + 1, "from": prev, "to": mode,
+                                    "excerpt": sent[:80]})
+            prev = mode
+
+    return {
+        "logos_count": sum(1 for l in labeled if l["mode"] == "logos"),
+        "mythos_count": sum(1 for l in labeled if l["mode"] == "mythos"),
+        "transitions": transitions[:20],
+        "method": "Logos / Mythos Transition Detection",
+        "precedent": "Plato shifts from dialectic to myth at critical moments (Cave, Er, Allegory of the Chariot)",
+        "interpretation": "Transitions from logos to mythos at key moments may signal the author packaging dangerous rational conclusions in mythological form.",
+    }
+
+
+def detect_commentary_divergence(text: str, delimiter_pattern: str = None) -> dict:
+    """Find passages where the author's commentary diverges from cited views.
+
+    Precedent: Strauss on commentators who 'explain' an author while subtly reframing.
+    """
+    CITATION_MARKERS = [
+        r'(\w+)\s+(?:says|argues|maintains|holds|claims|contends|asserts|believes|suggests|notes)',
+        r'according to\s+(\w+)',
+        r'as\s+(\w+)\s+(?:puts it|observed|noted|remarked|pointed out)',
+        r'in (?:the (?:words|view|opinion) of)\s+(\w+)',
+    ]
+    DIVERGENCE_MARKERS = {'but', 'however', 'yet', 'nevertheless', 'although', 'though',
+                          'in fact', 'actually', 'rather', 'on the contrary', 'in truth',
+                          'strictly speaking', 'more precisely', 'one might wonder'}
+
+    sents = re.split(r'[.!?]+', text)
+    sents = [s.strip() for s in sents if len(s.strip()) > 15]
+
+    findings = []
+    for i, sent in enumerate(sents):
+        cited_author = None
+        for pat in CITATION_MARKERS:
+            m = re.search(pat, sent, re.I)
+            if m:
+                cited_author = m.group(1)
+                break
+        if not cited_author:
+            continue
+
+        # Check next 3 sentences for divergence
+        window = ' '.join(sents[i:min(i+4, len(sents))]).lower()
+        divergences = [d for d in DIVERGENCE_MARKERS if d in window]
+        if divergences:
+            findings.append({
+                "cited_author": cited_author,
+                "sentence": i + 1,
+                "divergence_markers": divergences,
+                "excerpt": sent[:150],
+            })
+
+    return {
+        "total_divergences": len(findings),
+        "findings": findings[:20],
+        "method": "Commentary Divergence Analysis",
+        "precedent": "Strauss on commentators who explain while subtly reframing; Al-Farabi on Plato",
+        "interpretation": "When an author cites another then immediately diverges, the 'commentary' may be the vehicle for the author's own heterodox view.",
+    }
+
+
+def detect_polysemy(text: str, delimiter_pattern: str = None) -> dict:
+    """Find key words used in significantly different contexts (Dante four-levels method).
+
+    Precedent: Dante's four levels of meaning; Maimonides on parables.
+    """
+    words = re.findall(r'\b[a-zA-Z]{4,}\b', text.lower())
+    freq = Counter(words)
+
+    # Focus on moderately frequent content words (3-30 occurrences)
+    candidates = {w for w, c in freq.items()
+                  if 3 <= c <= 30 and w not in _STOPWORDS and w in _PHILOSOPHICAL_TERMS}
+
+    sections = re.split(delimiter_pattern or r"\n\s*\n", text)
+    sections = [s for s in sections if len(s.strip()) > 50]
+
+    polysemous = []
+    for word in candidates:
+        # Find sections containing this word
+        contexts = []
+        for i, sec in enumerate(sections):
+            if word in sec.lower():
+                # Get surrounding words (context)
+                sec_words = set(re.findall(r'\b[a-zA-Z]{4,}\b', sec.lower())) - _STOPWORDS - {word}
+                contexts.append({"section": i + 1, "context_words": sec_words})
+
+        if len(contexts) < 2:
+            continue
+
+        # Check if contexts diverge significantly
+        all_pairs_overlap = []
+        for a in range(len(contexts)):
+            for b in range(a + 1, len(contexts)):
+                inter = len(contexts[a]["context_words"] & contexts[b]["context_words"])
+                union = len(contexts[a]["context_words"] | contexts[b]["context_words"])
+                overlap = inter / union if union else 0
+                all_pairs_overlap.append(overlap)
+
+        avg_overlap = sum(all_pairs_overlap) / len(all_pairs_overlap) if all_pairs_overlap else 1
+        if avg_overlap < 0.15:  # Very different contexts
+            polysemous.append({
+                "word": word,
+                "occurrences": freq[word],
+                "contexts_found": len(contexts),
+                "avg_context_overlap": round(avg_overlap, 3),
+            })
+
+    polysemous.sort(key=lambda x: x["avg_context_overlap"])
+
+    return {
+        "total_polysemous": len(polysemous),
+        "words": polysemous[:20],
+        "method": "Polysemy Detection (Dante Four-Levels)",
+        "precedent": "Dante's four levels (literal, allegorical, moral, anagogical); Maimonides on parables",
+        "interpretation": "Key terms used in radically different contexts may carry different meanings at different levels of the text.",
+    }
+
+
+def detect_aphoristic_fragmentation(text: str, delimiter_pattern: str = None) -> dict:
+    """Measure textual fragmentation (Nietzsche mask method).
+
+    Precedent: Nietzsche's aphoristic style; Bacon on aphorisms vs method.
+    """
+    sections = re.split(delimiter_pattern or r"\n\s*\n", text)
+    sections = [s.strip() for s in sections if s.strip()]
+
+    # Count short isolated sections (< 3 sentences)
+    short_sections = 0
+    total_sections = len(sections)
+    for sec in sections:
+        sents = re.split(r'[.!?]+', sec)
+        sents = [s for s in sents if len(s.strip()) > 10]
+        if len(sents) <= 2:
+            short_sections += 1
+
+    frag_ratio = short_sections / total_sections if total_sections else 0
+
+    # Topic shift detection: compare adjacent sections by word overlap
+    topic_shifts = 0
+    for i in range(1, len(sections)):
+        w_prev = set(re.findall(r'\b[a-zA-Z]{4,}\b', sections[i-1].lower())) - _STOPWORDS
+        w_curr = set(re.findall(r'\b[a-zA-Z]{4,}\b', sections[i].lower())) - _STOPWORDS
+        union = len(w_prev | w_curr)
+        if union == 0:
+            continue
+        overlap = len(w_prev & w_curr) / union
+        if overlap < 0.1:
+            topic_shifts += 1
+
+    shift_ratio = topic_shifts / max(total_sections - 1, 1)
+
+    # Non-sequential argument markers
+    NON_SEQ = {'incidentally', 'by the way', 'to digress', 'parenthetically',
+               'as an aside', 'returning to', 'but first', 'before continuing',
+               'to return', 'as i was saying', 'on another note'}
+    non_seq_count = sum(1 for m in NON_SEQ if m in text.lower())
+
+    score = min(1.0, frag_ratio * 0.5 + shift_ratio * 0.3 + non_seq_count * 0.05)
+
+    return {
+        "total_sections": total_sections,
+        "short_sections": short_sections,
+        "fragmentation_ratio": round(frag_ratio, 3),
+        "topic_shifts": topic_shifts,
+        "topic_shift_ratio": round(shift_ratio, 3),
+        "non_sequential_markers": non_seq_count,
+        "score": round(score, 3),
+        "method": "Aphoristic Fragmentation (Nietzsche Mask Method)",
+        "precedent": "Nietzsche's aphoristic style; Bacon on aphorisms; the principle that fragmentation forces active reader reconstruction",
+        "interpretation": "High fragmentation suggests the author deliberately avoids continuous argument, forcing the reader to reconstruct coherence — a mask that rewards only the careful reader.",
     }
