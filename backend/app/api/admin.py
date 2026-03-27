@@ -864,7 +864,7 @@ def _run_bulk_esoteric(
     from app.services.esoteric_engine import run_esoteric_analysis_v2
     from app.services.markdown import has_cached_markdown, markdown_path_for
     from app.services.text_extraction import (
-        _extract_epub_markdown_sync, _extract_pdf_pdfplumber_sync, optimize_for_llm,
+        _extract_epub_markdown_sync, _extract_pdf_marker, optimize_for_llm,
     )
     from app.services.background_jobs import sync_update_job, sync_get_job_status, _get_sync_db_path
     from pathlib import Path
@@ -917,7 +917,7 @@ def _run_bulk_esoteric(
                             if fmt == "epub":
                                 text = _extract_epub_markdown_sync(fp)
                             elif fmt == "pdf":
-                                text = _extract_pdf_pdfplumber_sync(fp)
+                                text = _extract_pdf_marker(fp)
 
                 if not text or len(text.strip()) < 200:
                     done += 1

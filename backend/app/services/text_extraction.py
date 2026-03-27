@@ -488,6 +488,62 @@ def fix_hyphenated_linebreaks(text: str) -> str:
     return re.sub(r'(\w)-\s*\n\s*(\w)', r'\1\2', text)
 
 
+def _extract_pdf_marker(path: Path) -> str:
+    """High-quality PDF extraction using Marker (ML-based).
+
+    Preserves bold, italic, headings, tables, footnotes.
+    Works on CPU (slower) or GPU/MPS (fast).
+    Falls back to pdfplumber if Marker is not installed or fails.
+
+    Uses subprocess to avoid threading issues with torch on some platforms.
+    """
+    import subprocess
+    import sys
+    import shutil
+
+    # Check if marker CLI is available
+    marker_bin = shutil.which("marker")
+    if not marker_bin:
+        logger.debug("Marker CLI not found, falling back to pdfplumber")
+        return _extract_pdf_pdfplumber_sync(path)
+
+    try:
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = subprocess.run(
+                [sys.executable, "-c", f"""
+import sys
+try:
+    from marker.converters.pdf import PdfConverter
+    from marker.config.parser import ConfigParser
+    config = ConfigParser({{"output_format": "markdown"}})
+    converter = PdfConverter(config=config.generate_config_dict())
+    result = converter("{path}")
+    print(result.markdown)
+except Exception as e:
+    print(f"MARKER_ERROR: {{e}}", file=sys.stderr)
+    sys.exit(1)
+"""],
+                capture_output=True, text=True, timeout=600,
+                env={**__import__('os').environ, 'OMP_NUM_THREADS': '1'},
+            )
+
+            if result.returncode == 0 and result.stdout and len(result.stdout.strip()) > 200:
+                logger.info("Marker extracted %d chars from %s", len(result.stdout), path.name)
+                return result.stdout
+            else:
+                logger.warning("Marker failed for %s (rc=%d), falling back to pdfplumber",
+                               path.name, result.returncode)
+                return _extract_pdf_pdfplumber_sync(path)
+
+    except subprocess.TimeoutExpired:
+        logger.warning("Marker timed out for %s, falling back to pdfplumber", path.name)
+        return _extract_pdf_pdfplumber_sync(path)
+    except Exception as e:
+        logger.warning("Marker error for %s: %s, falling back to pdfplumber", path.name, e)
+        return _extract_pdf_pdfplumber_sync(path)
+
+
 async def _extract_pdf_pdfplumber(path: Path) -> str:
     """High-quality PDF extraction using pdfplumber.
 
@@ -661,7 +717,17 @@ def _extract_pdf_pdfplumber_sync(path: Path) -> str:
 
 
 async def _extract_pdf_text(path: Path) -> str:
-    """Extract text from a PDF, preferring pdfplumber then falling back to pypdf."""
+    """Extract text from a PDF. Priority: Marker → pdfplumber → pypdf."""
+    # Try Marker first (ML-based, preserves formatting)
+    try:
+        loop = __import__('asyncio').get_event_loop()
+        text = await loop.run_in_executor(None, _extract_pdf_marker, path)
+        if text and len(text.strip()) > 200:
+            return text
+    except Exception as marker_err:
+        logger.debug("Marker extraction failed (%s), trying pdfplumber", marker_err)
+
+    # Fallback: pdfplumber
     try:
         return await _extract_pdf_pdfplumber(path)
     except Exception as plumber_err:

@@ -182,7 +182,8 @@ def generate_markdown_sync(edition_id: int) -> str | None:
             if fmt == "epub":
                 text = _extract_epub_markdown_sync(file_path)
             elif fmt == "pdf":
-                text = _extract_pdf_pdfplumber_sync(file_path)
+                from app.services.text_extraction import _extract_pdf_marker
+                text = _extract_pdf_marker(file_path)
             elif fmt in ("txt", "text"):
                 text = file_path.read_text(encoding="utf-8", errors="replace")
             else:
