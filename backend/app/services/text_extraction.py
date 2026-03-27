@@ -391,23 +391,68 @@ async def _extract_epub_poetry(path: Path) -> str:
     except ImportError:
         raise RuntimeError("ebooklib and beautifulsoup4 required")
 
+    # Track whether we've passed front matter
+    _past_front_matter = [False]
+    _front_matter_end_markers = {'caedmon', 'anonymous', 'beowulf', 'riddles',
+                                  'prologue', 'book i', 'canto i', 'part i'}
+
     def _is_author_heading(text: str) -> bool:
-        """Detect ALL CAPS or letter-spaced author names like 'R O B E R T  F R O S T'."""
+        """Detect poet name headings like 'R O B E R T  F R O S T' or 'ROBERT FROST'.
+
+        Must be: letter-spaced ALL CAPS personal name (2-4 words)
+        or regular ALL CAPS name. Excludes institutions, boilerplate, single words.
+        """
         stripped = text.strip()
         if not stripped or len(stripped) < 5:
             return False
-        # Letter-spaced: "R O B E R T  F R O S T" — only if it looks like a name
-        collapsed = stripped.replace(' ', '')
-        if (len(collapsed) >= 6 and collapsed.isupper() and collapsed.isalpha()
-                and stripped.count(' ') > len(collapsed) * 0.5
-                and len(collapsed.split()) <= 1):  # collapsed = single word = spaced name
-            return True
-        # ALL CAPS with at least 2 words: "ROBERT FROST" (not "CONTENTS")
+
+        # Detect and collapse letter-spaced text
+        # "R O B E R T  F R O S T" → check if it's a name
+        parts = stripped.split()
+        single_chars = sum(1 for p in parts if len(p) == 1 and p.isalpha())
+        is_letter_spaced = single_chars > len(parts) * 0.5 and len(parts) > 4
+
+        if is_letter_spaced:
+            # Collapse: group runs of single letters into words
+            collapsed_words = []
+            buf = []
+            for p in parts:
+                if len(p) == 1 and p.isalpha():
+                    buf.append(p)
+                else:
+                    if buf:
+                        collapsed_words.append(''.join(buf))
+                        buf = []
+                    collapsed_words.append(p)
+            if buf:
+                collapsed_words.append(''.join(buf))
+
+            name = ' '.join(collapsed_words).upper()
+            # Must be 2-4 words, all alpha (personal name, not institution)
+            if 2 <= len(collapsed_words) <= 5 and all(w.isalpha() for w in collapsed_words):
+                # Exclude institutional words
+                institutional = {'university', 'college', 'professor', 'emeritus',
+                                 'institute', 'edition', 'late', 'oxford', 'cambridge'}
+                if not any(w.lower() in institutional for w in collapsed_words):
+                    return True
+            return False
+
+        # Regular ALL CAPS: "ROBERT FROST" — 2-4 words, all alpha
         words = stripped.split()
-        if (stripped.isupper() and len(words) >= 2 and len(stripped) <= 40
-                and all(w.isalpha() or w in ('.', '-', "'") for w in words)
-                and stripped not in ('CONTENTS', 'COPYRIGHT', 'ACKNOWLEDGMENTS', 'PERMISSIONS',
-                                     'INDEX', 'NOTES', 'PREFACE', 'INTRODUCTION', 'GLOSSARY')):
+        if (stripped.isupper() and 2 <= len(words) <= 5
+                and all(w.isalpha() or w in ('.', '-', "'") for w in words)):
+            # Exclude boilerplate
+            boilerplate = {'CONTENTS', 'COPYRIGHT', 'ACKNOWLEDGMENTS', 'PERMISSIONS',
+                          'INDEX', 'NOTES', 'PREFACE', 'INTRODUCTION', 'GLOSSARY',
+                          'PRINTED', 'ALL RIGHTS', 'EDITORS EMERITI', 'NEW YORK',
+                          'FIFTH EDITION', 'SHORTER EDITION'}
+            if stripped in boilerplate or any(b in stripped for b in boilerplate):
+                return False
+            # Exclude if any word is an institutional term
+            institutional = {'UNIVERSITY', 'COLLEGE', 'PROFESSOR', 'EMERITUS',
+                           'INSTITUTE', 'EDITION', 'COMPANY', 'NORTON', 'PRESS'}
+            if any(w in institutional for w in words):
+                return False
             return True
         return False
 
@@ -561,9 +606,30 @@ async def _extract_epub_poetry(path: Path) -> str:
             else:
                 prev_was_blank = True
 
-    # Clean up: collapse 3+ blank lines to 2 (stanza break), but preserve single newlines (line breaks)
+    # Clean up
     text = '\n'.join(output_lines)
-    text = re.sub(r'\n{4,}', '\n\n\n', text)  # Max triple newline (poem break)
+
+    # Strip front matter using heuristic: find where verse content begins
+    # Verse lines are short (< 80 chars). TOC/front matter lines are long.
+    # Find the first stretch of 5+ consecutive short lines (= actual poetry)
+    text_lines = text.split('\n')
+    verse_start = 0
+    consecutive_short = 0
+    for i, line in enumerate(text_lines):
+        stripped = line.strip()
+        if stripped and 5 < len(stripped) < 80 and not stripped.startswith('#'):
+            consecutive_short += 1
+            if consecutive_short >= 5:
+                verse_start = max(0, i - consecutive_short)
+                break
+        else:
+            consecutive_short = 0
+
+    if verse_start > 20:
+        text = '\n'.join(text_lines[verse_start:])
+
+    # Collapse 3+ blank lines to 2 (stanza break), preserve single newlines (line breaks)
+    text = re.sub(r'\n{4,}', '\n\n\n', text)
     text = normalize_unicode(text)
     return text.strip()
 
