@@ -404,35 +404,136 @@ class StudyEdition:
     def import_text(self, text: str, chapter_pattern: str = r'(?:Chapter|Book|Part)\s+\w+',
                     paragraph_separator: str = '\n\n'):
         """
-        Import a plain text, auto-detecting chapters and paragraphs.
+        Import markdown text, parsing headings, bold, italic, etc.
         Returns self for chaining.
         """
-        # Split into chapters
-        chapter_splits = re.split(f'({chapter_pattern})', text, flags=re.IGNORECASE)
+        return self.import_markdown(text)
 
-        if len(chapter_splits) <= 1:
-            # No chapters detected — treat whole text as one chapter
-            ch = self.add_chapter("Full Text")
-            for para in text.split(paragraph_separator):
-                para = para.strip()
-                if para:
-                    ch.add_paragraph(para, css_class="indent")
-        else:
-            # Process chapter splits
-            i = 0
-            if chapter_splits[0].strip():
-                # Text before first chapter marker = introduction
-                self.set_general_introduction(chapter_splits[0].strip())
-                i = 1
-            while i < len(chapter_splits) - 1:
-                title = chapter_splits[i].strip()
-                body = chapter_splits[i + 1].strip() if i + 1 < len(chapter_splits) else ""
-                ch = self.add_chapter(title)
-                for para in body.split(paragraph_separator):
-                    para = para.strip()
-                    if para:
-                        ch.add_paragraph(para, css_class="indent")
-                i += 2
+    def import_markdown(self, text: str):
+        """Import markdown text with proper heading/chapter detection.
+
+        Handles:
+        - # H1 → new chapter
+        - ## H2 → section header level 1
+        - ### H3 → section header level 2
+        - **bold** and *italic* → preserved for HTML rendering
+        - > blockquotes → sidebar essays
+        - Regular paragraphs
+        """
+        blocks = text.split('\n\n')
+        current_chapter = None
+
+        for block in blocks:
+            block = block.strip()
+            if not block:
+                continue
+
+            # Strip markdown formatting for clean text
+            def _clean_md(t):
+                """Convert markdown inline formatting to plain text for data model."""
+                # Keep bold/italic markers — they'll be converted in rendering
+                return t
+
+            def _is_valid_heading(title: str) -> bool:
+                """Filter junk headings from PDF extraction artifacts."""
+                if len(title) < 4:
+                    return False
+                # Must have enough alpha characters
+                alpha = sum(1 for c in title if c.isalpha())
+                if alpha < 3:
+                    return False
+                # Skip ALL CAPS headings (title page artifacts from PDF)
+                if title == title.upper() and len(title) < 40:
+                    return False
+                # Skip common short words that aren't chapter titles
+                if title.lower() in ('by', 'tt', 'as', 'the', 'and', 'or', 'in', 'on',
+                                      'at', 'to', 'how', 'who', 'what', 'why', 'leo strauss',
+                                      'seth benardete'):
+                    return False
+                return True
+
+            # H1 = new chapter
+            m = re.match(r'^#\s+(.+)$', block, re.MULTILINE)
+            if m and '\n' not in block.strip():
+                title = m.group(1).strip()
+                title = re.sub(r'\*\*(.+?)\*\*', r'\1', title)
+                if _is_valid_heading(title):
+                    current_chapter = self.add_chapter(title)
+                    continue
+                # Invalid heading — treat as paragraph
+                if current_chapter:
+                    current_chapter.add_paragraph(title, css_class="indent")
+                continue
+
+            # H2 = section header
+            m = re.match(r'^##\s+(.+)$', block, re.MULTILINE)
+            if m and '\n' not in block.strip():
+                header = m.group(1).strip()
+                header = re.sub(r'\*\*(.+?)\*\*', r'\1', header)
+                if _is_valid_heading(header):
+                    if current_chapter:
+                        current_chapter.add_section_header(header, level=1)
+                    else:
+                        current_chapter = self.add_chapter(header)
+                    continue
+                if current_chapter:
+                    current_chapter.add_paragraph(header, css_class="indent")
+                continue
+
+            # H3 = sub-section header
+            m = re.match(r'^###\s+(.+)$', block, re.MULTILINE)
+            if m and '\n' not in block.strip():
+                header = m.group(1).strip()
+                header = re.sub(r'\*\*(.+?)\*\*', r'\1', header)
+                if _is_valid_heading(header):
+                    if current_chapter:
+                        current_chapter.add_section_header(header, level=2)
+                    else:
+                        current_chapter = self.add_chapter(header)
+                    continue
+                if current_chapter:
+                    current_chapter.add_paragraph(header, css_class="indent")
+                continue
+
+            # Blockquote = sidebar essay
+            if block.startswith('> '):
+                content = re.sub(r'^>\s*', '', block, flags=re.MULTILINE)
+                if current_chapter:
+                    # Use first line as title if short
+                    lines = content.split('\n')
+                    if len(lines[0]) < 80 and len(lines) > 1:
+                        current_chapter.add_sidebar_essay(lines[0], '\n'.join(lines[1:]))
+                    else:
+                        current_chapter.add_sidebar_essay("Note", content)
+                continue
+
+            # Multi-line block with headings mixed in
+            if '\n#' in f'\n{block}' and block.count('\n') > 0:
+                # Split and process line by line
+                for line in block.split('\n'):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    hm = re.match(r'^(#{1,3})\s+(.+)$', line)
+                    if hm:
+                        level = len(hm.group(1))
+                        title = re.sub(r'\*\*(.+?)\*\*', r'\1', hm.group(2).strip())
+                        if level == 1:
+                            current_chapter = self.add_chapter(title)
+                        elif current_chapter:
+                            current_chapter.add_section_header(title, level=level - 1)
+                    elif current_chapter:
+                        current_chapter.add_paragraph(line, css_class="indent")
+                continue
+
+            # Regular paragraph
+            if not current_chapter:
+                current_chapter = self.add_chapter("Text")
+
+            # Clean up markdown artifacts in paragraph text
+            clean = block
+            # Don't strip ** and * — they'll be rendered as bold/italic in HTML
+            current_chapter.add_paragraph(clean, css_class="indent")
 
         return self
 
