@@ -1800,4 +1800,303 @@ def run_full_esoteric_analysis(
         logger.error(f"Structural Obscurity Detector failed: {e}")
         results["structural_obscurity"] = {"error": str(e)}
 
+    # Excessive Praise Detector
+    try:
+        praise_result = detect_excessive_praise(text=text, delimiter_pattern=config.delimiter_pattern)
+        results["excessive_praise"] = praise_result
+    except Exception as e:
+        logger.error(f"Excessive Praise Detector failed: {e}")
+        results["excessive_praise"] = {"error": str(e)}
+
+    # Lexical Density Mapper
+    try:
+        density_result = detect_lexical_density(text=text, delimiter_pattern=config.delimiter_pattern)
+        results["lexical_density"] = density_result
+    except Exception as e:
+        logger.error(f"Lexical Density Mapper failed: {e}")
+        results["lexical_density"] = {"error": str(e)}
+
+    # Sentiment Inversion Detector
+    try:
+        inversion_result = detect_sentiment_inversion(text=text, delimiter_pattern=config.delimiter_pattern)
+        results["sentiment_inversion"] = inversion_result
+    except Exception as e:
+        logger.error(f"Sentiment Inversion Detector failed: {e}")
+        results["sentiment_inversion"] = {"error": str(e)}
+
+    # Numerological Significance
+    try:
+        numerology_result = check_numerological_significance(text=text, delimiter_pattern=config.delimiter_pattern)
+        results["numerology"] = numerology_result
+    except Exception as e:
+        logger.error(f"Numerological Significance failed: {e}")
+        results["numerology"] = {"error": str(e)}
+
     return results
+
+
+# ─────────────────────────────────────────────────────
+# NEW TOOLS: Excessive Praise, Lexical Density,
+#             Sentiment Inversion, Numerology
+# ─────────────────────────────────────────────────────
+
+# Gematria / Isopsephy / Numerology tables
+GEMATRIA_TABLE = {
+    'א': 1, 'ב': 2, 'ג': 3, 'ד': 4, 'ה': 5, 'ו': 6, 'ז': 7, 'ח': 8, 'ט': 9,
+    'י': 10, 'כ': 20, 'ך': 20, 'ל': 30, 'מ': 40, 'ם': 40, 'נ': 50, 'ן': 50,
+    'ס': 60, 'ע': 70, 'פ': 80, 'ף': 80, 'צ': 90, 'ץ': 90, 'ק': 100, 'ר': 200,
+    'ש': 300, 'ת': 400,
+}
+
+ISOPSEPHY_TABLE = {
+    'α': 1, 'β': 2, 'γ': 3, 'δ': 4, 'ε': 5, 'ϛ': 6, 'ζ': 7, 'η': 8, 'θ': 9,
+    'ι': 10, 'κ': 20, 'λ': 30, 'μ': 40, 'ν': 50, 'ξ': 60, 'ο': 70, 'π': 80,
+    'ϟ': 90, 'ρ': 100, 'σ': 200, 'ς': 200, 'τ': 300, 'υ': 400, 'φ': 500,
+    'χ': 600, 'ψ': 700, 'ω': 800, 'ϡ': 900,
+}
+
+LATIN_TABLE = {chr(i): i - 96 for i in range(97, 123)}
+
+SIGNIFICANT_NUMBERS = {
+    1: "Unity, the One, the Monad", 3: "Triad, harmony, Trinity",
+    4: "Tetractys, cosmic completeness", 5: "Pentad, marriage of 2+3",
+    6: "Harmony, creation (6 days), perfect number", 7: "Sacred completeness",
+    10: "Decad, perfection, Sefirot", 12: "Cosmic order (tribes, apostles, zodiac)",
+    13: "Transgression, rebellion; 13 attributes of mercy",
+    18: "Chai (life) in gematria", 22: "Hebrew alphabet letters",
+    26: "YHWH in gematria (Strauss on Machiavelli)",
+    28: "Second perfect number", 32: "Paths of wisdom (Sefirot + letters)",
+    36: "Double-chai (36 righteous ones)", 40: "Trial, testing, purification",
+    42: "42-letter Name of God", 49: "7×7, completeness squared",
+    50: "Jubilee, freedom", 70: "Fullness of nations, Sanhedrin",
+    72: "Names of God (Shemhamphorasch)", 100: "Fullness of a cycle",
+    142: "Machiavelli's Discourses (Livy's 141 + 1)",
+    216: "Plato's Nuptial Number candidate (6³)", 666: "Number of the Beast",
+}
+
+
+def compute_gematria(word: str, table: dict = None) -> int:
+    """Compute numerical value of a word using the given letter-value table."""
+    if table is None:
+        table = LATIN_TABLE
+    return sum(table.get(c, 0) for c in word.lower())
+
+
+def detect_excessive_praise(
+    text: str,
+    delimiter_pattern: str = r"\n\s*\n",
+) -> dict:
+    """Detect passages with excessive praise/emphatic agreement ('protesting too much').
+
+    Per Strauss: praising orthodox opinion with unusual vehemence signals disagreement.
+    """
+    PRAISE_MARKERS = {
+        'absolutely', 'certainly', 'undoubtedly', 'unquestionably', 'indisputably',
+        'beyond question', 'beyond doubt', 'no one would deny', 'all agree',
+        'every reasonable person', 'obviously', 'clearly', 'manifestly',
+        'it is evident', 'without doubt', 'universally acknowledged',
+        'no sane person', 'self-evident', 'goes without saying', 'needless to say',
+        'of course', 'naturally', 'it stands to reason', 'everyone knows',
+    }
+    SUPERLATIVES = {
+        'greatest', 'noblest', 'highest', 'best', 'most excellent', 'most worthy',
+        'most admirable', 'supreme', 'unparalleled', 'incomparable', 'matchless',
+        'peerless', 'finest', 'most sacred', 'most holy', 'most important',
+    }
+
+    sections = re.split(delimiter_pattern or r"\n\s*\n", text)
+    flagged = []
+    text_lower = text.lower()
+
+    for i, section in enumerate(sections):
+        if len(section.strip()) < 50:
+            continue
+        s_lower = section.lower()
+        praise_count = sum(1 for m in PRAISE_MARKERS if m in s_lower)
+        super_count = sum(1 for s in SUPERLATIVES if s in s_lower)
+        word_count = len(s_lower.split())
+        if word_count < 10:
+            continue
+
+        density = (praise_count + super_count) / word_count
+        if praise_count + super_count >= 2 or density > 0.02:
+            flagged.append({
+                "section": i + 1,
+                "praise_markers": praise_count,
+                "superlatives": super_count,
+                "density": round(density, 4),
+                "excerpt": section.strip()[:200],
+            })
+
+    flagged.sort(key=lambda x: x["density"], reverse=True)
+    return {
+        "total_flagged": len(flagged),
+        "sections": flagged[:15],
+        "interpretation": "Passages with excessive emphatic language may signal the author 'protesting too much' — praising orthodoxy to mask disagreement (Strauss).",
+    }
+
+
+def detect_lexical_density(
+    text: str,
+    delimiter_pattern: str = r"\n\s*\n",
+) -> dict:
+    """Measure vocabulary diversity (type-token ratio) per section.
+
+    High lexical density = author writing most carefully = philosophically loaded section.
+    """
+    sections = re.split(delimiter_pattern or r"\n\s*\n", text)
+    densities = []
+
+    for i, section in enumerate(sections):
+        words = re.findall(r'\b[a-zA-Z]{3,}\b', section.lower())
+        if len(words) < 20:
+            continue
+        types = len(set(words))
+        tokens = len(words)
+        ttr = types / tokens  # type-token ratio
+        densities.append({
+            "section": i + 1,
+            "type_token_ratio": round(ttr, 4),
+            "unique_words": types,
+            "total_words": tokens,
+            "excerpt": section.strip()[:100],
+        })
+
+    if not densities:
+        return {"sections": [], "avg_density": 0, "high_density_sections": []}
+
+    avg = sum(d["type_token_ratio"] for d in densities) / len(densities)
+    std = (sum((d["type_token_ratio"] - avg) ** 2 for d in densities) / len(densities)) ** 0.5
+
+    high = [d for d in densities if d["type_token_ratio"] > avg + std]
+    high.sort(key=lambda x: x["type_token_ratio"], reverse=True)
+
+    return {
+        "avg_density": round(avg, 4),
+        "std_density": round(std, 4),
+        "total_sections": len(densities),
+        "high_density_sections": high[:10],
+        "interpretation": "High lexical density indicates the author chose words most carefully — these sections likely carry the most philosophically loaded content.",
+    }
+
+
+def detect_sentiment_inversion(
+    text: str,
+    delimiter_pattern: str = r"\n\s*\n",
+) -> dict:
+    """Detect topically similar passages with inverted polarity (potential irony/contradiction).
+
+    Uses keyword overlap for topical similarity and negation density differential
+    for polarity inversion. More sophisticated than simple contradiction detection.
+    """
+    NEGATION = {
+        'not', 'no', 'never', 'neither', 'nor', 'nothing', 'nowhere',
+        'hardly', 'scarcely', 'barely', 'without', 'cannot', "can't",
+        "don't", "doesn't", "didn't", "won't", "wouldn't", "shouldn't",
+    }
+    OPPOSITION = {
+        'but', 'however', 'yet', 'nevertheless', 'nonetheless',
+        'although', 'contrary', 'opposite', 'whereas', 'instead',
+        'rather', 'despite', 'conversely',
+    }
+
+    sections = re.split(delimiter_pattern or r"\n\s*\n", text)
+    parsed = []
+    for i, section in enumerate(sections):
+        words = re.findall(r'\b[a-zA-Z]{3,}\b', section.lower())
+        if len(words) < 15:
+            continue
+        content_words = set(words) - NEGATION - OPPOSITION - {
+            'the', 'and', 'for', 'that', 'this', 'with', 'from', 'are', 'was', 'were',
+            'have', 'has', 'had', 'been', 'being', 'will', 'would', 'could', 'should',
+        }
+        neg_density = sum(1 for w in words if w in NEGATION) / len(words)
+        opp_density = sum(1 for w in words if w in OPPOSITION) / len(words)
+        parsed.append({
+            "index": i,
+            "content_words": content_words,
+            "neg_density": neg_density,
+            "opp_density": opp_density,
+            "word_count": len(words),
+            "excerpt": section.strip()[:200],
+        })
+
+    inversions = []
+    for a_idx in range(len(parsed)):
+        for b_idx in range(a_idx + 1, min(a_idx + 20, len(parsed))):
+            a, b = parsed[a_idx], parsed[b_idx]
+            # Topical similarity via Jaccard coefficient
+            intersection = len(a["content_words"] & b["content_words"])
+            union = len(a["content_words"] | b["content_words"])
+            if union == 0:
+                continue
+            similarity = intersection / union
+            if similarity < 0.15:
+                continue
+
+            # Polarity inversion
+            neg_diff = abs(a["neg_density"] - b["neg_density"])
+            combined_opp = a["opp_density"] + b["opp_density"]
+            inversion_score = similarity * (neg_diff + combined_opp) * 10
+
+            if inversion_score > 0.1:
+                inversions.append({
+                    "section_a": a["index"] + 1,
+                    "section_b": b["index"] + 1,
+                    "topical_similarity": round(similarity, 3),
+                    "negation_differential": round(neg_diff, 4),
+                    "inversion_score": round(min(inversion_score, 1.0), 3),
+                    "excerpt_a": a["excerpt"],
+                    "excerpt_b": b["excerpt"],
+                })
+
+    inversions.sort(key=lambda x: x["inversion_score"], reverse=True)
+    return {
+        "total_inversions": len(inversions),
+        "inversions": inversions[:15],
+        "interpretation": "Topically similar passages with inverted polarity may signal deliberate contradiction or irony (Maimonides 7th cause; Strauss on the less emphatic statement).",
+    }
+
+
+def check_numerological_significance(
+    text: str,
+    delimiter_pattern: str = r"\n\s*\n",
+) -> dict:
+    """Check structural counts against traditionally significant numbers."""
+    sections = re.split(delimiter_pattern or r"\n\s*\n", text)
+    sections = [s for s in sections if len(s.strip()) > 50]
+    sentences = re.split(r'[.!?]+', text)
+    sentences = [s for s in sentences if len(s.strip()) > 10]
+
+    # Count headings (markdown ## or CHAPTER patterns)
+    headings = re.findall(r'^#{1,3}\s+.+$|^(?:CHAPTER|Chapter|BOOK|Book|PART|Part)\s+', text, re.MULTILINE)
+
+    counts = {
+        "sections": len(sections),
+        "sentences": len(sentences),
+        "headings": len(headings),
+    }
+
+    matches = []
+    for label, count in counts.items():
+        if count in SIGNIFICANT_NUMBERS:
+            matches.append({
+                "element": label,
+                "count": count,
+                "significance": SIGNIFICANT_NUMBERS[count],
+            })
+        # Check divisors
+        for num, meaning in SIGNIFICANT_NUMBERS.items():
+            if num > 1 and count > num and count % num == 0 and count != num:
+                matches.append({
+                    "element": label,
+                    "count": count,
+                    "divisible_by": num,
+                    "significance": f"Divisible by {num}: {meaning}",
+                })
+
+    return {
+        "counts": counts,
+        "significant_matches": matches[:20],
+        "interpretation": "Structural counts matching traditionally significant numbers may indicate deliberate numerological construction (Pythagorean, Kabbalistic, Straussian on Machiavelli).",
+    }
