@@ -2877,44 +2877,138 @@ class LiteraryAnalyzer:
         3. --- EPUB file boundary separators
         4. Inline Roman/Arabic numeral markers
         5. Anthology format (ALL CAPS author + dated headings)
-        6. Within-section splitting (blank line + capitalized first line)
-        7. Prose chapter detection (Chapter X, Part X, story-length blocks)
+        6. Prose chapter detection (Chapter X, Part X, ALL CAPS titles, TOC-based)
+        7. Within-section splitting (blank line + capitalized first line)
         8. Triple+ newline fallback
+        9. Force-split for large unsplittable texts
+
+        Post-processing: merge over-split results, merge tiny sections.
 
         Returns list of {"title": str, "text": str, "index": int, "author"?: str}
         """
         poems = self._split_bracketed_titles()
         if len(poems) >= 3:
-            return poems
+            return self._postprocess(poems)
 
         poems = self._split_markdown_headings()
         if len(poems) >= 3:
-            # Check if any sections are very large — may need within-section splitting
             poems = self._refine_large_sections(poems)
-            return poems
+            return self._postprocess(poems)
 
         poems = self._split_separator_markers()
         if len(poems) >= 3:
-            return poems
+            return self._postprocess(poems)
 
         poems = self._split_inline_numerals()
         if len(poems) >= 3:
-            return poems
+            return self._postprocess(poems)
 
         poems = self._split_anthology_authors()
         if len(poems) >= 3:
-            return poems
+            return self._postprocess(poems)
 
         poems = self._split_prose_chapters()
         if len(poems) >= 3:
-            return poems
+            return self._postprocess(poems)
 
         poems = self._split_blank_line_poems()
         if len(poems) >= 3:
-            return poems
+            return self._postprocess(poems)
 
-        # Final fallback: triple+ newlines
-        return self._split_triple_newlines()
+        poems = self._split_triple_newlines()
+        if len(poems) >= 3:
+            return self._postprocess(poems)
+
+        # Final fallback: force-split large texts into equal sections
+        return self._force_split()
+
+    def _postprocess(self, sections: list[dict]) -> list[dict]:
+        """Post-process split results to fix over-splitting and tiny sections.
+
+        Rules:
+        1. If >300 sections, merge adjacent small ones (<1000 chars) together
+        2. If avg section size < 300 chars, re-merge until avg > 500
+        3. Re-index after merging
+        """
+        if not sections:
+            return sections
+
+        # Rule 1: Over-split — merge adjacent small sections
+        if len(sections) > 300:
+            merged = []
+            buffer_title = None
+            buffer_text = []
+            for s in sections:
+                if len(s['text']) < 1000 and buffer_text:
+                    buffer_text.append(s['text'])
+                elif len(s['text']) < 1000 and not buffer_text:
+                    buffer_title = s.get('title', '')
+                    buffer_text.append(s['text'])
+                else:
+                    if buffer_text:
+                        merged.append({
+                            "title": buffer_title or f"Section {len(merged) + 1}",
+                            "text": '\n\n'.join(buffer_text),
+                            "index": len(merged),
+                        })
+                        buffer_text = []
+                        buffer_title = None
+                    merged.append(s)
+            if buffer_text:
+                merged.append({
+                    "title": buffer_title or f"Section {len(merged) + 1}",
+                    "text": '\n\n'.join(buffer_text),
+                    "index": len(merged),
+                })
+            sections = merged
+
+        # Rule 2: Tiny sections — merge until avg > 500 chars
+        sizes = [len(s['text']) for s in sections]
+        avg = sum(sizes) / max(len(sizes), 1)
+        if avg < 300 and len(sections) > 5:
+            # Group sections into larger chunks
+            target_count = max(3, len(sections) // 5)
+            chunk_size = max(1, len(sections) // target_count)
+            merged = []
+            for i in range(0, len(sections), chunk_size):
+                chunk = sections[i:i + chunk_size]
+                title = chunk[0].get('title', f'Section {len(merged) + 1}')
+                body = '\n\n'.join(s['text'] for s in chunk)
+                merged.append({"title": title, "text": body, "index": len(merged)})
+            sections = merged
+
+        # Re-index
+        for i, s in enumerate(sections):
+            s['index'] = i
+
+        return sections
+
+    def _force_split(self) -> list[dict]:
+        """Last resort: split large unsplittable text into ~10 equal sections."""
+        text = self.text.strip()
+        if len(text) < 5000:
+            return [{"title": self.title or "Full Text", "text": text, "index": 0}]
+
+        # Split into paragraphs, then group into ~10 sections
+        paras = re.split(r'\n\s*\n', text)
+        paras = [p.strip() for p in paras if p.strip()]
+        if len(paras) < 5:
+            return [{"title": self.title or "Full Text", "text": text, "index": 0}]
+
+        target = min(max(5, len(paras) // 20), 15)
+        chunk_size = max(1, len(paras) // target)
+        sections = []
+        for i in range(0, len(paras), chunk_size):
+            chunk = paras[i:i + chunk_size]
+            body = '\n\n'.join(chunk)
+            # Title from first sentence
+            first = chunk[0][:60].split('.')[0].strip()
+            sections.append({
+                "title": first if len(first) > 5 else f"Section {len(sections) + 1}",
+                "text": body,
+                "index": len(sections),
+            })
+        return sections
 
     def _split_bracketed_titles(self) -> list[dict]:
         """Strategy 1: [POEM TITLE](link) — common in EPUB exports."""
