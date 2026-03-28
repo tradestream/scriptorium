@@ -19,6 +19,37 @@ logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────────────
+# Shared tokenization cache — avoids re-splitting text
+# 91 times (once per tool)
+# ─────────────────────────────────────────────────────
+
+_text_cache: dict = {}
+
+
+def _get_shared(text: str, delimiter_pattern: str = None) -> dict:
+    """Get pre-computed text data. Computed once, reused by all tools."""
+    key = id(text)
+    if key not in _text_cache:
+        dp = delimiter_pattern or r"\n\s*\n"
+        sections = re.split(dp, text)
+        sections = [s.strip() for s in sections if s.strip()]
+        words = re.findall(r'\b[a-zA-Z]{3,}\b', text.lower())
+        _text_cache[key] = {
+            'sections': sections,
+            'words': words,
+            'word_freq': Counter(words),
+            'sentences': [s.strip() for s in re.split(r'[.!?]+', text) if len(s.strip()) > 10],
+            'content_words': set(w for w in words if w not in _STOPWORDS),
+        }
+    return _text_cache[key]
+
+
+def _clear_cache():
+    """Clear the shared tokenization cache."""
+    _text_cache.clear()
+
+
+# ─────────────────────────────────────────────────────
 # Data structures
 # ─────────────────────────────────────────────────────
 
@@ -1604,9 +1635,13 @@ def run_full_esoteric_analysis(
     text: str,
     config: Optional[EsotericAnalysisConfig] = None,
 ) -> dict:
-    """Run all sixteen computational esoteric analysis tools and return combined results."""
+    """Run all 56 computational esoteric analysis tools and return combined results."""
     if config is None:
         config = EsotericAnalysisConfig()
+
+    # Pre-compute shared tokenization (used by all tools)
+    _clear_cache()
+    _get_shared(text, config.delimiter_pattern)
 
     results = {}
 
@@ -2003,6 +2038,7 @@ def run_full_esoteric_analysis(
             logger.error(f"{name} failed: {e}")
             results[name] = {"error": str(e)}
 
+    _clear_cache()
     return results
 
 

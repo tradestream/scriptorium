@@ -869,17 +869,18 @@ def _run_bulk_esoteric(
     from app.services.background_jobs import sync_update_job, sync_get_job_status, _get_sync_db_path
     from pathlib import Path
 
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     sync_update_job(job_id, status="running")
     done = 0
     failed = 0
     comp_done = 0
 
     db_path = _get_sync_db_path()
+    WORKERS = 4
 
-    for edition_id in computational_ids:
-        if done % 10 == 0 and sync_get_job_status(job_id) == "cancelled":
-            break
-
+    def _analyze_one(edition_id):
+        """Analyze a single book — runs in thread pool."""
         try:
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
@@ -941,23 +942,37 @@ def _run_bulk_esoteric(
                     json.dumps(results, default=str),
                 ))
                 conn.commit()
-                comp_done += 1
                 score = v2_results.get("overall_score", "?")
                 logger.info("Esoteric done: edition %d score=%s", edition_id, score)
+                return ("ok", edition_id)
 
             finally:
                 conn.close()
 
         except Exception as exc:
             logger.warning("Esoteric failed for %d: %s", edition_id, exc)
-            failed += 1
+            return ("failed", edition_id)
 
-        done += 1
-        sync_update_job(
-            job_id, done=done, failed=failed,
-            computational_done=comp_done,
-            current=f"Computational {comp_done}/{len(computational_ids)}",
-        )
+    # Process books in parallel
+    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        futures = {pool.submit(_analyze_one, eid): eid for eid in computational_ids}
+        for future in as_completed(futures):
+            status, eid = future.result()
+            done += 1
+            if status == "ok":
+                comp_done += 1
+            else:
+                failed += 1
+
+            if done % 10 == 0 or done == len(computational_ids):
+                if sync_get_job_status(job_id) == "cancelled":
+                    pool.shutdown(wait=False, cancel_futures=True)
+                    break
+                sync_update_job(
+                    job_id, done=done, failed=failed,
+                    computational_done=comp_done,
+                    current=f"Computational {comp_done}/{len(computational_ids)}",
+                )
 
     # Mark job done for computational phase
     final_status = "done" if sync_get_job_status(job_id) != "cancelled" else "cancelled"

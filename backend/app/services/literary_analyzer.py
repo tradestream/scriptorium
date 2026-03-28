@@ -372,6 +372,9 @@ class LiteraryAnalyzer:
 
     def _parse(self):
         """Parse text into lines, words, sentences, paragraphs, stanzas."""
+        if hasattr(self, '_parsed') and self._parsed:
+            return  # Already parsed — skip expensive re-tokenization
+
         # Lines (preserving original line breaks)
         self.lines = [line for line in self.text.split('\n') if line.strip()]
 
@@ -416,6 +419,8 @@ class LiteraryAnalyzer:
             # Fall back to paragraphs as "chapters" for short texts
             self.chapters = [{'title': f'Section {i+1}', 'text': p}
                              for i, p in enumerate(self.paragraphs)]
+
+        self._parsed = True
 
     # ==================================================================
     # I. PROSODY & SOUND

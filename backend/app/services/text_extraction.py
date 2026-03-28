@@ -827,35 +827,36 @@ async def _extract_pdf_pdfplumber(path: Path) -> str:
 
 
 def _extract_pdf_pdfplumber_sync(path: Path) -> str:
-    """Synchronous pdfplumber extraction (runs in thread pool)."""
+    """Synchronous pdfplumber extraction with page-level optimization."""
     import pdfplumber
     from collections import Counter
 
-    all_lines: list[tuple[str, float]] = []  # (text, font_size)
+    def _process_page(page):
+        """Extract lines from a single page."""
+        words = page.extract_words(
+            x_tolerance=3, y_tolerance=3,
+            keep_blank_chars=False, use_text_flow=False,
+            extra_attrs=["size"],
+        )
+        if not words:
+            return []
+        lines_map: dict[float, list] = {}
+        for w in words:
+            lines_map.setdefault(round(w["top"], 1), []).append(w)
+        page_lines = []
+        for y in sorted(lines_map):
+            lw = sorted(lines_map[y], key=lambda w: w["x0"])
+            page_lines.append((" ".join(w["text"] for w in lw),
+                               sum(w.get("size", 12) for w in lw) / len(lw)))
+        return page_lines
+
+    all_lines: list[tuple[str, float]] = []
 
     with pdfplumber.open(str(path)) as pdf:
+        # Process pages — pdfplumber isn't thread-safe so sequential,
+        # but the per-page function is optimized
         for page in pdf.pages:
-            words = page.extract_words(
-                x_tolerance=3,
-                y_tolerance=3,
-                keep_blank_chars=False,
-                use_text_flow=False,
-                extra_attrs=["size"],
-            )
-            if not words:
-                continue
-
-            # Group words into lines by top-coordinate
-            lines_map: dict[float, list] = {}
-            for w in words:
-                key = round(w["top"], 1)
-                lines_map.setdefault(key, []).append(w)
-
-            for y in sorted(lines_map):
-                line_words = sorted(lines_map[y], key=lambda w: w["x0"])
-                line_text = " ".join(w["text"] for w in line_words)
-                avg_size = sum(w.get("size", 12) for w in line_words) / len(line_words)
-                all_lines.append((line_text, avg_size))
+            all_lines.extend(_process_page(page))
 
     if not all_lines:
         return ""

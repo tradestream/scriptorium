@@ -44,13 +44,19 @@ IMPORTANT METHODOLOGICAL NOTES:
 - Your goal is to help the reader see what a careful, historically informed reader would see."""
 
 
+_cached_stages_template: str = ""
+
+
 def _load_stages_template() -> str:
-    """Load the 40-stage analysis template.
+    """Load the 40-stage analysis template. Cached after first load.
 
     Tries to read from the reference llm_esoteric_prompt.md file first,
     falling back to a compact embedded version.
     """
-    # Try loading from file (for development/customization)
+    global _cached_stages_template
+    if _cached_stages_template:
+        return _cached_stages_template
+
     import os
     for search_path in [
         os.path.join(os.path.dirname(__file__), '..', '..', '..', 'llm_esoteric_prompt.md'),
@@ -65,7 +71,8 @@ def _load_stages_template() -> str:
                 # Extract just the stages section (from "YOUR TASK" to end)
                 idx = content.find("YOUR TASK:")
                 if idx >= 0:
-                    return content[idx:]
+                    _cached_stages_template = content[idx:]
+                    return _cached_stages_template
                 # Try alternate marker
                 idx = content.find("## STAGE 1")
                 if idx >= 0:
