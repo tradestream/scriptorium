@@ -891,12 +891,10 @@ def _run_bulk_esoteric(
                     WHERE e.id = ?
                 """, (edition_id,)).fetchone()
                 if not row:
-                    failed += 1
-                    done += 1
-                    continue
+                    return ("failed", edition_id)
 
-                logger.info("Esoteric %d/%d: edition %d (%s)",
-                            done + 1, len(computational_ids), edition_id, row["title"][:50])
+                logger.info("Esoteric: edition %d (%s)",
+                            edition_id, row["title"][:50])
 
                 # Get text — prefer cached markdown
                 text = None
@@ -922,8 +920,7 @@ def _run_bulk_esoteric(
                                 text = _extract_pdf_marker(fp)
 
                 if not text or len(text.strip()) < 200:
-                    done += 1
-                    continue
+                    return ("skipped", edition_id)
 
                 # Run analysis
                 config = EsotericAnalysisConfig()
