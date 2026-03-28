@@ -252,13 +252,13 @@ class HardcoverProvider(Provider):
         if isbn:
             query = """
             query($isbn: String!) {
-              books(where: {_or: [{isbn_10: {_eq: $isbn}}, {isbn_13: {_eq: $isbn}}]}, limit: 1) {
+              books(where: {_or: [{isbn_13: {_eq: $isbn}}, {editions: {isbn_13: {_eq: $isbn}}}]}, limit: 1) {
                 id title description language
                 contributions { author { name } }
                 book_tags { tag { tag } }
                 release_date
                 image { url }
-                isbn_10 isbn_13
+                isbn_13
               }
             }"""
             variables: dict = {"isbn": isbn}
@@ -337,9 +337,8 @@ class HardcoverProvider(Provider):
         if tags:
             result["tags"] = tags
         # ISBN
-        for key in ("isbn_13", "isbn_10"):
-            if v := book.get(key):
-                result.setdefault("isbn", v)
+        if v := book.get("isbn_13"):
+            result.setdefault("isbn", v)
         # Cover
         if img := book.get("image"):
             if url := (img.get("url") if isinstance(img, dict) else img):
