@@ -330,7 +330,7 @@ async def run_analysis(
 
     # Create a pending analysis record
     analysis = BookAnalysis(
-        book_id=book_id,
+        work_id=book_id,
         template_id=template_id,
         title=title,
         content="",
