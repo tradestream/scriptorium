@@ -272,7 +272,9 @@ async def replace_edition_file(
         ef.kepub_hash = None
 
     # Clear markdown cache
-    markdown_path_for(edition.uuid).unlink(missing_ok=True)
+    md_path = markdown_path_for(edition.uuid)
+    if md_path.parent.exists():
+        md_path.unlink(missing_ok=True)
 
     await db.commit()
 
@@ -308,30 +310,35 @@ async def rehash_edition_file(
 
     resolved = Path(resolve_path(ef.file_path))
     if not resolved.exists():
-        raise HTTPException(status_code=404, detail="File not on disk")
+        raise HTTPException(status_code=404, detail=f"File not on disk: {resolved}")
 
-    old_hash = ef.file_hash
-    ef.file_hash = _hash_file(resolved)
-    ef.file_size = resolved.stat().st_size
+    try:
+        old_hash = ef.file_hash
+        ef.file_hash = _hash_file(resolved)
+        ef.file_size = resolved.stat().st_size
 
-    if clear_caches:
-        if ef.kepub_path:
-            kepub_resolved = Path(resolve_path(ef.kepub_path))
-            kepub_resolved.unlink(missing_ok=True)
-            ef.kepub_path = None
-            ef.kepub_hash = None
-        markdown_path_for(edition.uuid).unlink(missing_ok=True)
+        if clear_caches:
+            if ef.kepub_path:
+                kepub_resolved = Path(resolve_path(ef.kepub_path))
+                kepub_resolved.unlink(missing_ok=True)
+                ef.kepub_path = None
+                ef.kepub_hash = None
+            md_path = markdown_path_for(edition.uuid)
+            if md_path.parent.exists():
+                md_path.unlink(missing_ok=True)
 
-    await db.commit()
+        await db.commit()
 
-    return {
-        "file_id": ef.id,
-        "edition_id": edition_id,
-        "old_hash": old_hash,
-        "new_hash": ef.file_hash,
-        "file_size": ef.file_size,
-        "changed": old_hash != ef.file_hash,
-    }
+        return {
+            "file_id": ef.id,
+            "edition_id": edition_id,
+            "old_hash": old_hash,
+            "new_hash": ef.file_hash,
+            "file_size": ef.file_size,
+            "changed": old_hash != ef.file_hash,
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 # ── UserEdition (reading status) ──────────────────────────────────────────────
