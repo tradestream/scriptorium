@@ -497,6 +497,30 @@ async def run_computational_analysis(
             from app.services.esoteric import detect_disreputable_mouthpieces
             r = detect_disreputable_mouthpieces(text, config.delimiter_pattern, config.context_window)
             results = r.to_dict()
+        elif request.analysis_type == "literary_full_poetry":
+            from app.services.literary_analyzer import LiteraryAnalyzer
+            analyzer = LiteraryAnalyzer()
+            analyzer.load_text_string(text, title=book.title)
+            analyzer.set_mode("poetry")
+            results = analyzer.full_analysis()
+        elif request.analysis_type == "literary_full_prose":
+            from app.services.literary_analyzer import LiteraryAnalyzer
+            analyzer = LiteraryAnalyzer()
+            analyzer.load_text_string(text, title=book.title)
+            analyzer.set_mode("prose")
+            results = analyzer.full_analysis()
+        elif request.analysis_type.startswith("literary_"):
+            from app.services.literary_analyzer import LiteraryAnalyzer
+            analyzer = LiteraryAnalyzer()
+            analyzer.load_text_string(text, title=book.title)
+            mode = request.analysis_type.split("_")[1] if request.analysis_type.count("_") > 1 else "poetry"
+            if mode in ("poetry", "prose"):
+                analyzer.set_mode(mode)
+            tool_name = request.analysis_type.removeprefix("literary_").removeprefix("poetry_").removeprefix("prose_")
+            method = getattr(analyzer, f"analyze_{tool_name}", None)
+            if method is None:
+                raise HTTPException(status_code=400, detail=f"Unknown literary analysis tool: {tool_name}")
+            results = method()
         else:
             raise HTTPException(status_code=400, detail=f"Unknown analysis type: {request.analysis_type}")
 

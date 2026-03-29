@@ -9,8 +9,6 @@
     EyeOff,
     Loader2,
     Search,
-    Target,
-    BarChart3,
     AlertTriangle,
     ChevronDown,
     ChevronUp,
@@ -30,6 +28,8 @@
     Footprints,
     Layers,
     Drama,
+    Music,
+    Pen,
   } from "lucide-svelte";
   import * as api from "$lib/api/client";
   import type { ComputationalAnalysis, ComputationalAnalysisRequest } from "$lib/api/client";
@@ -49,51 +49,60 @@
   // Config state
   let keywordsInput = $state("justice, truth, god, gods, fate, piety, wisdom, nature, law, virtue");
   let entitiesInput = $state("");
-  let selectedType = $state<ComputationalAnalysisRequest["analysis_type"]>("full");
+  let selectedType = $state<string>("full");
 
-  const analysisGroups = [
+  type AnalysisTypeEntry = { value: string; label: string; icon: typeof Eye; description: string };
+  type AnalysisGroup = { label: string; types: AnalysisTypeEntry[] };
+
+  const analysisGroups: AnalysisGroup[] = [
     {
       label: "Core Esoteric",
       types: [
-        { value: "full" as const, label: "Full Esoteric Analysis", icon: Eye, description: "Run all core Straussian tools" },
-        { value: "engine_v2" as const, label: "Engine v2 (All Tools)", icon: Cpu, description: "Comprehensive computational analysis" },
-        { value: "loud_silence" as const, label: "Loud Silences", icon: EyeOff, description: "Where keywords conspicuously vanish" },
-        { value: "contradiction" as const, label: "Contradiction Hunter", icon: AlertTriangle, description: "Entity sentiment dissonance across sections" },
-        { value: "center" as const, label: "Center Locator", icon: Crosshair, description: "Physical center of the text" },
-        { value: "exoteric_esoteric" as const, label: "Exo/Eso Ratio", icon: Scale, description: "Pious vs. subversive language ratio" },
+        { value: "full", label: "Full Esoteric Analysis", icon: Eye, description: "Run all core Straussian tools" },
+        { value: "engine_v2", label: "Engine v2 (All Tools)", icon: Cpu, description: "Comprehensive computational analysis" },
+        { value: "loud_silence", label: "Loud Silences", icon: EyeOff, description: "Where keywords conspicuously vanish" },
+        { value: "contradiction", label: "Contradiction Hunter", icon: AlertTriangle, description: "Entity sentiment dissonance across sections" },
+        { value: "center", label: "Center Locator", icon: Crosshair, description: "Physical center of the text" },
+        { value: "exoteric_esoteric", label: "Exo/Eso Ratio", icon: Scale, description: "Pious vs. subversive language ratio" },
       ],
     },
     {
       label: "Rhetorical & Linguistic",
       types: [
-        { value: "repetition_variation" as const, label: "Repetition with Variation", icon: Repeat, description: "Repeated formulations with subtle changes" },
-        { value: "hedging_language" as const, label: "Hedging Language", icon: HelpCircle, description: "Qualifiers, conditionals, and epistemic hedges" },
-        { value: "conditional_language" as const, label: "Conditional Language", icon: GitBranch, description: "If/then patterns and hypotheticals" },
-        { value: "emphasis_quotation" as const, label: "Emphasis & Quotation", icon: Bold, description: "Italics, bold, and quotation patterns" },
+        { value: "repetition_variation", label: "Repetition with Variation", icon: Repeat, description: "Repeated formulations with subtle changes" },
+        { value: "hedging_language", label: "Hedging Language", icon: HelpCircle, description: "Qualifiers, conditionals, and epistemic hedges" },
+        { value: "conditional_language", label: "Conditional Language", icon: GitBranch, description: "If/then patterns and hypotheticals" },
+        { value: "emphasis_quotation", label: "Emphasis & Quotation", icon: Bold, description: "Italics, bold, and quotation patterns" },
       ],
     },
     {
       label: "Structural",
       types: [
-        { value: "section_proportion" as const, label: "Section Proportions", icon: PieChart, description: "Relative size and balance of sections" },
-        { value: "first_last_words" as const, label: "First & Last Words", icon: BookOpen, description: "Opening and closing words of each section" },
-        { value: "parenthetical_footnote" as const, label: "Parentheticals & Footnotes", icon: BookmarkMinus, description: "Asides, parenthetical remarks, and footnotes" },
-        { value: "structural_obscurity" as const, label: "Structural Obscurity", icon: Layers, description: "Unusual organization and buried passages" },
-        { value: "epigraph" as const, label: "Epigraphs", icon: Quote, description: "Epigraphs and their relationship to the text" },
+        { value: "section_proportion", label: "Section Proportions", icon: PieChart, description: "Relative size and balance of sections" },
+        { value: "first_last_words", label: "First & Last Words", icon: BookOpen, description: "Opening and closing words of each section" },
+        { value: "parenthetical_footnote", label: "Parentheticals & Footnotes", icon: BookmarkMinus, description: "Asides, parenthetical remarks, and footnotes" },
+        { value: "structural_obscurity", label: "Structural Obscurity", icon: Layers, description: "Unusual organization and buried passages" },
+        { value: "epigraph", label: "Epigraphs", icon: Quote, description: "Epigraphs and their relationship to the text" },
       ],
     },
     {
       label: "Voice & Audience",
       types: [
-        { value: "audience_differentiation" as const, label: "Audience Differentiation", icon: Users, description: "Signals aimed at different reader levels" },
-        { value: "self_reference" as const, label: "Self-Reference", icon: Footprints, description: "Author references to own work and method" },
-        { value: "disreputable_mouthpiece" as const, label: "Disreputable Mouthpieces", icon: Drama, description: "Dangerous ideas voiced through flawed characters" },
+        { value: "audience_differentiation", label: "Audience Differentiation", icon: Users, description: "Signals aimed at different reader levels" },
+        { value: "self_reference", label: "Self-Reference", icon: Footprints, description: "Author references to own work and method" },
+        { value: "disreputable_mouthpiece", label: "Disreputable Mouthpieces", icon: Drama, description: "Dangerous ideas voiced through flawed characters" },
+      ],
+    },
+    {
+      label: "Literary & Poetic",
+      types: [
+        { value: "literary_full_poetry", label: "Full Poetry Analysis", icon: Music, description: "Prosody, sound, form, figurative language (30 tools)" },
+        { value: "literary_full_prose", label: "Full Prose Analysis", icon: Pen, description: "Narrative, diction, intertextual, speaker (30 tools)" },
       ],
     },
   ];
 
-  // Flat list for backwards compat
-  const analysisTypes = analysisGroups.flatMap((g) => g.types);
+  const analysisTypes: AnalysisTypeEntry[] = analysisGroups.flatMap((g) => g.types);
 
   async function loadAnalyses() {
     try {

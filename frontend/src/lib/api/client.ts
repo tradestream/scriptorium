@@ -900,7 +900,10 @@ export interface ComputationalAnalysisRequest {
     | 'first_last_words'
     | 'parenthetical_footnote'
     | 'structural_obscurity'
-    | 'disreputable_mouthpiece';
+    | 'disreputable_mouthpiece'
+    | 'literary_full_poetry'
+    | 'literary_full_prose'
+    | string;  // also supports literary_<tool> for individual tools
   keywords?: string[];
   entities?: string[];
   pious_words?: string[];
