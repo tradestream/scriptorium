@@ -259,7 +259,17 @@ async def replace_edition_file(
         raise
 
     # Update file metadata
-    ef.file_hash = _hash_file(resolved)
+    new_hash = _hash_file(resolved)
+    dup = await db.execute(
+        select(EditionFile).where(EditionFile.file_hash == new_hash, EditionFile.id != ef.id)
+    )
+    existing = dup.scalar_one_or_none()
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Another file already has this hash (file_id={existing.id}, edition_id={existing.edition_id}). Delete the duplicate first.",
+        )
+    ef.file_hash = new_hash
     ef.file_size = resolved.stat().st_size
     if file.filename:
         ef.filename = file.filename
@@ -312,33 +322,44 @@ async def rehash_edition_file(
     if not resolved.exists():
         raise HTTPException(status_code=404, detail=f"File not on disk: {resolved}")
 
-    try:
-        old_hash = ef.file_hash
-        ef.file_hash = _hash_file(resolved)
-        ef.file_size = resolved.stat().st_size
+    old_hash = ef.file_hash
+    new_hash = _hash_file(resolved)
 
-        if clear_caches:
-            if ef.kepub_path:
-                kepub_resolved = Path(resolve_path(ef.kepub_path))
-                kepub_resolved.unlink(missing_ok=True)
-                ef.kepub_path = None
-                ef.kepub_hash = None
-            md_path = markdown_path_for(edition.uuid)
-            if md_path.parent.exists():
-                md_path.unlink(missing_ok=True)
+    # Check for duplicate hash (unique constraint on file_hash)
+    if new_hash != old_hash:
+        dup = await db.execute(
+            select(EditionFile).where(EditionFile.file_hash == new_hash, EditionFile.id != ef.id)
+        )
+        existing = dup.scalar_one_or_none()
+        if existing:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Another file already has this hash (file_id={existing.id}, edition_id={existing.edition_id}). Delete the duplicate first.",
+            )
 
-        await db.commit()
+    ef.file_hash = new_hash
+    ef.file_size = resolved.stat().st_size
 
-        return {
-            "file_id": ef.id,
-            "edition_id": edition_id,
-            "old_hash": old_hash,
-            "new_hash": ef.file_hash,
-            "file_size": ef.file_size,
-            "changed": old_hash != ef.file_hash,
-        }
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    if clear_caches:
+        if ef.kepub_path:
+            kepub_resolved = Path(resolve_path(ef.kepub_path))
+            kepub_resolved.unlink(missing_ok=True)
+            ef.kepub_path = None
+            ef.kepub_hash = None
+        md_path = markdown_path_for(edition.uuid)
+        if md_path.parent.exists():
+            md_path.unlink(missing_ok=True)
+
+    await db.commit()
+
+    return {
+        "file_id": ef.id,
+        "edition_id": edition_id,
+        "old_hash": old_hash,
+        "new_hash": ef.file_hash,
+        "file_size": ef.file_size,
+        "changed": old_hash != ef.file_hash,
+    }
 
 
 # ── UserEdition (reading status) ──────────────────────────────────────────────
