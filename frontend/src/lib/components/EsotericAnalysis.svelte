@@ -17,6 +17,19 @@
     Trash2,
     Crosshair,
     Scale,
+    Repeat,
+    Users,
+    HelpCircle,
+    Cpu,
+    Quote,
+    PieChart,
+    BookOpen,
+    GitBranch,
+    Bold,
+    BookmarkMinus,
+    Footprints,
+    Layers,
+    Drama,
   } from "lucide-svelte";
   import * as api from "$lib/api/client";
   import type { ComputationalAnalysis, ComputationalAnalysisRequest } from "$lib/api/client";
@@ -38,13 +51,49 @@
   let entitiesInput = $state("");
   let selectedType = $state<ComputationalAnalysisRequest["analysis_type"]>("full");
 
-  const analysisTypes = [
-    { value: "full" as const, label: "Full Esoteric Analysis", icon: Eye, description: "Run all four tools" },
-    { value: "loud_silence" as const, label: "Loud Silences", icon: EyeOff, description: "Where keywords vanish" },
-    { value: "contradiction" as const, label: "Contradiction Hunter", icon: AlertTriangle, description: "Entity sentiment dissonance" },
-    { value: "center" as const, label: "Center Locator", icon: Crosshair, description: "Physical center of text" },
-    { value: "exoteric_esoteric" as const, label: "Exo/Eso Ratio", icon: Scale, description: "Pious vs. subversive language" },
+  const analysisGroups = [
+    {
+      label: "Core Esoteric",
+      types: [
+        { value: "full" as const, label: "Full Esoteric Analysis", icon: Eye, description: "Run all core Straussian tools" },
+        { value: "engine_v2" as const, label: "Engine v2 (All Tools)", icon: Cpu, description: "Comprehensive computational analysis" },
+        { value: "loud_silence" as const, label: "Loud Silences", icon: EyeOff, description: "Where keywords conspicuously vanish" },
+        { value: "contradiction" as const, label: "Contradiction Hunter", icon: AlertTriangle, description: "Entity sentiment dissonance across sections" },
+        { value: "center" as const, label: "Center Locator", icon: Crosshair, description: "Physical center of the text" },
+        { value: "exoteric_esoteric" as const, label: "Exo/Eso Ratio", icon: Scale, description: "Pious vs. subversive language ratio" },
+      ],
+    },
+    {
+      label: "Rhetorical & Linguistic",
+      types: [
+        { value: "repetition_variation" as const, label: "Repetition with Variation", icon: Repeat, description: "Repeated formulations with subtle changes" },
+        { value: "hedging_language" as const, label: "Hedging Language", icon: HelpCircle, description: "Qualifiers, conditionals, and epistemic hedges" },
+        { value: "conditional_language" as const, label: "Conditional Language", icon: GitBranch, description: "If/then patterns and hypotheticals" },
+        { value: "emphasis_quotation" as const, label: "Emphasis & Quotation", icon: Bold, description: "Italics, bold, and quotation patterns" },
+      ],
+    },
+    {
+      label: "Structural",
+      types: [
+        { value: "section_proportion" as const, label: "Section Proportions", icon: PieChart, description: "Relative size and balance of sections" },
+        { value: "first_last_words" as const, label: "First & Last Words", icon: BookOpen, description: "Opening and closing words of each section" },
+        { value: "parenthetical_footnote" as const, label: "Parentheticals & Footnotes", icon: BookmarkMinus, description: "Asides, parenthetical remarks, and footnotes" },
+        { value: "structural_obscurity" as const, label: "Structural Obscurity", icon: Layers, description: "Unusual organization and buried passages" },
+        { value: "epigraph" as const, label: "Epigraphs", icon: Quote, description: "Epigraphs and their relationship to the text" },
+      ],
+    },
+    {
+      label: "Voice & Audience",
+      types: [
+        { value: "audience_differentiation" as const, label: "Audience Differentiation", icon: Users, description: "Signals aimed at different reader levels" },
+        { value: "self_reference" as const, label: "Self-Reference", icon: Footprints, description: "Author references to own work and method" },
+        { value: "disreputable_mouthpiece" as const, label: "Disreputable Mouthpieces", icon: Drama, description: "Dangerous ideas voiced through flawed characters" },
+      ],
+    },
   ];
+
+  // Flat list for backwards compat
+  const analysisTypes = analysisGroups.flatMap((g) => g.types);
 
   async function loadAnalyses() {
     try {
@@ -126,22 +175,27 @@
       <div class="space-y-3 rounded-md border bg-muted/50 p-4">
         <p class="text-sm font-medium">Analysis Configuration</p>
 
-        <!-- Type selector -->
-        <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {#each analysisTypes as type}
-            {@const Icon = type.icon}
-            <button
-              class="flex items-start gap-2 rounded-md border p-2 text-left text-xs transition-colors {selectedType === type.value ? 'border-primary bg-primary/5' : 'hover:bg-accent'}"
-              onclick={() => (selectedType = type.value)}
-            >
-              <Icon class="mt-0.5 h-3 w-3 shrink-0" />
-              <div>
-                <p class="font-medium">{type.label}</p>
-                <p class="text-muted-foreground">{type.description}</p>
-              </div>
-            </button>
-          {/each}
-        </div>
+        <!-- Type selector (grouped) -->
+        {#each analysisGroups as group}
+          <div>
+            <p class="mb-1.5 text-xs font-medium text-muted-foreground">{group.label}</p>
+            <div class="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+              {#each group.types as type}
+                {@const Icon = type.icon}
+                <button
+                  class="flex items-start gap-2 rounded-md border p-2 text-left text-xs transition-colors {selectedType === type.value ? 'border-primary bg-primary/5' : 'hover:bg-accent'}"
+                  onclick={() => (selectedType = type.value)}
+                >
+                  <Icon class="mt-0.5 h-3 w-3 shrink-0" />
+                  <div>
+                    <p class="font-medium">{type.label}</p>
+                    <p class="text-muted-foreground">{type.description}</p>
+                  </div>
+                </button>
+              {/each}
+            </div>
+          </div>
+        {/each}
 
         <!-- Keywords -->
         <div class="space-y-1">

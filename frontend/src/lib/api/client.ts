@@ -882,7 +882,25 @@ export interface ComputationalAnalysis {
 }
 
 export interface ComputationalAnalysisRequest {
-  analysis_type: 'full' | 'loud_silence' | 'contradiction' | 'center' | 'exoteric_esoteric';
+  analysis_type:
+    | 'full'
+    | 'loud_silence'
+    | 'contradiction'
+    | 'center'
+    | 'exoteric_esoteric'
+    | 'repetition_variation'
+    | 'audience_differentiation'
+    | 'hedging_language'
+    | 'engine_v2'
+    | 'self_reference'
+    | 'section_proportion'
+    | 'epigraph'
+    | 'conditional_language'
+    | 'emphasis_quotation'
+    | 'first_last_words'
+    | 'parenthetical_footnote'
+    | 'structural_obscurity'
+    | 'disreputable_mouthpiece';
   keywords?: string[];
   entities?: string[];
   pious_words?: string[];
