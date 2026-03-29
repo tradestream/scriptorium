@@ -539,7 +539,7 @@ async def run_computational_analysis(
     }
 
     record = ComputationalAnalysis(
-        book_id=book_id,
+        edition_id=book_id,
         analysis_type=request.analysis_type,
         config_json=json.dumps(config_dict),
         results_json=json.dumps(results, default=str),
