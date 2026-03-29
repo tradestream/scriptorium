@@ -529,6 +529,77 @@ def _run_bulk_markdown(job_id: str, edition_ids: list[int]) -> None:
                     failed=failed, skipped=skipped, current="")
 
 
+# ── Single / Batch Markdown Generation ───────────────────────────────────────
+
+
+class BatchMarkdownRequest(BaseModel):
+    edition_ids: list[int]
+    force: bool = False
+
+
+@router.post("/markdown/generate/{edition_id}")
+async def generate_single_markdown(
+    edition_id: int,
+    force: bool = False,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(_require_admin),
+):
+    """Generate cached markdown for a single edition.
+
+    Set force=true to regenerate even if cached markdown already exists.
+    """
+    from sqlalchemy import select
+    from app.models.edition import Edition
+    from app.services.markdown import has_cached_markdown, markdown_path_for, generate_markdown
+
+    stmt = select(Edition).where(Edition.id == edition_id)
+    result = await db.execute(stmt)
+    edition = result.scalar_one_or_none()
+    if not edition:
+        raise HTTPException(status_code=404, detail="Edition not found")
+
+    if force and has_cached_markdown(edition.uuid):
+        markdown_path_for(edition.uuid).unlink(missing_ok=True)
+
+    md = await generate_markdown(edition_id)
+    if md is None:
+        raise HTTPException(status_code=422, detail="Could not generate markdown (no extractable file or unsupported format)")
+
+    return {"edition_id": edition_id, "status": "generated", "length": len(md)}
+
+
+@router.post("/markdown/batch")
+async def start_batch_markdown(
+    request: BatchMarkdownRequest,
+    _admin: User = Depends(_require_admin),
+):
+    """Generate cached markdown for a specific set of editions.
+
+    Set force=true to regenerate even if cached markdown already exists.
+    Returns a job_id for polling via /markdown/bulk/{job_id}.
+    """
+    from app.services.markdown import has_cached_markdown, markdown_path_for
+    from sqlalchemy import select
+    from app.models.edition import Edition
+
+    edition_ids = request.edition_ids
+    if not edition_ids:
+        raise HTTPException(status_code=400, detail="No edition IDs provided")
+
+    if request.force:
+        # Clear cached markdown for specified editions so they regenerate
+        async with _session_factory() as db:
+            result = await db.execute(
+                select(Edition.uuid).where(Edition.id.in_(edition_ids))
+            )
+            for (uuid,) in result:
+                markdown_path_for(uuid).unlink(missing_ok=True)
+
+    job_id, _ = await create_job("markdown", len(edition_ids), {"skipped": 0})
+    _spawn_background_task(_run_bulk_markdown, job_id, edition_ids)
+    return {"job_id": job_id, "total": len(edition_ids)}
+
+
 # ── Bulk Identifier Extraction ───────────────────────────────────────────────
 
 

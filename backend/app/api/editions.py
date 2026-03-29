@@ -1,12 +1,14 @@
 """Editions API — CRUD for specific copies of a Work, plus UserEdition and Loan management."""
 
+import hashlib
 import logging
+import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -202,6 +204,134 @@ async def download_edition_file(
         filename=ef.filename,
         media_type="application/octet-stream",
     )
+
+
+# ── File replacement ─────────────────────────────────────────────────────────
+
+def _require_admin(current_user: User = Depends(get_current_user)) -> User:
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+    return current_user
+
+
+def _hash_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+@router.put("/{edition_id}/files/{file_id}/replace")
+async def replace_edition_file(
+    edition_id: int,
+    file_id: int,
+    file: UploadFile,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(_require_admin),
+):
+    """Replace an edition's file with a new upload.
+
+    Updates the file on disk, recalculates the hash, clears kepub and
+    markdown caches so Kobo sync picks up the new version.
+    """
+    from app.config import resolve_path
+    from app.services.markdown import markdown_path_for
+
+    edition = await _get_edition_or_404(edition_id, db)
+    ef = next((f for f in edition.files if f.id == file_id), None)
+    if ef is None:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    resolved = Path(resolve_path(ef.file_path))
+    if not resolved.parent.exists():
+        raise HTTPException(status_code=500, detail="Library directory not found")
+
+    # Write new file to disk
+    tmp_path = resolved.with_suffix(".tmp")
+    try:
+        with open(tmp_path, "wb") as out:
+            while chunk := await file.read(8192):
+                out.write(chunk)
+        shutil.move(str(tmp_path), str(resolved))
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+    # Update file metadata
+    ef.file_hash = _hash_file(resolved)
+    ef.file_size = resolved.stat().st_size
+    if file.filename:
+        ef.filename = file.filename
+
+    # Clear kepub cache
+    if ef.kepub_path:
+        kepub_resolved = Path(resolve_path(ef.kepub_path))
+        kepub_resolved.unlink(missing_ok=True)
+        ef.kepub_path = None
+        ef.kepub_hash = None
+
+    # Clear markdown cache
+    markdown_path_for(edition.uuid).unlink(missing_ok=True)
+
+    await db.commit()
+
+    return {
+        "file_id": ef.id,
+        "edition_id": edition_id,
+        "file_hash": ef.file_hash,
+        "file_size": ef.file_size,
+        "status": "replaced",
+    }
+
+
+@router.post("/{edition_id}/files/{file_id}/rehash")
+async def rehash_edition_file(
+    edition_id: int,
+    file_id: int,
+    clear_caches: bool = Query(True, description="Also clear kepub and markdown caches"),
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(_require_admin),
+):
+    """Recalculate a file's hash from disk.
+
+    Useful after replacing a file outside the application (e.g. manual copy).
+    Clears kepub and markdown caches by default so they regenerate.
+    """
+    from app.config import resolve_path
+    from app.services.markdown import markdown_path_for
+
+    edition = await _get_edition_or_404(edition_id, db)
+    ef = next((f for f in edition.files if f.id == file_id), None)
+    if ef is None:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    resolved = Path(resolve_path(ef.file_path))
+    if not resolved.exists():
+        raise HTTPException(status_code=404, detail="File not on disk")
+
+    old_hash = ef.file_hash
+    ef.file_hash = _hash_file(resolved)
+    ef.file_size = resolved.stat().st_size
+
+    if clear_caches:
+        if ef.kepub_path:
+            kepub_resolved = Path(resolve_path(ef.kepub_path))
+            kepub_resolved.unlink(missing_ok=True)
+            ef.kepub_path = None
+            ef.kepub_hash = None
+        markdown_path_for(edition.uuid).unlink(missing_ok=True)
+
+    await db.commit()
+
+    return {
+        "file_id": ef.id,
+        "edition_id": edition_id,
+        "old_hash": old_hash,
+        "new_hash": ef.file_hash,
+        "file_size": ef.file_size,
+        "changed": old_hash != ef.file_hash,
+    }
 
 
 # ── UserEdition (reading status) ──────────────────────────────────────────────

@@ -1458,6 +1458,32 @@ export async function getActiveBulkMarkdownJob(): Promise<{ job_id: string; stat
   return fetchAPI('/admin/markdown/bulk/active');
 }
 
+export async function generateMarkdown(editionId: number, force = false): Promise<{ edition_id: number; status: string; length: number }> {
+  const qs = force ? '?force=true' : '';
+  return fetchAPI(`/admin/markdown/generate/${editionId}${qs}`, { method: 'POST' });
+}
+
+export async function startBatchMarkdown(editionIds: number[], force = false): Promise<{ job_id: string; total: number }> {
+  return fetchAPI('/admin/markdown/batch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ edition_ids: editionIds, force }),
+  });
+}
+
+export async function replaceEditionFile(editionId: number, fileId: number, file: File): Promise<{ file_id: number; edition_id: number; file_hash: string; file_size: number; status: string }> {
+  const form = new FormData();
+  form.append('file', file);
+  return fetchAPI(`/editions/${editionId}/files/${fileId}/replace`, {
+    method: 'PUT',
+    body: form,
+  });
+}
+
+export async function rehashEditionFile(editionId: number, fileId: number, clearCaches = true): Promise<{ file_id: number; edition_id: number; old_hash: string; new_hash: string; file_size: number; changed: boolean }> {
+  return fetchAPI(`/editions/${editionId}/files/${fileId}/rehash?clear_caches=${clearCaches}`, { method: 'POST' });
+}
+
 export async function updateLibraryNaming(libraryId: number, namingPattern: string | null): Promise<Library> {
   return fetchAPI(`/libraries/${libraryId}`, {
     method: 'PUT',

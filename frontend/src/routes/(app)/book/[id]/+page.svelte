@@ -5,12 +5,12 @@
   import { Card, CardContent, CardHeader, CardTitle } from "$lib/components/ui/card";
   import { Progress } from "$lib/components/ui/progress";
   import { Separator } from "$lib/components/ui/separator";
-  import { BookOpen, Download, Pencil, X, Sparkles, ChevronDown, ChevronLeft, ChevronRight, Send, BookMarked, Check, Layers, Plus, Highlighter, MessageSquare, Bookmark, Trash2, CalendarCheck, Lightbulb, Package, Headphones, ScanSearch, MapPin, Quote, Globe } from "lucide-svelte";
+  import { BookOpen, Download, Pencil, X, Sparkles, ChevronDown, ChevronLeft, ChevronRight, Send, BookMarked, Check, Layers, Plus, Highlighter, MessageSquare, Bookmark, Trash2, CalendarCheck, Lightbulb, Package, Headphones, ScanSearch, MapPin, Quote, Globe, FileText, Replace } from "lucide-svelte";
   import BookAnalysis from "$lib/components/BookAnalysis.svelte";
   import Marginalia from "$lib/components/Marginalia.svelte";
   import EsotericAnalysis from "$lib/components/EsotericAnalysis.svelte";
   import BookMetaEditor from "$lib/components/BookMetaEditor.svelte";
-  import { bookCoverUrl, enrichBook, getEnrichmentProviders, convertBookFile, bookFileUrl, sendBookToDevice, setBookStatus, getShelves, getBookShelves, addBookToShelf, removeBookFromShelf, getCollections, addBookToCollection, removeBookFromCollection, getAnnotations, createAnnotation, deleteAnnotation, getReadSessions, createReadSession, deleteReadSession, setCoverFromUrl, setLockedFields, setEsotericEnabled, exportAnnotations, getBookRecommendations, updateBook, extractBookIdentifiers, citationUrl, computeReadingLevel, getBook, getSeriesNeighbors } from "$lib/api/client";
+  import { bookCoverUrl, enrichBook, getEnrichmentProviders, convertBookFile, bookFileUrl, sendBookToDevice, setBookStatus, getShelves, getBookShelves, addBookToShelf, removeBookFromShelf, getCollections, addBookToCollection, removeBookFromCollection, getAnnotations, createAnnotation, deleteAnnotation, getReadSessions, createReadSession, deleteReadSession, setCoverFromUrl, setLockedFields, setEsotericEnabled, exportAnnotations, getBookRecommendations, updateBook, extractBookIdentifiers, citationUrl, computeReadingLevel, getBook, getSeriesNeighbors, generateMarkdown, replaceEditionFile } from "$lib/api/client";
   import type { SeriesNav } from "$lib/api/client";
   import type { EnrichmentProvider, BookRecommendation, EnrichStreamEvent } from "$lib/api/client";
   import { enrichBookStream } from "$lib/api/client";
@@ -101,6 +101,11 @@
 
   let extractingIds = $state(false);
   let extractIdsMsg = $state('');
+  let generatingMd = $state(false);
+  let mdMsg = $state('');
+  let replacingFile = $state(false);
+  let replaceFileMsg = $state('');
+  let replaceFileInput: HTMLInputElement;
   let showCiteMenu = $state(false);
   let computingFk = $state(false);
   let seriesNav = $state<SeriesNav[]>([]);
@@ -286,6 +291,37 @@
       extractIdsMsg = err instanceof Error ? err.message : 'Extraction failed';
     } finally {
       extractingIds = false;
+    }
+  }
+
+  async function handleGenerateMarkdown(force = false) {
+    if (!book) return;
+    generatingMd = true;
+    mdMsg = '';
+    try {
+      const res = await generateMarkdown(book.id, force);
+      mdMsg = `Markdown generated (${Math.round(res.length / 1024)}k chars)`;
+    } catch (err) {
+      mdMsg = err instanceof Error ? err.message : 'Generation failed';
+    } finally {
+      generatingMd = false;
+    }
+  }
+
+  async function handleReplaceFile() {
+    if (!book || !replaceFileInput?.files?.length) return;
+    const primaryFile = book.files?.[0];
+    if (!primaryFile) return;
+    replacingFile = true;
+    replaceFileMsg = '';
+    try {
+      const res = await replaceEditionFile(book.id, primaryFile.id, replaceFileInput.files[0]);
+      replaceFileMsg = `Replaced — ${Math.round(res.file_size / 1024)}KB`;
+      book = await getBook(book.id);
+    } catch (err) {
+      replaceFileMsg = err instanceof Error ? err.message : 'Replace failed';
+    } finally {
+      replacingFile = false;
     }
   }
 
@@ -539,6 +575,24 @@
               <Button variant="outline" size="icon" title="Download" href={bookFileUrl(book.id, primaryFile.id)}>
                 <Download class="h-4 w-4" />
               </Button>
+              {#if isAdmin}
+                <input
+                  type="file"
+                  accept=".epub,.pdf,.cbz,.cbr,.mobi,.azw,.azw3"
+                  class="hidden"
+                  bind:this={replaceFileInput}
+                  onchange={handleReplaceFile}
+                />
+                <Button
+                  variant="outline"
+                  size="icon"
+                  title={replacingFile ? 'Replacing…' : 'Replace file'}
+                  disabled={replacingFile}
+                  onclick={() => replaceFileInput?.click()}
+                >
+                  <Replace class="h-4 w-4" />
+                </Button>
+              {/if}
               <Button variant="outline" size="icon" title="Send to device" onclick={() => showSendDialog = true}>
                 <Send class="h-4 w-4" />
               </Button>
@@ -770,6 +824,36 @@
                 <ScanSearch class="mr-1.5 h-3.5 w-3.5" />
                 {extractingIds ? 'Scanning…' : 'Extract IDs'}
               </Button>
+              {#if isAdmin}
+                <div class="relative">
+                  <div class="flex">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onclick={() => handleGenerateMarkdown(false)}
+                      disabled={generatingMd}
+                      class="rounded-r-none border-r-0"
+                      title="Generate LLM-optimized markdown from book file"
+                    >
+                      <FileText class="mr-1.5 h-3.5 w-3.5" />
+                      {generatingMd ? 'Generating…' : 'Markdown'}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      class="rounded-l-none px-2"
+                      onclick={() => handleGenerateMarkdown(true)}
+                      disabled={generatingMd}
+                      title="Force regenerate (overwrite existing)"
+                    >
+                      <Sparkles class="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                  {#if mdMsg}
+                    <p class="absolute right-0 top-full z-10 mt-1 whitespace-nowrap rounded bg-popover px-2 py-1 text-xs shadow-md border">{mdMsg}</p>
+                  {/if}
+                </div>
+              {/if}
               <div class="relative">
                 <Button
                   variant="outline"
@@ -849,6 +933,9 @@
           {/if}
           {#if extractIdsMsg}
             <p class="mt-2 text-sm text-muted-foreground">{extractIdsMsg}</p>
+          {/if}
+          {#if replaceFileMsg}
+            <p class="mt-2 text-sm text-muted-foreground">{replaceFileMsg}</p>
           {/if}
 
           <!-- Metadata Proposals Panel -->

@@ -218,6 +218,33 @@
     bulkActionRunning = false;
   }
 
+  async function bulkGenerateMarkdown() {
+    if (selectedIds.size === 0) return;
+    bulkActionRunning = true;
+    bulkMsg = '';
+    try {
+      const r = await api.startBatchMarkdown([...selectedIds], true);
+      bulkMsg = `Generating markdown for ${r.total} books…`;
+      const poll = setInterval(async () => {
+        try {
+          const job = await api.getBulkMarkdownJob(r.job_id);
+          bulkMsg = `Markdown… ${job.done}/${job.total}`;
+          if (job.status === 'done' || job.status === 'cancelled') {
+            clearInterval(poll);
+            bulkMsg = `Done — ${job.done} processed`;
+            bulkActionRunning = false;
+          }
+        } catch {
+          clearInterval(poll);
+          bulkActionRunning = false;
+        }
+      }, 2000);
+    } catch (e) {
+      bulkMsg = e instanceof Error ? e.message : 'Failed';
+      bulkActionRunning = false;
+    }
+  }
+
   // Bulk shelf assignment
   let showBulkShelfPicker = $state(false);
   let bulkShelves = $state<{ id: number; name: string }[]>([]);
@@ -414,6 +441,15 @@
         >
           <Sparkles class="mr-1.5 h-3.5 w-3.5" />
           Enrich
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onclick={bulkGenerateMarkdown}
+          disabled={selectedIds.size === 0 || bulkActionRunning}
+        >
+          <FileType class="mr-1.5 h-3.5 w-3.5" />
+          Markdown
         </Button>
         <div class="relative">
           <Button
