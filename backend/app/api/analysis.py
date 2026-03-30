@@ -13,6 +13,8 @@ from sqlalchemy.orm import joinedload
 
 from app.database import get_db
 from app.models import Book, User
+from app.models.edition import Edition, EditionFile
+from app.models.work import Work
 from app.models.analysis import AnalysisTemplate, BookAnalysis
 from app.schemas.analysis import (
     AnalysisRequest,
@@ -27,6 +29,14 @@ from app.services.analysis import run_analysis
 from .auth import get_current_user
 
 router = APIRouter()
+
+
+def _book_with_rels():
+    """Select options to eagerly load relationships needed by extract_text_from_book."""
+    return [
+        joinedload(Edition.files),
+        joinedload(Edition.work).joinedload(Work.authors),
+    ]
 
 
 # --- Book Analysis Endpoints ---
@@ -409,10 +419,10 @@ async def run_computational_analysis(
     - 'center': Find the physical center of the text
     - 'exoteric_esoteric': Measure pious vs. subversive language ratio
     """
-    # Verify book exists and extract text
-    stmt = select(Book).where(Book.id == book_id)
+    # Verify book exists and extract text (eagerly load rels for text extraction)
+    stmt = select(Book).where(Book.id == book_id).options(*_book_with_rels())
     result = await db.execute(stmt)
-    book = result.scalar_one_or_none()
+    book = result.unique().scalar_one_or_none()
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
 
@@ -1042,15 +1052,21 @@ async def run_literary_analysis(
     - 'literary_full_prose': Full 30-tool prose analysis
     - 'literary_<tool>': Individual tool (e.g. literary_meter, literary_rhyme_scheme)
     """
-    from app.services.literary_analyzer import LiteraryAnalyzer
+    try:
+        from app.services.literary_analyzer import LiteraryAnalyzer
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Literary analyzer unavailable: {exc}")
 
-    stmt = select(Book).where(Book.id == book_id)
+    stmt = select(Book).where(Book.id == book_id).options(*_book_with_rels())
     result = await db.execute(stmt)
-    book = result.scalar_one_or_none()
+    book = result.unique().scalar_one_or_none()
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
 
-    text = await extract_text_from_book(book, db)
+    try:
+        text = await extract_text_from_book(book, db)
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
     try:
         analyzer = LiteraryAnalyzer()
