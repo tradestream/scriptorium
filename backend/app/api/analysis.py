@@ -497,30 +497,6 @@ async def run_computational_analysis(
             from app.services.esoteric import detect_disreputable_mouthpieces
             r = detect_disreputable_mouthpieces(text, config.delimiter_pattern, config.context_window)
             results = r.to_dict()
-        elif request.analysis_type == "literary_full_poetry":
-            from app.services.literary_analyzer import LiteraryAnalyzer
-            analyzer = LiteraryAnalyzer()
-            analyzer.load_text_string(text, title=book.title)
-            analyzer.set_mode("poetry")
-            results = analyzer.full_analysis()
-        elif request.analysis_type == "literary_full_prose":
-            from app.services.literary_analyzer import LiteraryAnalyzer
-            analyzer = LiteraryAnalyzer()
-            analyzer.load_text_string(text, title=book.title)
-            analyzer.set_mode("prose")
-            results = analyzer.full_analysis()
-        elif request.analysis_type.startswith("literary_"):
-            from app.services.literary_analyzer import LiteraryAnalyzer
-            analyzer = LiteraryAnalyzer()
-            analyzer.load_text_string(text, title=book.title)
-            mode = request.analysis_type.split("_")[1] if request.analysis_type.count("_") > 1 else "poetry"
-            if mode in ("poetry", "prose"):
-                analyzer.set_mode(mode)
-            tool_name = request.analysis_type.removeprefix("literary_").removeprefix("poetry_").removeprefix("prose_")
-            method = getattr(analyzer, f"analyze_{tool_name}", None)
-            if method is None:
-                raise HTTPException(status_code=400, detail=f"Unknown literary analysis tool: {tool_name}")
-            results = method()
         else:
             raise HTTPException(status_code=400, detail=f"Unknown analysis type: {request.analysis_type}")
 
@@ -998,3 +974,149 @@ async def get_text_preview(
         preview=full_text[:PREVIEW_CHARS],
         truncated=len(full_text) > PREVIEW_CHARS,
     )
+
+
+# ── Literary / Poetic Analysis ───────────────────────────────────────────────
+
+
+class LiteraryAnalysisRequest(BaseModel):
+    """Request to run literary/poetic computational analysis."""
+    analysis_type: str = "literary_full_prose"
+    mode: str = "prose"  # "poetry" or "prose"
+
+
+class LiteraryAnalysisRead(BaseModel):
+    id: int
+    book_id: int
+    analysis_type: str
+    results: dict
+    config: dict | None = None
+    status: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+@router.get("/books/{book_id}/literary", response_model=list[LiteraryAnalysisRead])
+async def list_literary_analyses(
+    book_id: int,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """List all literary/poetic analyses for a book."""
+    stmt = (
+        select(ComputationalAnalysis)
+        .where(
+            ComputationalAnalysis.edition_id == book_id,
+            ComputationalAnalysis.analysis_type.like("literary_%"),
+        )
+        .order_by(ComputationalAnalysis.created_at.desc())
+    )
+    result = await db.execute(stmt)
+    return [
+        LiteraryAnalysisRead(
+            id=a.id,
+            book_id=a.edition_id,
+            analysis_type=a.analysis_type,
+            results=json.loads(a.results_json),
+            config=json.loads(a.config_json) if a.config_json else None,
+            status=a.status,
+            created_at=a.created_at,
+        )
+        for a in result.scalars().all()
+    ]
+
+
+@router.post("/books/{book_id}/literary", response_model=LiteraryAnalysisRead, status_code=status.HTTP_201_CREATED)
+async def run_literary_analysis(
+    book_id: int,
+    request: LiteraryAnalysisRequest,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """Run literary/poetic computational analysis on any book.
+
+    Available types:
+    - 'literary_full_poetry': Full 30-tool poetry analysis
+    - 'literary_full_prose': Full 30-tool prose analysis
+    - 'literary_<tool>': Individual tool (e.g. literary_meter, literary_rhyme_scheme)
+    """
+    from app.services.literary_analyzer import LiteraryAnalyzer
+
+    stmt = select(Book).where(Book.id == book_id)
+    result = await db.execute(stmt)
+    book = result.scalar_one_or_none()
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+
+    text = await extract_text_from_book(book, db)
+
+    try:
+        analyzer = LiteraryAnalyzer()
+        analyzer.load_text_string(text, title=book.title)
+
+        if request.mode in ("poetry", "prose"):
+            analyzer.set_mode(request.mode)
+
+        if request.analysis_type in ("literary_full_poetry", "literary_full_prose"):
+            mode = "poetry" if "poetry" in request.analysis_type else "prose"
+            analyzer.set_mode(mode)
+            results = analyzer.full_analysis()
+        elif request.analysis_type.startswith("literary_"):
+            tool_name = request.analysis_type.removeprefix("literary_")
+            method = getattr(analyzer, f"analyze_{tool_name}", None)
+            if method is None:
+                raise HTTPException(status_code=400, detail=f"Unknown literary analysis tool: {tool_name}")
+            results = method()
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown analysis type: {request.analysis_type}")
+
+        status_val = "completed"
+    except HTTPException:
+        raise
+    except Exception as e:
+        results = {"error": str(e)}
+        status_val = "failed"
+
+    record = ComputationalAnalysis(
+        edition_id=book_id,
+        analysis_type=request.analysis_type,
+        config_json=json.dumps({"mode": request.mode}),
+        results_json=json.dumps(results, default=str),
+        status=status_val,
+    )
+    db.add(record)
+    await db.commit()
+    await db.refresh(record)
+
+    return LiteraryAnalysisRead(
+        id=record.id,
+        book_id=record.edition_id,
+        analysis_type=record.analysis_type,
+        results=results,
+        config={"mode": request.mode},
+        status=record.status,
+        created_at=record.created_at,
+    )
+
+
+@router.delete("/books/{book_id}/literary/{analysis_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_literary_analysis(
+    book_id: int,
+    analysis_id: int,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """Delete a literary analysis."""
+    result = await db.execute(
+        select(ComputationalAnalysis).where(
+            ComputationalAnalysis.id == analysis_id,
+            ComputationalAnalysis.edition_id == book_id,
+        )
+    )
+    analysis = result.scalar_one_or_none()
+    if not analysis:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found")
+    await db.delete(analysis)
+    await db.commit()

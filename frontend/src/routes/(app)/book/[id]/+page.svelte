@@ -9,6 +9,7 @@
   import BookAnalysis from "$lib/components/BookAnalysis.svelte";
   import Marginalia from "$lib/components/Marginalia.svelte";
   import EsotericAnalysis from "$lib/components/EsotericAnalysis.svelte";
+  import LiteraryAnalysis from "$lib/components/LiteraryAnalysis.svelte";
   import BookMetaEditor from "$lib/components/BookMetaEditor.svelte";
   import { bookCoverUrl, enrichBook, getEnrichmentProviders, convertBookFile, bookFileUrl, sendBookToDevice, setBookStatus, getShelves, getBookShelves, addBookToShelf, removeBookFromShelf, getCollections, addBookToCollection, removeBookFromCollection, getAnnotations, createAnnotation, deleteAnnotation, getReadSessions, createReadSession, deleteReadSession, setCoverFromUrl, setLockedFields, setEsotericEnabled, exportAnnotations, getBookRecommendations, updateBook, extractBookIdentifiers, citationUrl, computeReadingLevel, getBook, getSeriesNeighbors, generateMarkdown, replaceEditionFile } from "$lib/api/client";
   import type { SeriesNav } from "$lib/api/client";
@@ -1461,6 +1462,11 @@
           <!-- AI Analysis -->
           <div class="mt-6">
             <BookAnalysis {bookId} {isAdmin} esotericEnabled={book?.esoteric_enabled ?? false} />
+          </div>
+
+          <!-- Literary / Poetic Analysis -->
+          <div class="mt-6">
+            <LiteraryAnalysis {bookId} />
           </div>
 
           <!-- Computational Esoteric Analysis -->

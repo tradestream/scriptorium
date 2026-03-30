@@ -900,10 +900,7 @@ export interface ComputationalAnalysisRequest {
     | 'first_last_words'
     | 'parenthetical_footnote'
     | 'structural_obscurity'
-    | 'disreputable_mouthpiece'
-    | 'literary_full_poetry'
-    | 'literary_full_prose'
-    | string;  // also supports literary_<tool> for individual tools
+    | 'disreputable_mouthpiece';
   keywords?: string[];
   entities?: string[];
   pious_words?: string[];
@@ -924,6 +921,38 @@ export async function runComputationalAnalysis(
 
 export async function deleteComputationalAnalysis(bookId: number | string, analysisId: number | string): Promise<void> {
   return fetchAPI(`/books/${bookId}/esoteric/${analysisId}`, { method: 'DELETE' });
+}
+
+// ── Literary / Poetic Analysis ───────────────────────────────────────────────
+
+export interface LiteraryAnalysis {
+  id: number;
+  book_id: number;
+  analysis_type: string;
+  results: Record<string, unknown>;
+  config: Record<string, unknown> | null;
+  status: string;
+  created_at: string;
+}
+
+export interface LiteraryAnalysisRequest {
+  analysis_type: 'literary_full_poetry' | 'literary_full_prose' | string;
+  mode?: 'poetry' | 'prose';
+}
+
+export async function getLiteraryAnalyses(bookId: number | string): Promise<LiteraryAnalysis[]> {
+  return fetchAPI(`/books/${bookId}/literary`);
+}
+
+export async function runLiteraryAnalysis(
+  bookId: number | string,
+  data: LiteraryAnalysisRequest
+): Promise<LiteraryAnalysis> {
+  return fetchAPI(`/books/${bookId}/literary`, { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function deleteLiteraryAnalysis(bookId: number | string, analysisId: number | string): Promise<void> {
+  return fetchAPI(`/books/${bookId}/literary/${analysisId}`, { method: 'DELETE' });
 }
 
 // ── Esoteric enablement + per-book prompt configs ─────────────────────────────

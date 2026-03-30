@@ -28,8 +28,6 @@
     Footprints,
     Layers,
     Drama,
-    Music,
-    Pen,
   } from "lucide-svelte";
   import * as api from "$lib/api/client";
   import type { ComputationalAnalysis, ComputationalAnalysisRequest } from "$lib/api/client";
@@ -91,13 +89,6 @@
         { value: "audience_differentiation", label: "Audience Differentiation", icon: Users, description: "Signals aimed at different reader levels" },
         { value: "self_reference", label: "Self-Reference", icon: Footprints, description: "Author references to own work and method" },
         { value: "disreputable_mouthpiece", label: "Disreputable Mouthpieces", icon: Drama, description: "Dangerous ideas voiced through flawed characters" },
-      ],
-    },
-    {
-      label: "Literary & Poetic",
-      types: [
-        { value: "literary_full_poetry", label: "Full Poetry Analysis", icon: Music, description: "Prosody, sound, form, figurative language (30 tools)" },
-        { value: "literary_full_prose", label: "Full Prose Analysis", icon: Pen, description: "Narrative, diction, intertextual, speaker (30 tools)" },
       ],
     },
   ];
