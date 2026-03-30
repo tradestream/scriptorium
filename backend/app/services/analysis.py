@@ -321,10 +321,19 @@ async def run_analysis(
         custom_prompt: One-off prompt override (optional)
         title: Label for this analysis
     """
-    # Fetch the book
-    stmt = select(Book).where(Book.id == book_id)
+    # Fetch the book (eagerly load rels needed by extract_text_from_book)
+    from sqlalchemy.orm import joinedload
+    from app.models.work import Work
+    stmt = (
+        select(Book)
+        .where(Book.id == book_id)
+        .options(
+            joinedload(Book.files),
+            joinedload(Book.work).joinedload(Work.authors),
+        )
+    )
     result = await db.execute(stmt)
-    book = result.scalar_one_or_none()
+    book = result.unique().scalar_one_or_none()
     if not book:
         raise ValueError(f"Book not found: {book_id}")
 
