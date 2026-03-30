@@ -324,7 +324,7 @@ class ComputationalAnalysisRequest(BaseModel):
 class ComputationalAnalysisRead(BaseModel):
     """Read schema for computational analysis results."""
     id: int
-    book_id: int
+    book_id: int  # edition_id in DB, aliased for API consistency
     analysis_type: str
     results: dict  # Parsed JSON
     config: dict | None = None
@@ -353,7 +353,7 @@ async def list_computational_analyses(
     return [
         ComputationalAnalysisRead(
             id=a.id,
-            work_id=a.work_id,
+            book_id=a.edition_id,
             analysis_type=a.analysis_type,
             results=json.loads(a.results_json),
             config=json.loads(a.config_json) if a.config_json else None,
@@ -384,7 +384,7 @@ async def get_computational_analysis(
 
     return ComputationalAnalysisRead(
         id=analysis.id,
-        work_id=analysis.work_id,
+        book_id=analysis.edition_id,
         analysis_type=analysis.analysis_type,
         results=json.loads(analysis.results_json),
         config=json.loads(analysis.config_json) if analysis.config_json else None,
@@ -551,7 +551,7 @@ async def run_computational_analysis(
 
     return ComputationalAnalysisRead(
         id=record.id,
-        work_id=record.work_id,
+        book_id=record.edition_id,
         analysis_type=record.analysis_type,
         results=results,
         config=config_dict,
