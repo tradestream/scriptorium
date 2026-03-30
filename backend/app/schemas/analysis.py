@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, AliasChoices
 
 
 # --- Analysis Templates ---
@@ -54,7 +54,7 @@ class AnalysisRequest(BaseModel):
 class BookAnalysisRead(BaseModel):
     """Read schema for a book analysis."""
     id: int
-    book_id: int
+    book_id: int = Field(validation_alias=AliasChoices("book_id", "work_id"))
     template_id: Optional[int] = None
     title: str
     content: str
@@ -73,7 +73,7 @@ class BookAnalysisRead(BaseModel):
 class BookAnalysisSummary(BaseModel):
     """Lightweight summary for listing analyses."""
     id: int
-    book_id: int
+    book_id: int = Field(validation_alias=AliasChoices("book_id", "work_id"))
     title: str
     status: str
     model_used: Optional[str] = None
