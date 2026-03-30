@@ -337,6 +337,9 @@ async def run_analysis(
     if not book:
         raise ValueError(f"Book not found: {book_id}")
 
+    # Extract text BEFORE committing anything (commit expires eager-loaded rels)
+    text = await extract_text_from_book(book, db)
+
     # Create a pending analysis record
     analysis = BookAnalysis(
         work_id=book_id,
@@ -350,8 +353,6 @@ async def run_analysis(
     await db.refresh(analysis)
 
     try:
-        # Extract text
-        text = await extract_text_from_book(book, db)
 
         # Resolve the template
         if template_id:
