@@ -36,6 +36,7 @@ dependencies = [
     "lxml>=4.9.0",
     "slowapi>=0.1.9",
     "storygraph-api>=0.1.0",
+    "nltk>=3.8.0",
 ]
 
 [project.optional-dependencies]
