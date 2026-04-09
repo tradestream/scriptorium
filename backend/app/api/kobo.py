@@ -178,20 +178,22 @@ async def kobo_book_metadata(
 
     # For now, return a minimal metadata response
     # The full sync already provides complete metadata
-    from sqlalchemy import select
     from sqlalchemy.orm import selectinload
     from app.models import Book, Work
 
-    stmt = (
-        select(Book)
-        .where(Book.uuid == book_uuid)
-        .options(
-            selectinload(Book.work).selectinload(Work.authors),
-            selectinload(Book.files),
-        )
+    # Accept UUID or numeric id — older releases served numeric ids as
+    # EntitlementIds and devices still have them cached.
+    base = select(Book).options(
+        selectinload(Book.work).selectinload(Work.authors),
+        selectinload(Book.files),
     )
+    stmt = base.where(Book.uuid == book_uuid)
     result = await db.execute(stmt)
     book = result.scalar_one_or_none()
+    if book is None and book_uuid.isdigit():
+        stmt = base.where(Book.id == int(book_uuid))
+        result = await db.execute(stmt)
+        book = result.scalar_one_or_none()
 
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
@@ -212,10 +214,10 @@ async def kobo_book_metadata(
             "Language": book.language or "en",
             "Isbn": getattr(book, 'isbn', '') or "",
             "Publisher": {"Name": getattr(book, 'publisher', '') or ""},
-            "EntitlementId": book.uuid,
-            "CrossRevisionId": book.uuid,
-            "RevisionId": book.uuid,
-            "WorkId": book.uuid,
+            "EntitlementId": book_uuid,
+            "CrossRevisionId": book_uuid,
+            "RevisionId": book_uuid,
+            "WorkId": book_uuid,
         }
     ]
 
@@ -229,14 +231,10 @@ async def kobo_get_reading_state(
     """Get the reading state for a specific book."""
     sync_token = await _get_sync_token(auth_token, db)
 
-    from sqlalchemy import select
-    from app.models import Book
     from app.models.progress import KoboBookState
-    from app.services.kobo_sync import _build_reading_state
+    from app.services.kobo_sync import _build_reading_state, _find_edition_by_any_id
 
-    stmt = select(Book).where(Book.uuid == book_uuid)
-    result = await db.execute(stmt)
-    book = result.scalar_one_or_none()
+    book = await _find_edition_by_any_id(book_uuid, db)
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
 
@@ -535,7 +533,6 @@ async def kobo_add_items_to_tag(
     body = await request.json()
     items = body.get("Items", [])
 
-    from app.models import Edition
     from app.models.progress import KoboShelfArchive
     from app.models.shelf import ShelfBook
     from app.models.collection import Collection, CollectionBook
@@ -560,8 +557,8 @@ async def kobo_add_items_to_tag(
         rev_id = item.get("RevisionId")
         if not rev_id:
             continue
-        edition_result = await db.execute(select(Edition).where(Edition.uuid == rev_id))
-        edition = edition_result.scalar_one_or_none()
+        from app.services.kobo_sync import _find_edition_by_any_id
+        edition = await _find_edition_by_any_id(str(rev_id), db)
         if not edition:
             continue
 
@@ -595,7 +592,6 @@ async def kobo_remove_item_from_tag(
     """Handle removing a book from a tag on the Kobo device. Removes from both Shelf and Collection."""
     sync_token = await _get_sync_token(auth_token, db)
 
-    from app.models import Edition
     from app.models.progress import KoboShelfArchive
     from app.models.shelf import ShelfBook
     from app.models.collection import Collection, CollectionBook
@@ -610,8 +606,8 @@ async def kobo_remove_item_from_tag(
     if not archive:
         return Response(status_code=404)
 
-    edition_result = await db.execute(select(Edition).where(Edition.uuid == item_id))
-    edition = edition_result.scalar_one_or_none()
+    from app.services.kobo_sync import _find_edition_by_any_id
+    edition = await _find_edition_by_any_id(item_id, db)
     if edition:
         # Remove from shelf
         if archive.shelf_id:

@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l README.md retrieval/README.md generation/README.md generation/autoreview/models/*.py retrieval/src/utils/prompt_utils/*.py)"
+    ]
+  }
+}

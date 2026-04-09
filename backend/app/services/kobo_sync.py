@@ -769,6 +769,26 @@ def _build_reading_state(entity_uuid: str, state: KoboBookState) -> dict:
 # Reading State Updates (device → server)
 # ---------------------------------------------------------------------------
 
+async def _find_edition_by_any_id(
+    identifier: str, db: AsyncSession
+) -> Optional[Edition]:
+    """Resolve an Edition by UUID or numeric id.
+
+    The Kobo protocol identifies entitlements by the string we sent as
+    `EntitlementId`. Older Scriptorium releases sent numeric ids; current
+    releases send UUIDs. Devices retain cached entitlements across app
+    upgrades, so handlers must accept either form.
+    """
+    result = await db.execute(select(Edition).where(Edition.uuid == identifier))
+    edition = result.scalar_one_or_none()
+    if edition is not None:
+        return edition
+    if identifier.isdigit():
+        result = await db.execute(select(Edition).where(Edition.id == int(identifier)))
+        return result.scalar_one_or_none()
+    return None
+
+
 async def update_reading_state(
     book_uuid: str,
     user_id: int,
@@ -782,11 +802,10 @@ async def update_reading_state(
     Updates KoboBookState and UserEdition (the canonical user reading state).
     """
     # Edition and Book are the same model (alias), so a single lookup is
-    # sufficient. The previous two-branch version could store a Book PK in
-    # the edition_id FK column, corrupting subsequent lookups.
-    edition_stmt = select(Edition).where(Edition.uuid == book_uuid)
-    edition_result = await db.execute(edition_stmt)
-    edition = edition_result.scalar_one_or_none()
+    # sufficient. Accept either a UUID string or a numeric id — older
+    # Scriptorium releases served Kobo entitlements with numeric ids as
+    # the EntitlementId, and those are still cached on user devices.
+    edition = await _find_edition_by_any_id(book_uuid, db)
 
     if edition is None:
         logger.warning("Reading state update for unknown UUID: %s", book_uuid)
