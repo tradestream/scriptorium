@@ -871,10 +871,10 @@ async def update_reading_state(
 
     kobo_state.updated_at = _utcnow()
 
-    # Sync to UserEdition (primary) and legacy ReadProgress (compat).
-    # Edition/Book are the same model now; a single edition_id feeds both.
+    # Sync to UserEdition (canonical). The legacy ReadProgress sync path
+    # was removed — its schema diverged from the helper's expectations
+    # (no device_id column) and UserEdition is the authoritative table.
     await _sync_to_user_edition(user_id=user_id, edition_id=edition_id, kobo_state=kobo_state, db=db)
-    await _sync_to_read_progress(user_id=user_id, book_id=edition_id, kobo_state=kobo_state, db=db)
 
     await db.commit()
     await db.refresh(kobo_state)
