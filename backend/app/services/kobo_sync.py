@@ -434,9 +434,31 @@ async def get_sync_payload(
             # rows with no Edition — the bookkeeping loss is acceptable.
             await db.delete(orphan)
 
-    # Record synced editions in lookup table (Calibre-Web pattern)
+    # Record synced editions in lookup table (Calibre-Web pattern).
+    #
+    # Cursor advancement policy: during the initial-fill phase (is_incremental
+    # == False), the query exclusively uses the KoboSyncedBook NOT EXISTS
+    # filter — the timestamp cursor is NOT consulted at all. Advancing
+    # books_last_modified page-by-page would flip the query into incremental
+    # mode on the next call and cause the updated_at > cursor filter to
+    # skip editions whose timestamp is <= the cursor's. That's catastrophic
+    # for bulk-imported libraries where every book shares one import
+    # timestamp: after the first page sets the cursor, the second page
+    # filters the entire batch out and the device gets stuck at 10 books.
+    #
+    # So: during initial fill, do NOT advance books_last_modified until the
+    # fill is fully complete (has_more == False). On the final page, advance
+    # to the current wall-clock so the next sync flips cleanly into the
+    # incremental branch. During incremental mode we can advance normally.
     if editions:
-        sync_token.books_last_modified = max(e.updated_at for e in editions)
+        if is_incremental:
+            sync_token.books_last_modified = max(e.updated_at for e in editions)
+        elif not has_more:
+            # Initial fill just finished this request. Mark the switchover
+            # to incremental mode at "now" so subsequent syncs use the
+            # updated_at > cursor path.
+            sync_token.books_last_modified = datetime.utcnow()
+
         created_timestamps = [e.created_at for e in editions if e.created_at]
         if created_timestamps:
             new_max_created = max(created_timestamps)
