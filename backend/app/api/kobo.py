@@ -22,6 +22,7 @@ Management (under /api/v1, JWT-authed):
 """
 
 import logging
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -333,15 +334,30 @@ async def kobo_download_book(
 
     media_types = {
         "epub": "application/epub+zip",
-        "kepub": "application/epub+zip",
+        "kepub": "application/kepub+zip",
         "pdf": "application/pdf",
     }
     media_type = media_types.get(file_format.lower(), "application/octet-stream")
+
+    # Kobo resumes partial downloads via Range + ETag/Last-Modified, so
+    # include both. ETag is based on (uuid, size, mtime) — stable enough
+    # to dedupe but changes when the file is rewritten.
+    import os
+    stat = os.stat(file_path)
+    etag = f'"{book_uuid}-{stat.st_size}-{int(stat.st_mtime)}"'
+    last_modified = datetime.utcfromtimestamp(stat.st_mtime).strftime(
+        "%a, %d %b %Y %H:%M:%S GMT"
+    )
 
     return FileResponse(
         path=str(file_path),
         media_type=media_type,
         filename=file_path.name,
+        headers={
+            "ETag": etag,
+            "Last-Modified": last_modified,
+            "Accept-Ranges": "bytes",
+        },
     )
 
 

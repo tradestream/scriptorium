@@ -526,6 +526,36 @@ def _get_kobo_compatible_file(files: list[BookFile]) -> Optional[BookFile]:
     return sorted(compatible, key=lambda f: priority.get(f.format.lower(), 99))[0]
 
 
+def _build_download_urls(
+    edition: Edition,
+    edition_files: list[EditionFile],
+    kobo_base: str,
+) -> list[dict]:
+    """Build the DownloadUrls list, preferring KEPUB exclusively when present.
+
+    CWA cps/kobo.py L584-586: if any KEPUB is available, emit ONLY kepub
+    entries; otherwise fall back to other compatible formats. Mixing a
+    KEPUB file with an EPUB label confuses the device.
+    """
+    kepubs = [f for f in edition_files if f.format.lower() == "kepub"]
+    candidates = kepubs if kepubs else [
+        f for f in edition_files if f.format.lower() in ("epub", "pdf")
+    ]
+    urls = []
+    for f in candidates:
+        fmt = f.format.lower()
+        urls.append(
+            {
+                "DrmType": "None",
+                "Format": fmt.upper(),
+                "Size": f.file_size,
+                "Url": f"{kobo_base}/v1/library/{edition.uuid}/download/{fmt}",
+                "Platform": "Generic",
+            }
+        )
+    return urls
+
+
 def _build_edition_entry(
     edition: Edition,
     edition_file: EditionFile,
@@ -569,19 +599,18 @@ def _build_edition_entry(
                 "Categories": [],
                 "ContributorRoles": [{"Name": name} for name in author_list],
                 "Contributors": author_list,
-                "CoverImageId": edition.uuid if edition.cover_hash else None,
+                # Cover cache-busting: include cover_hash so cover updates
+                # propagate to the device instead of being masked by a
+                # stable uuid-only id.
+                "CoverImageId": (
+                    f"{edition.uuid}-{edition.cover_hash}"
+                    if edition.cover_hash
+                    else None
+                ),
                 "CrossRevisionId": edition.uuid,
                 "CurrentDisplayPrice": {"CurrencyCode": "USD", "TotalAmount": 0},
                 "Description": (work.description if work else None) or "",
-                "DownloadUrls": [
-                    {
-                        "DrmType": "None",
-                        "Format": edition_file.format.upper(),
-                        "Size": edition_file.file_size,
-                        "Url": f"{kobo_base}/v1/library/{edition.uuid}/download/{edition_file.format.lower()}",
-                        "Platform": "Generic",
-                    }
-                ],
+                "DownloadUrls": _build_download_urls(edition, edition.files or [], kobo_base),
                 "EntitlementId": edition.uuid,
                 "ExternalIds": [{"Id": edition.isbn, "Source": "ISBN"}] if edition.isbn else [],
                 "Isbn": edition.isbn or "",
@@ -658,19 +687,13 @@ def _build_book_entry(
                 "Categories": [],
                 "ContributorRoles": [{"Name": name} for name in author_list],
                 "Contributors": author_list,
-                "CoverImageId": book.uuid if book.cover_hash else None,
+                "CoverImageId": (
+                    f"{book.uuid}-{book.cover_hash}" if book.cover_hash else None
+                ),
                 "CrossRevisionId": book.uuid,
                 "CurrentDisplayPrice": {"CurrencyCode": "USD", "TotalAmount": 0},
                 "Description": book.description or "",
-                "DownloadUrls": [
-                    {
-                        "DrmType": "None",
-                        "Format": book_file.format.upper(),
-                        "Size": book_file.file_size,
-                        "Url": f"{kobo_base}/v1/library/{book.uuid}/download/{book_file.format.lower()}",
-                        "Platform": "Generic",
-                    }
-                ],
+                "DownloadUrls": _build_download_urls(book, book.files or [], kobo_base),
                 "EntitlementId": book.uuid,
                 "ExternalIds": [{"Id": book.isbn, "Source": "ISBN"}] if book.isbn else [],
                 "Isbn": book.isbn or "",
