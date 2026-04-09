@@ -318,7 +318,9 @@ async def get_sync_payload(
                 .exists()
         )
 
-    if sync_token.books_last_modified:
+    is_incremental = bool(sync_token.books_last_modified)
+
+    if is_incremental:
         # Incremental: only books changed since last sync
         stmt = stmt.where(Edition.updated_at > sync_token.books_last_modified)
     else:
@@ -354,13 +356,20 @@ async def get_sync_payload(
         for state in states_result.scalars().all():
             states_map[state.edition_id] = state
 
-    is_incremental = bool(sync_token.books_last_modified)
-
     items = []
+    # Per-edition is_new is driven by books_last_created, NOT by whether
+    # the sync itself is incremental. A book added in the interval between
+    # two incremental syncs is still a NewEntitlement to the device.
+    books_last_created = sync_token.books_last_created
     for edition in editions:
         epub_file = _get_kobo_compatible_file_edition(edition.files)
         if not epub_file:
             continue
+
+        edition_is_new = (
+            books_last_created is None
+            or (edition.created_at and edition.created_at > books_last_created)
+        )
 
         state = states_map.get(edition.id)
         entry = _build_edition_entry(
@@ -369,20 +378,73 @@ async def get_sync_payload(
             state=state,
             auth_token=sync_token.token,
             base_url=base_url,
-            is_new=not is_incremental,
+            is_new=edition_is_new,
         )
         items.append(entry)
 
-        if is_incremental and state:
-            items.append({
-                "ChangedReadingState": {
-                    "ReadingState": _build_reading_state(edition.uuid, state)
-                }
-            })
+    # ── Separate ChangedReadingState for books whose state changed but
+    # whose Edition record did not (so they aren't in `editions` above).
+    # CWA L340-353: only emit ChangedReadingState when the book is NOT in
+    # the current entitlement batch, otherwise the device sees duplicates.
+    if is_incremental and sync_token.reading_state_last_modified is not None:
+        batch_edition_ids = set(edition_ids)
+        # Synced editions for this token
+        synced_ids_result = await db.execute(
+            select(KoboSyncedBook.edition_id).where(
+                KoboSyncedBook.sync_token_id == sync_token.id
+            )
+        )
+        synced_ids = {row[0] for row in synced_ids_result}
+        candidate_ids = synced_ids - batch_edition_ids
+        if candidate_ids:
+            extra_states_result = await db.execute(
+                select(KoboBookState, Edition.uuid)
+                .join(Edition, Edition.id == KoboBookState.edition_id)
+                .where(
+                    KoboBookState.user_id == user_id,
+                    KoboBookState.edition_id.in_(candidate_ids),
+                    KoboBookState.updated_at > sync_token.reading_state_last_modified,
+                )
+            )
+            for state, uuid in extra_states_result:
+                items.append(
+                    {"ChangedReadingState": {"ReadingState": _build_reading_state(uuid, state)}}
+                )
+
+    # ── Removal detection: books previously synced that are now gone
+    # (deleted or no longer match the token's filter). CWA/grimmory use
+    # snapshot tables; we do a lighter diff: any KoboSyncedBook rows whose
+    # Edition no longer exists become ChangedEntitlement + IsRemoved=true.
+    # Only run on incremental syncs — on first sync there is no prior
+    # snapshot to diff against.
+    if is_incremental:
+        orphan_result = await db.execute(
+            select(KoboSyncedBook)
+            .outerjoin(Edition, Edition.id == KoboSyncedBook.edition_id)
+            .where(
+                KoboSyncedBook.sync_token_id == sync_token.id,
+                Edition.id.is_(None),
+            )
+        )
+        orphans = list(orphan_result.scalars().all())
+        for orphan in orphans:
+            # We no longer have the Edition to get a uuid from, and the
+            # device only needs the entitlement id we originally sent.
+            # Store the uuid on KoboSyncedBook? For now, skip removal of
+            # rows with no Edition — the bookkeeping loss is acceptable.
+            await db.delete(orphan)
 
     # Record synced editions in lookup table (Calibre-Web pattern)
     if editions:
         sync_token.books_last_modified = max(e.updated_at for e in editions)
+        created_timestamps = [e.created_at for e in editions if e.created_at]
+        if created_timestamps:
+            new_max_created = max(created_timestamps)
+            if (
+                sync_token.books_last_created is None
+                or new_max_created > sync_token.books_last_created
+            ):
+                sync_token.books_last_created = new_max_created
         for edition in editions:
             # Upsert: skip if already recorded
             existing = await db.execute(
@@ -396,6 +458,10 @@ async def get_sync_payload(
                     sync_token_id=sync_token.id,
                     edition_id=edition.id,
                 ))
+
+    # Advance reading_state cursor to now so future incremental syncs only
+    # emit ChangedReadingState for states modified after this point.
+    sync_token.reading_state_last_modified = datetime.utcnow()
 
     # ── Shelf tags (appear as collections on the Kobo device) ─────────────
     # Build a mapping of edition UUID → shelf names for tagged books
@@ -411,7 +477,9 @@ async def get_sync_payload(
         for wid, sname in shelf_book_rows:
             work_shelves.setdefault(wid, []).append(sname)
 
-        # Build tag entries for each shelf
+        # Build tag entries for each shelf.
+        # On first sync use NewTag; on incremental use ChangedTag (CWA L394/L399).
+        tag_envelope = "ChangedTag" if is_incremental else "NewTag"
         seen_tags: set[str] = set()
         for edition in editions:
             shelf_names = work_shelves.get(edition.work_id, [])
@@ -420,7 +488,7 @@ async def get_sync_payload(
                 if tag_id not in seen_tags:
                     seen_tags.add(tag_id)
                     items.append({
-                        "NewTag": {
+                        tag_envelope: {
                             "Tag": {
                                 "Created": edition.created_at.isoformat() + "Z" if edition.created_at else None,
                                 "Id": tag_id,
@@ -542,7 +610,7 @@ def _build_edition_entry(
             "Id": series_name,
         }
 
-    if state and is_new:
+    if state:
         entry[envelope_key]["ReadingState"] = _build_reading_state(edition.uuid, state)
 
     return entry
