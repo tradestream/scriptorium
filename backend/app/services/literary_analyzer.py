@@ -3614,9 +3614,30 @@ A computational pre-analysis has been performed and yielded these findings:
 
 ---
 
+## HOW TO WRITE THIS ANALYSIS
+
+**Audience and voice.** Write as a scholar speaking to an intelligent non-specialist. Open each stage with a sentence that states what you found, then develop the evidence in paragraphs. Let the prose carry the reader — do not treat stage headers as dry labels. Prefer paragraphs to bullets except for enumerated textual evidence.
+
+**Two-pass method.** Before drafting, survey every stage below and silently mark each as:
+- **LOAD-BEARING** — the {mode_label} genuinely activates this method; concrete evidence is available in the text or the computational findings.
+- **SUPPORTING** — some evidence exists, worth folding into a load-bearing stage.
+- **NOT APPLICABLE** — the {mode_label} does not activate this, or the findings are silent.
+
+Write full analysis ONLY for LOAD-BEARING stages. Fold SUPPORTING observations into the nearest load-bearing stage. For NOT APPLICABLE stages, write one sentence of why and move on. Thoroughness is depth on what matters, not length on what doesn't.
+
+**Evidence per claim.** Every interpretive claim must be anchored to a specific word, phrase, line, or passage quoted directly in the response. A claim without an inline quote is not a claim.
+
+**Length contract.** Per load-bearing stage: 150–400 words of prose. Quote the text directly at least once per stage. Final synthesis (Stage 11): 500–800 words. Do not pad.
+
+**Running synthesis.** After every 3 stages, pause for a 2–3 sentence "What we know so far" checkpoint that threads the meaning forward. Do not wait for the final synthesis to start making connections.
+
+**Falsifiability.** Any time you assert a non-obvious reading, state in one clause what would disconfirm it. "This reading would fail if..."
+
+---
+
 YOUR TASK: Perform a deep close reading of this {mode_label}, guided by the
 computational findings above but going far beyond them. Proceed through the
-following stages:
+following stages using the two-pass method above:
 
 ## STAGE 1: FIRST READING — WHAT DOES THE {mode_label.upper()} SAY?
 Read the {mode_label} as a whole. What is it about on the surface? What is the
@@ -3683,18 +3704,37 @@ What other texts, myths, or cultural references does this {mode_label} invoke?
 - Are there archetypal patterns? (Foster: quest, communion, rebirth, descent)
 
 ## STAGE 9: WHAT THE {mode_label.upper()} DOES NOT SAY
-What is conspicuously ABSENT?
-- What topics does the reader expect that the {mode_label} avoids?
-  (Strauss: conspicuous silence; Pinsky: Moore's "restraint")
-- Are there gaps, ellipses, or things left unsaid?
-- What would a different poet have included that this poet omits?
+Absence is evidence. Close reading earns its keep here. Work through:
+- **Expected topics that are missing.** Given the subject, situation, and genre, what would a
+  reader expect the {mode_label} to address that it avoids? Name two or three specific absences
+  and quote any passages where the absence is felt as a gap rather than neutral omission.
+  (Strauss: conspicuous silence as technique; Pinsky on Moore: "the deepest feeling always
+  shows itself in silence.")
+- **Grammatical and rhetorical ellipses.** Are there sentences that trail off, stanzas that
+  end before their argument completes, questions left unanswered, addressees who never respond?
+  What function does each ellipsis perform?
+- **The counterfactual {mode_label}.** What would a different poet, writing on the same
+  subject, have felt compelled to include? Name at least one such element the {mode_label}
+  pointedly omits, and ask what that omission protects or concedes.
+- **Texture of silence.** Distinguish conspicuous silence (the absence is underlined by
+  the surrounding text) from mere selectivity (the absence is structural, not rhetorical).
+  Only the former is evidence.
 
 ## STAGE 10: CONTRADICTION AND PARADOX
-Does the {mode_label} contain unresolved tensions?
-- Are there contradictions — assertions that pull in opposite directions?
-  (Pinsky: Shakespeare's "two distinct, division none")
-- Does the {mode_label} hold paradoxes without resolving them?
-- Is there irony operating that inverts the surface meaning? (Foster)
+Tension is where meaning happens. Do not resolve paradoxes prematurely. Work through:
+- **Surface contradictions.** Quote any two passages that pull in opposite directions —
+  assertions, tones, images, or valuations that cannot both be true at the literal level.
+  Per Pinsky on Shakespeare: "two distinct, division none" holds contradictory terms in
+  a single thought. Which of this {mode_label}'s contradictions are of that kind?
+- **Paradoxes held unresolved.** Distinguish a contradiction (which asks to be solved) from
+  a paradox (which asks to be held). Which does the {mode_label} offer? A paradox held open
+  is often the load-bearing structure of the poem's meaning.
+- **Ironic inversions.** Per Foster: irony trumps everything. Is the surface statement
+  undercut by its vehicle, context, tone, or placement? Quote the passage where the ironic
+  gap is widest and state what the {mode_label} actually says beneath the surface.
+- **The paraphrase test.** Could a prose paraphrase preserve any of these tensions, or do
+  they live only in the {mode_label}'s particular form? Contradictions that survive paraphrase
+  are thematic; those that die in paraphrase are formal, and those are the interesting ones.
 
 ## STAGE 11: HOW THE {mode_label.upper()} MEANS
 Synthesize your observations. How does this {mode_label} mean?
@@ -3722,7 +3762,8 @@ IMPORTANT NOTES:
 - Read generously: assume the writer is skilled until proven otherwise.
 - Multiple valid readings can coexist. Embrace ambiguity (Pinsky).
 
-Please provide the text for analysis, or if it has been provided, begin now.
+The text follows below. Begin your analysis immediately, starting with your two-pass
+survey (silently, in your head — then write up the load-bearing stages).
 """
         return prompt
 

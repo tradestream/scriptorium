@@ -68,144 +68,149 @@ def _load_stages_template() -> str:
             if os.path.exists(p):
                 with open(p, encoding='utf-8') as f:
                     content = f.read()
-                # Extract just the stages section (from "YOUR TASK" to end)
+                # Extract from the standing-rules header so the prompt
+                # includes the two-pass / evidence / falsifiability block.
+                idx = content.find("## HOW TO WRITE THIS ANALYSIS")
+                if idx >= 0:
+                    _cached_stages_template = content[idx:]
+                    return _cached_stages_template
+                # Legacy layout: older reference file started at YOUR TASK
                 idx = content.find("YOUR TASK:")
                 if idx >= 0:
                     _cached_stages_template = content[idx:]
                     return _cached_stages_template
-                # Try alternate marker
+                # Last-resort fallback
                 idx = content.find("## STAGE 1")
                 if idx >= 0:
                     return "YOUR TASK: Perform a deep esoteric reading guided by the computational findings above.\n\n" + content[idx:]
         except Exception:
             continue
 
-    # Fallback: compact embedded stages
-    return """YOUR TASK: Perform a deep esoteric reading of this text, guided by the 56-tool \
-computational findings above. Proceed through ALL of the following stages:
+    # Fallback: compact embedded stages (mirrors llm_esoteric_prompt.md)
+    return """## HOW TO WRITE THIS ANALYSIS
+
+**Two-pass method.** Silently survey the stages below and mark each LOAD-BEARING, SUPPORTING, \
+or NOT APPLICABLE for this text. Write full analysis ONLY for LOAD-BEARING stages. Fold \
+SUPPORTING observations into them. Note NOT APPLICABLE with one sentence of why. \
+If the text is not esoteric, say so in Stage 1 and stop.
+
+**Evidence per claim.** Every claim must be anchored to a quoted word, phrase, or passage. \
+No inline quote = no claim. Computational findings point you to passages — still quote them.
+
+**Length contract.** 200–500 words per load-bearing stage. Stage 16 synthesis: 600–1000 words. \
+Do not pad. Eight tight stages beat seventeen thin ones.
+
+**Running synthesis.** After Stages 7, 13, and 15, pause for 3–4 sentences of "what we know \
+so far" that threads the meaning forward.
+
+**Falsifiability (standing rule).** Any non-obvious reading must state in one clause what \
+would disconfirm it. Build this in from Stage 1, not as an afterthought.
+
+**Voice.** Scholar speaking to an intelligent non-specialist. Paragraphs, not bullets, except \
+for enumerated evidence. Each stage opens with a sentence stating what you found.
+
+---
+
+YOUR TASK: Perform a deep esoteric reading guided by the computational findings above. \
+The seventeen stages are grouped in four passes; write a checkpoint after each pass.
+
+## FIRST PASS — SURFACE AND ITS DISRUPTIONS
 
 ## STAGE 1: LITERAL SURFACE READING
-Describe the exoteric argument. What does the text appear to say? Who is the audience?
+Describe the exoteric argument. Who is the apparent audience? If no deliberate concealment \
+is visible on careful surface reading, say so and stop.
 
 ## STAGE 2: CONTRADICTION ANALYSIS
-Examine contradictions. Per Strauss: the less emphatic statement is likelier true. \
-Per Maimonides: 5th cause (pedagogy) or 7th cause (concealment)?
+Examine flagged contradictions. Per Strauss: the less emphatic statement is likelier true. \
+Per Maimonides: 5th cause (pedagogy) or 7th cause (concealment)? Quote the passages.
 
 ## STAGE 3: STRUCTURAL ANALYSIS
-Center placement, ring/chiastic structure, numerological patterns, lexical density.
+Center placement, ring/chiastic structure, numerological features, lexical density. Quote \
+the center passage.
 
 ## STAGE 4: SILENCE AND OMISSION
-Why are expected topics absent? Does silence constitute a negative argument?
+Expected topics absent. Distinguish conspicuous silence from mere selectivity.
 
 ## STAGE 5: IRONY AND INDIRECT COMMUNICATION
-Hedging, excessive praise, conditional language, qualifier-to-assertion ratio.
+Hedging, excessive praise, dramatic framing that undercuts stated positions. Quote the \
+widest ironic gap.
 
 ## STAGE 6: DIGRESSIONS AND SCATTERED ARGUMENTS
-Per Maimonides: "combine scattered chapters." Do digressions yield a hidden argument?
+Per Maimonides: combine scattered chapters. Do digressions yield a hidden argument?
 
 ## STAGE 7: SOURCE AND AUTHORITY ANALYSIS
-Scare quotes, parenthetical asides, commentary divergence, distorted citations.
+Distorted citations, scare quotes, parenthetical asides, commentary divergence.
+
+### ✦ CHECKPOINT 1 — 3–4 sentences summarizing the surface disruptions. State your working hypothesis.
+
+## SECOND PASS — VOICE, REGISTER, LAYERS
 
 ## STAGE 8: VOICE AND PERSONA (KIERKEGAARD)
-Stylistic shifts between sections. Multiple voices? Indirect communication?
+Stylistic shifts between sections. Multiple voices?
 
 ## STAGE 9: REGISTER ANALYSIS (AVERROES)
-Rhetorical/dialectical/demonstrative modes. Where does the demonstrative register appear?
+Rhetorical/dialectical/demonstrative modes. Mark the exoteric/esoteric boundary.
 
 ## STAGE 10: LOGOS/MYTHOS (PLATO)
-Transitions between argument and myth/narrative. Myth at the boundary of reason.
+Transitions between argument and myth. Myth at the boundary of reason.
 
 ## STAGE 11: MULTI-LEVEL READING (DANTE/KABBALAH)
-Literal, allegorical, moral, anagogical. Peshat/Remez/Derash/Sod.
+Literal/allegorical/moral/anagogical. Peshat/Remez/Derash/Sod. Demonstrate on one passage.
 
 ## STAGE 12: MASK AND SELF-REFERENCE (NIETZSCHE)
-Self-referential concealment. Does the text announce its own esotericism?
+Self-referential concealment. Passages discussing esotericism itself are often the most esoteric.
 
 ## STAGE 13: ACROSTIC AND STEGANOGRAPHIC PATTERNS
-First/last letter patterns, numerological structure counts.
+First/last letter patterns, numerological structure counts. Only flag above-chance convergence.
 
-## STAGE 14: TRAPDOOR ANALYSIS (BENARDETE)
-Hedged absolutes, non-sequiturs, local impossibilities. What lies beneath?
+### ✦ CHECKPOINT 2 — 3–4 sentences tying voice/register/layer back to Pass 1. Sharpened hypothesis.
 
-## STAGE 15: DYADIC STRUCTURE (BENARDETE)
-Binary oppositions converging. Conjunctive→disjunctive two. Phantom images.
+## THIRD PASS — BENARDETE AND ROSEN TOOLKITS
 
-## STAGE 16: PERIAGOGE (BENARDETE)
-Second half inverting/deepening the first. The philosophical "turning." Pathei mathos.
+## STAGE 14: BENARDETE TOOLKIT
+Survey these eight methods; full paragraphs only on those with real evidence; one sentence \
+each on non-applicable:
+1. Trapdoors — hedged absolutes, non-sequiturs, local impossibilities.
+2. Dyadic structure — conjunctive→disjunctive two; phantom images.
+3. Periagoge — second half inverting/deepening first; pathei mathos.
+4. Logos-ergon — speech vs deed; burstlike vs filamentlike arguments.
+5. Onomastic — names as compressed philosophical arguments; outis/metis.
+6. Recognition scene — conceal→test→reveal; anagnorisis + peripeteia.
+7. Nomos-physis — convention vs nature; foreign defamiliarizing the familiar.
+8. Impossible arithmetic — one=many; poet's dialectic; truth in two spurious forms.
 
-## STAGE 17: LOGOS-ERGON (BENARDETE)
-Speech vs deed. The argument IN the action. Burstlike vs filamentlike arguments.
+## STAGE 15: ROSEN TOOLKIT
+Survey these seventeen methods; full paragraphs only where evidence exists:
+1. Rhetoric of concealment (Rosen on Montesquieu).
+2. Transcendental ambiguity (Rosen on Kant).
+3. Rhetoric of frankness.
+4. Intuition-analysis dialectic; Winke.
+5. Logographic necessity; show not say.
+6. Theological disavowal.
+7. Defensive writing.
+8. Nature-freedom oscillation.
+9. Postmodern misreading vulnerability; what resists appropriation.
+10. Dramatic context.
+11. Speech sequencing.
+12. Philosophical comedy.
+13. Daimonic mediation.
+14. Medicinal rhetoric; graduated disclosure.
+15. Poetry-philosophy dialectic.
+16. Aspiration-achievement gap.
+17. Synoptic requirement; deliberate incompleteness.
 
-## STAGE 18: ONOMASTIC ANALYSIS (BENARDETE)
-Names as philosophical arguments. Etymological commentary. The outis/metis pun.
+### ✦ CHECKPOINT 3 — 3–4 sentences on Benardete/Rosen convergence. Note any disagreement openly.
 
-## STAGE 19: RECOGNITION SCENE (BENARDETE)
-Concealment→test→reveal. Identity achieved through narrative, not given.
+## FOURTH PASS — SYNTHESIS AND REVIEW
 
-## STAGE 20: NOMOS-PHYSIS (HERODOTEAN METHOD)
-Convention vs nature. Alien customs revealing problematic assumptions.
+## STAGE 16: THE ESOTERIC ARGUMENT
+Reconstruct: (1) Exoteric teaching (2) Esoteric teaching (3) Methods of concealment with \
+named historical precedents (4) Evidence, quoted directly (5) Motive (Melzer's four types) \
+(6) Confidence level; what would most strengthen/undermine the reading.
 
-## STAGE 21: IMPOSSIBLE ARITHMETIC (BENARDETE)
-One=many, same=different. The poet's dialectic. Truth in two spurious forms.
-
-## STAGE 22: RHETORIC OF CONCEALMENT (ROSEN)
-Hidden design beneath disorder. Defensive maneuvering. The disheveled surface.
-
-## STAGE 23: TRANSCENDENTAL AMBIGUITY (ROSEN)
-Deliberately unresolved double meanings. Ambiguity as condition of possibility.
-
-## STAGE 24: RHETORIC OF FRANKNESS (ROSEN)
-Performative transparency as concealment. "Dare to know" as rhetoric.
-
-## STAGE 25: INTUITION-ANALYSIS DIALECTIC (ROSEN)
-Appeals to non-discursive knowing. Limits of formalization. Winke (hints).
-
-## STAGE 26: LOGOGRAPHIC NECESSITY (BENARDETE)
-Form carries the logos. Dramatic constraints as philosophical content.
-
-## STAGE 27: THEOLOGICAL DISAVOWAL (ROSEN)
-Theology disguised as philosophy. Philosophical substitutes for religious concepts.
-
-## STAGE 28: DEFENSIVE WRITING (ROSEN/STRAUSS)
-Preemptive rebuttals, disclaimers, appeals to orthodoxy. Defensive layering.
-
-## STAGE 29: NATURE-FREEDOM OSCILLATION (ROSEN)
-Systematic alternation between necessity and freedom. The oscillation IS the insight.
-
-## STAGE 30: POSTMODERN MISREADING VULNERABILITY (ROSEN)
-What would deconstruction latch onto? What would it miss? What resists appropriation?
-
-## STAGE 31: DRAMATIC CONTEXT (ROSEN/SYMPOSIUM)
-Speaker identity, setting, occasion. Arguments enabled/foreclosed by dramatic situation.
-
-## STAGE 32: SPEECH SEQUENCING (ROSEN/SYMPOSIUM)
-Successive sections building/transforming each other. Does sequence matter?
-
-## STAGE 33: PHILOSOPHICAL COMEDY (ROSEN/SYMPOSIUM)
-Serious philosophy in comic form. Laughter as philosophical instrument.
-
-## STAGE 34: DAIMONIC MEDIATION (ROSEN/SYMPOSIUM)
-Intermediate beings/concepts bridging opposites. Neither/nor positions.
-
-## STAGE 35: MEDICINAL RHETORIC (ROSEN/SYMPOSIUM)
-Speech adapted to the listener's soul. Graduated disclosure. Truth in measured doses.
-
-## STAGE 36: POETRY-PHILOSOPHY DIALECTIC (ROSEN/SYMPOSIUM)
-The ancient quarrel. The same person writing comedy and tragedy.
-
-## STAGE 37: ASPIRATION-ACHIEVEMENT GAP (ROSEN/SYMPOSIUM)
-Philosophy as permanent unfulfilled desire. Unresolved tensions as feature, not bug.
-
-## STAGE 38: SYNOPTIC REQUIREMENT (ROSEN/SYMPOSIUM)
-Full understanding requires the wider corpus. Deliberate incompleteness.
-
-## STAGE 39: THE ESOTERIC ARGUMENT
-Reconstruct: 1) Exoteric teaching 2) Esoteric teaching 3) Methods of concealment \
-4) Evidence 5) Motive (Melzer's four types) 6) Confidence level
-
-## STAGE 40: SAFEGUARDS AGAINST OVER-READING
-Does your reading produce MORE coherence? Is evidence convergent? \
-Could patterns be accidental? What would DISPROVE your reading?"""
+## STAGE 17: SAFEGUARDS AGAINST OVER-READING
+Re-read what you wrote. More coherent or merely different? Convergent evidence or scattered \
+anomalies? Could compositional accident explain it? Flag weak assertions. What would DISPROVE your reading?"""
 
 
 def build_integrated_prompt(
@@ -256,8 +261,44 @@ Begin your analysis now."""
     return prompt
 
 
+def _qual(value: float, bands: list[tuple[float, str]]) -> str:
+    """Return a qualitative tag for a numeric value.
+
+    `bands` is a list of (threshold, label) tuples sorted ascending. The
+    returned label is the first band whose threshold the value meets or
+    exceeds, falling back to the highest label for values above all
+    thresholds.
+
+    Example:
+        _qual(0.08, [(0.01, "LOW"), (0.05, "MEDIUM"), (0.1, "HIGH")])
+        -> "MEDIUM"
+    """
+    label = bands[0][1] if bands else ""
+    for threshold, name in bands:
+        if value >= threshold:
+            label = name
+    return label
+
+
+def _tag(value: float, bands: list[tuple[float, str]], precision: int = 2) -> str:
+    """Format `value` as `LABEL (x.xx)` for compact findings output."""
+    return f"{_qual(value, bands)} ({value:.{precision}f})"
+
+
+# Standard bands used across findings
+_DENSITY_BANDS = [(0.01, "LOW"), (0.03, "MEDIUM"), (0.06, "HIGH"), (0.10, "VERY HIGH")]
+_RATIO_BANDS = [(0.2, "LOW"), (0.4, "MEDIUM"), (0.6, "HIGH"), (0.8, "VERY HIGH")]
+_SCORE_BANDS = [(0.1, "WEAK"), (0.3, "MODERATE"), (0.5, "STRONG"), (0.7, "VERY STRONG")]
+
+
 def _format_computational_findings(results: dict) -> str:
-    """Format computational results into readable context for the LLM."""
+    """Format computational results into readable context for the LLM.
+
+    Numeric metrics are emitted as qualitative tags with the raw value in
+    parentheses, per the critique: "praise density: HIGH (0.08)" rather
+    than "praise density: 0.08491". The LLM cannot meaningfully act on
+    four-decimal precision, but the reader benefits from the tag.
+    """
     parts = []
 
     # Engine v2 overall score
@@ -314,21 +355,21 @@ def _format_computational_findings(results: dict) -> str:
     if isinstance(praise, dict) and praise.get("total_flagged", 0) > 0:
         parts.append(f"\n**Excessive Praise ('Protesting Too Much'):** {praise['total_flagged']} sections")
         for p in praise.get("sections", [])[:3]:
-            parts.append(f"- Section {p.get('section', '?')} (density: {p.get('density', 0):.4f}): {p.get('excerpt', '')[:80]}...")
+            parts.append(f"- Section {p.get('section', '?')} (praise density: {_tag(p.get('density', 0), _DENSITY_BANDS)}): {p.get('excerpt', '')[:80]}...")
 
     # Sentiment inversions
     inv = results.get("sentiment_inversion", {})
     if isinstance(inv, dict) and inv.get("total_inversions", 0) > 0:
         parts.append(f"\n**Sentiment Inversions:** {inv['total_inversions']} detected")
         for v in inv.get("inversions", [])[:3]:
-            parts.append(f"- Sections {v.get('section_a', '?')} vs {v.get('section_b', '?')} (score: {v.get('inversion_score', 0):.3f})")
+            parts.append(f"- Sections {v.get('section_a', '?')} vs {v.get('section_b', '?')} ({_tag(v.get('inversion_score', 0), _SCORE_BANDS)})")
 
     # Lexical density
     lex = results.get("lexical_density", {})
     if isinstance(lex, dict) and lex.get("high_density_sections"):
         parts.append(f"\n**High Lexical Density (most carefully written):**")
         for d in lex["high_density_sections"][:3]:
-            parts.append(f"- Section {d.get('section', '?')} (TTR: {d.get('type_token_ratio', 0):.4f}): {d.get('excerpt', '')[:60]}...")
+            parts.append(f"- Section {d.get('section', '?')} (TTR: {_tag(d.get('type_token_ratio', 0), _RATIO_BANDS)}): {d.get('excerpt', '')[:60]}...")
 
     # Emphasis/scare quotes
     emph = results.get("emphasis_quotation", {})
@@ -372,11 +413,11 @@ def _format_computational_findings(results: dict) -> str:
     # Periagoge
     peri = results.get("periagoge", {})
     if isinstance(peri, dict) and peri.get("score", 0) > 0:
-        parts.append(f"\n**Periagoge (Structural Reversal):** polarity shift={peri.get('polarity_shift', 0):.3f}")
-        parts.append(f"- First half polarity: {peri.get('first_half_polarity', 0):.3f}, Second: {peri.get('second_half_polarity', 0):.3f}")
-        parts.append(f"- Turning vocabulary density at center: {peri.get('turning_vocabulary_density', 0):.5f}")
+        parts.append(f"\n**Periagoge (Structural Reversal):** polarity shift {_tag(peri.get('polarity_shift', 0), _SCORE_BANDS)}")
+        parts.append(f"- First half polarity: {peri.get('first_half_polarity', 0):.2f}, Second: {peri.get('second_half_polarity', 0):.2f}")
+        parts.append(f"- Turning vocabulary at center: {_tag(peri.get('turning_vocabulary_density', 0), _DENSITY_BANDS)}")
         for s in peri.get("vocabulary_shifts", [])[:3]:
-            parts.append(f"- '{s.get('word', '?')}' {s.get('direction', '?')} ({s.get('shift', 0):.5f})")
+            parts.append(f"- '{s.get('word', '?')}' {s.get('direction', '?')} ({s.get('shift', 0):.2f})")
 
     # Dyadic Structure
     dyad = results.get("dyadic_structure", {})
@@ -394,7 +435,7 @@ def _format_computational_findings(results: dict) -> str:
     if isinstance(le, dict) and le.get("mismatch_count", 0) > 0:
         parts.append(f"\n**Logos-Ergon (Speech-Deed):** {le['mismatch_count']} mismatches, {le.get('burstlike_shifts', 0)} burstlike shifts")
         for m in le.get("mismatches", [])[:2]:
-            parts.append(f"- Section {m.get('section', '?')}: speech={m.get('speech', 0):.4f} action={m.get('action', 0):.4f}")
+            parts.append(f"- Section {m.get('section', '?')}: speech {_tag(m.get('speech', 0), _DENSITY_BANDS)} vs action {_tag(m.get('action', 0), _DENSITY_BANDS)}")
 
     # Recognition Structure
     rec = results.get("recognition_structure", {})
@@ -403,12 +444,16 @@ def _format_computational_findings(results: dict) -> str:
         parts.append(f"\n**Recognition Pattern (Conceal→Test→Reveal):** {'IDEAL pattern detected' if ideal else 'non-ideal pattern'}")
         for i, label in enumerate(["First third", "Middle third", "Final third"]):
             d = rec["phase_densities"][i]
-            parts.append(f"- {label}: conceal={d.get('concealment', 0):.5f} test={d.get('testing', 0):.5f} reveal={d.get('revelation', 0):.5f}")
+            parts.append(
+                f"- {label}: conceal {_qual(d.get('concealment', 0), _DENSITY_BANDS)}, "
+                f"test {_qual(d.get('testing', 0), _DENSITY_BANDS)}, "
+                f"reveal {_qual(d.get('revelation', 0), _DENSITY_BANDS)}"
+            )
 
     # Onomastic
     ono = results.get("onomastic", {})
     if isinstance(ono, dict) and ono.get("naming_passages"):
-        parts.append(f"\n**Onomastic (Name-Meaning):** {len(ono['naming_passages'])} etymological passages, density={ono.get('naming_density', 0):.5f}")
+        parts.append(f"\n**Onomastic (Name-Meaning):** {len(ono['naming_passages'])} etymological passages, density {_tag(ono.get('naming_density', 0), _DENSITY_BANDS)}")
         for p in ono.get("naming_passages", [])[:3]:
             parts.append(f"- {p.get('excerpt', '')[:80]}...")
 
@@ -416,7 +461,7 @@ def _format_computational_findings(results: dict) -> str:
     np_ = results.get("nomos_physis", {})
     if isinstance(np_, dict) and np_.get("co_occurrence_count", 0) > 0:
         parts.append(f"\n**Nomos-Physis (Convention vs Nature):** {np_['co_occurrence_count']} co-occurrences")
-        parts.append(f"- Nomos density: {np_.get('nomos_density', 0):.5f}, Physis: {np_.get('physis_density', 0):.5f}")
+        parts.append(f"- Nomos density: {_tag(np_.get('nomos_density', 0), _DENSITY_BANDS)}, Physis: {_tag(np_.get('physis_density', 0), _DENSITY_BANDS)}")
 
     # Impossible Arithmetic
     ia = results.get("impossible_arithmetic", {})
