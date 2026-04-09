@@ -822,9 +822,19 @@ async def update_reading_state(
     kobo_state = state_result.scalar_one_or_none()
 
     if not kobo_state:
+        # Explicitly initialize numeric fields — the SQLAlchemy column
+        # defaults don't apply to the Python object until after flush,
+        # and downstream code (e.g. _sync_to_user_edition) may read them
+        # before the session commits.
         kobo_state = KoboBookState(
             user_id=user_id,
             edition_id=edition_id,
+            status="ReadyToRead",
+            times_started_reading=0,
+            current_page=0,
+            time_spent_reading=0,
+            content_source_progress=0.0,
+            spine_index=0,
         )
         db.add(kobo_state)
 
@@ -906,7 +916,7 @@ async def _sync_to_user_edition(
 
     if ue.status == "completed" and not ue.completed_at:
         ue.completed_at = _utcnow()
-    if kobo_state.times_started_reading > 0 and not ue.started_at:
+    if (kobo_state.times_started_reading or 0) > 0 and not ue.started_at:
         ue.started_at = _utcnow()
 
 
