@@ -32,3 +32,4 @@ Thumbs.db
 frontend/tests/.auth/
 frontend/test-results/
 
+.claude/
