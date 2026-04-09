@@ -291,7 +291,6 @@ async def get_sync_payload(
     stmt = (
         select(Edition)
         .join(Library, Edition.library_id == Library.id)
-        .where(Library.is_hidden == False)
         .options(
             selectinload(Edition.files),
             selectinload(Edition.work).options(
@@ -471,9 +470,9 @@ def _build_edition_entry(
     kobo_base = f"{base_url}/kobo/{auth_token}"
     work = edition.work
 
-    author_name = ""
+    author_list: list[str] = []
     if work and work.authors:
-        author_name = ", ".join(a.name for a in work.authors)
+        author_list = [a.name for a in work.authors]
 
     series_name = None
     series_number = None
@@ -500,10 +499,8 @@ def _build_edition_entry(
             },
             "BookMetadata": {
                 "Categories": [],
-                "ContributorRoles": [
-                    {"Name": author_name, "Role": "Author"}
-                ] if author_name else [],
-                "Contributors": author_name,
+                "ContributorRoles": [{"Name": name} for name in author_list],
+                "Contributors": author_list,
                 "CoverImageId": edition.uuid if edition.cover_hash else None,
                 "CrossRevisionId": edition.uuid,
                 "CurrentDisplayPrice": {"CurrencyCode": "USD", "TotalAmount": 0},
@@ -562,9 +559,9 @@ def _build_book_entry(
     """Legacy: build a Kobo entry from a Book record (used until migration 0034)."""
     kobo_base = f"{base_url}/kobo/{auth_token}"
 
-    author_name = ""
+    author_list: list[str] = []
     if book.authors:
-        author_name = ", ".join(a.name for a in book.authors)
+        author_list = [a.name for a in book.authors]
 
     series_name = None
     series_number = None
@@ -591,10 +588,8 @@ def _build_book_entry(
             },
             "BookMetadata": {
                 "Categories": [],
-                "ContributorRoles": [
-                    {"Name": author_name, "Role": "Author"}
-                ] if author_name else [],
-                "Contributors": author_name,
+                "ContributorRoles": [{"Name": name} for name in author_list],
+                "Contributors": author_list,
                 "CoverImageId": book.uuid if book.cover_hash else None,
                 "CrossRevisionId": book.uuid,
                 "CurrentDisplayPrice": {"CurrencyCode": "USD", "TotalAmount": 0},
@@ -695,45 +690,31 @@ async def update_reading_state(
     the transition period). Prefers Edition; falls back to Book.
     Updates KoboBookState and UserEdition (the canonical user reading state).
     """
-    # Try Edition first
+    # Edition and Book are the same model (alias), so a single lookup is
+    # sufficient. The previous two-branch version could store a Book PK in
+    # the edition_id FK column, corrupting subsequent lookups.
     edition_stmt = select(Edition).where(Edition.uuid == book_uuid)
     edition_result = await db.execute(edition_stmt)
     edition = edition_result.scalar_one_or_none()
 
-    book_id: Optional[int] = None
-    edition_id: Optional[int] = None
+    if edition is None:
+        logger.warning("Reading state update for unknown UUID: %s", book_uuid)
+        return None
 
-    if edition:
-        edition_id = edition.id
-    else:
-        # Fall back to legacy Book row
-        book_stmt = select(Book).where(Book.uuid == book_uuid)
-        book_result = await db.execute(book_stmt)
-        book = book_result.scalar_one_or_none()
-        if not book:
-            logger.warning("Reading state update for unknown UUID: %s", book_uuid)
-            return None
-        book_id = book.id
+    edition_id = edition.id
 
     # Upsert KoboBookState
-    if edition_id is not None:
-        state_stmt = select(KoboBookState).where(
-            KoboBookState.user_id == user_id,
-            KoboBookState.edition_id == edition_id,
-        )
-    else:
-        state_stmt = select(KoboBookState).where(
-            KoboBookState.user_id == user_id,
-            KoboBookState.edition_id == book_id,
-        )
-
+    state_stmt = select(KoboBookState).where(
+        KoboBookState.user_id == user_id,
+        KoboBookState.edition_id == edition_id,
+    )
     state_result = await db.execute(state_stmt)
     kobo_state = state_result.scalar_one_or_none()
 
     if not kobo_state:
         kobo_state = KoboBookState(
             user_id=user_id,
-            edition_id=book_id,
+            edition_id=edition_id,
         )
         db.add(kobo_state)
 

@@ -27,6 +27,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -178,12 +179,15 @@ async def kobo_book_metadata(
     # The full sync already provides complete metadata
     from sqlalchemy import select
     from sqlalchemy.orm import selectinload
-    from app.models import Book
+    from app.models import Book, Work
 
     stmt = (
         select(Book)
         .where(Book.uuid == book_uuid)
-        .options(selectinload(Book.authors), selectinload(Book.files))
+        .options(
+            selectinload(Book.work).selectinload(Work.authors),
+            selectinload(Book.files),
+        )
     )
     result = await db.execute(stmt)
     book = result.scalar_one_or_none()
@@ -191,21 +195,28 @@ async def kobo_book_metadata(
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
 
-    author_name = ", ".join(a.name for a in book.authors) if book.authors else ""
+    author_list = [a.name for a in book.authors] if book.authors else []
+    contributor_roles = [{"Name": name} for name in author_list]
 
-    return {
-        "Title": book.title,
-        "Subtitle": getattr(book, 'subtitle', '') or "",
-        "Contributors": author_name,
-        "Description": book.description or "",
-        "Language": book.language or "en",
-        "Isbn": getattr(book, 'isbn', '') or "",
-        "Publisher": {"Name": getattr(book, 'publisher', '') or ""},
-        "EntitlementId": book.uuid,
-        "CrossRevisionId": book.uuid,
-        "RevisionId": book.uuid,
-        "WorkId": book.uuid,
-    }
+    # Kobo expects a JSON array here, not a bare object (confirmed by both
+    # CWA and grimmory). Returning a single object causes the device to
+    # silently skip the download stage.
+    return [
+        {
+            "Title": book.title,
+            "Subtitle": getattr(book, 'subtitle', '') or "",
+            "Contributors": author_list,
+            "ContributorRoles": contributor_roles,
+            "Description": book.description or "",
+            "Language": book.language or "en",
+            "Isbn": getattr(book, 'isbn', '') or "",
+            "Publisher": {"Name": getattr(book, 'publisher', '') or ""},
+            "EntitlementId": book.uuid,
+            "CrossRevisionId": book.uuid,
+            "RevisionId": book.uuid,
+            "WorkId": book.uuid,
+        }
+    ]
 
 
 @kobo_device_router.get("/kobo/{auth_token}/v1/library/{book_uuid}/state")
@@ -236,17 +247,20 @@ async def kobo_get_reading_state(
     state = state_result.scalar_one_or_none()
 
     if not state:
-        # Return default state
-        return {
-            "ReadingState": {
+        # Kobo expects a JSON array at this endpoint (confirmed by CWA).
+        return [
+            {
                 "EntitlementId": book_uuid,
+                "Created": None,
+                "LastModified": None,
+                "PriorityTimestamp": None,
                 "StatusInfo": {"Status": "ReadyToRead", "TimesStartedReading": 0},
                 "Statistics": {},
                 "CurrentBookmark": {"ProgressPercent": 0},
             }
-        }
+        ]
 
-    return {"ReadingState": _build_reading_state(book_uuid, state)}
+    return [_build_reading_state(book_uuid, state)]
 
 
 @kobo_device_router.put("/kobo/{auth_token}/v1/library/{book_uuid}/state")
@@ -264,30 +278,37 @@ async def kobo_put_reading_state(
     sync_token = await _get_sync_token(auth_token, db)
     body = await request.json()
 
-    # Device sends { "ReadingStates": [ {...} ] } — take the first element
-    reading_states = body.get("ReadingStates", [])
-    state_data = reading_states[0] if reading_states else body
+    # Device sends { "ReadingStates": [ {...}, ... ] } — a PUT for a single
+    # book may still contain multiple state fragments (bookmark + status +
+    # stats). Process them all; CWA and grimmory both iterate.
+    reading_states = body.get("ReadingStates") or [body]
 
-    state = await update_reading_state(
-        book_uuid=book_uuid,
-        user_id=sync_token.user_id,
-        state_data=state_data,
-        db=db,
-    )
+    update_results = []
+    any_success = False
+    for state_data in reading_states:
+        state = await update_reading_state(
+            book_uuid=book_uuid,
+            user_id=sync_token.user_id,
+            state_data=state_data,
+            db=db,
+        )
+        if state:
+            any_success = True
+            update_results.append(
+                {
+                    "EntitlementId": book_uuid,
+                    "CurrentBookmarkResult": {"Result": "Success"},
+                    "StatisticsResult": {"Result": "Success"},
+                    "StatusInfoResult": {"Result": "Success"},
+                }
+            )
 
-    if not state:
+    if not any_success:
         raise HTTPException(status_code=404, detail="Book not found")
 
     return {
         "RequestResult": "Success",
-        "UpdateResults": [
-            {
-                "EntitlementId": book_uuid,
-                "CurrentBookmarkResult": {"Result": "Success"},
-                "StatisticsResult": {"Result": "Ignored"},
-                "StatusInfoResult": {"Result": "Success"},
-            }
-        ],
+        "UpdateResults": update_results,
     }
 
 
@@ -388,6 +409,7 @@ async def kobo_create_tag(
     if not tag_name:
         return JSONResponse({"error": "No tag name"}, status_code=400)
 
+    from sqlalchemy import select
     from app.models.shelf import Shelf
     from app.models.collection import Collection
     from app.models.progress import KoboShelfArchive
@@ -497,10 +519,10 @@ async def kobo_add_items_to_tag(
     body = await request.json()
     items = body.get("Items", [])
 
+    from app.models import Edition
     from app.models.progress import KoboShelfArchive
     from app.models.shelf import ShelfBook
     from app.models.collection import Collection, CollectionBook
-    from sqlalchemy import select
 
     result = await db.execute(
         select(KoboShelfArchive).where(
@@ -557,10 +579,10 @@ async def kobo_remove_item_from_tag(
     """Handle removing a book from a tag on the Kobo device. Removes from both Shelf and Collection."""
     sync_token = await _get_sync_token(auth_token, db)
 
+    from app.models import Edition
     from app.models.progress import KoboShelfArchive
     from app.models.shelf import ShelfBook
     from app.models.collection import Collection, CollectionBook
-    from sqlalchemy import select
 
     result = await db.execute(
         select(KoboShelfArchive).where(
