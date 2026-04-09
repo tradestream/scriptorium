@@ -566,9 +566,13 @@ def _build_download_urls(
     urls = []
     for f in candidates:
         fmt = f.format.lower()
+        # Sideloaded EPUB/KEPUB are served as "SignedNoDrm" per CWA and
+        # grimmory convention — DrmType "None" causes some Kobo firmwares
+        # to silently reject the download client-side without issuing any
+        # HTTP request to the server.
         urls.append(
             {
-                "DrmType": "None",
+                "DrmType": "SignedNoDrm",
                 "Format": fmt.upper(),
                 "Size": f.file_size,
                 "Url": f"{kobo_base}/v1/library/{edition.uuid}/download/{fmt}",
