@@ -239,17 +239,25 @@ def build_initialization_response(auth_token: str, base_url: str) -> dict:
         "wishlist_page": "https://www.kobo.com/{region}/{language}/account/wishlist",
     }
 
-    # Override ONLY the image URLs — matching Komga's minimal pattern.
-    # Komga (confirmed working) overrides only these 3 keys. All other
-    # library URLs (sync, metadata, state, tags) are routed via the
-    # api_endpoint base URL in Kobo eReader.conf, NOT via Resource
-    # overrides. Over-overriding Resources can confuse Nickel into
-    # discarding entitlements.
+    # Override all library-operation URLs. The v3.0.24 config that
+    # produced 32 content rows on the device used the FULL override set.
+    # Stripping to Komga's minimal set (v3.0.30) broke entitlement
+    # processing — zero rows. Komga's minimal approach only works because
+    # Komga proxies unhandled requests to the real Kobo store; we don't.
+    resources["library_sync"] = f"{kobo_base}/v1/library/sync"
+    resources["library_items"] = f"{kobo_base}/v1/library/{{ItemId}}"
+    resources["library_metadata"] = f"{kobo_base}/v1/library/{{Ids}}/metadata"
+    resources["library_book"] = f"{kobo_base}/v1/library/{{LibraryItemId}}"
+    resources["reading_state"] = f"{kobo_base}/v1/library/{{ItemId}}/state"
     resources["image_host"] = base_url
     resources["image_url_quality_template"] = (
         f"{base_url}/covers/{{ImageId}}/{{Width}}/{{Height}}/false/image.jpg"
     )
     resources["image_url_template"] = f"{base_url}/covers/{{ImageId}}/image.jpg"
+    resources["tags"] = f"{kobo_base}/v1/library/tags"
+    resources["tag_items"] = f"{kobo_base}/v1/library/tags/{{TagId}}/Items"
+    resources["delete_tag"] = f"{kobo_base}/v1/library/tags/{{TagId}}"
+    resources["delete_tag_items"] = f"{kobo_base}/v1/library/tags/{{TagId}}/items/delete"
 
     return {"Resources": resources}
 
@@ -633,6 +641,8 @@ def _build_edition_entry(
                 "Description": (work.description if work else None) or "",
                 "DownloadUrls": _build_download_urls(edition, edition.files or [], kobo_base),
                 "EntitlementId": edition.uuid,
+                "ExternalIds": [],
+                "Genre": "00000000-0000-0000-0000-000000000001",
                 "IsEligibleForKoboLove": False,
                 "IsInternetArchive": False,
                 "IsPreOrder": False,
