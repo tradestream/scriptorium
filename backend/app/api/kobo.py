@@ -170,24 +170,30 @@ async def kobo_library_sync(
 async def kobo_book_metadata(
     auth_token: str,
     book_uuid: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """Get metadata for a specific book.
 
-    The device may call this for individual book details after the sync
-    endpoint provides the overview.
+    The device calls this endpoint when the user taps a book to download
+    it, or when it needs to refresh metadata for a synced entitlement.
+    CWA returns the FULL BookMetadata here including DownloadUrls — the
+    device uses this response to get the actual download URL. A minimal
+    response without DownloadUrls causes the download to silently fail.
     """
     sync_token = await _get_sync_token(auth_token, db)
 
-    # For now, return a minimal metadata response
-    # The full sync already provides complete metadata
     from sqlalchemy.orm import selectinload
     from app.models import Book, Work
+    from app.services.kobo_sync import (
+        _build_edition_entry,
+        _get_kobo_compatible_file_edition,
+    )
 
-    # Accept UUID or numeric id — older releases served numeric ids as
-    # EntitlementIds and devices still have them cached.
+    # Accept UUID or numeric id
     base = select(Book).options(
         selectinload(Book.work).selectinload(Work.authors),
+        selectinload(Book.work).selectinload(Work.series),
         selectinload(Book.files),
     )
     stmt = base.where(Book.uuid == book_uuid)
@@ -201,28 +207,29 @@ async def kobo_book_metadata(
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
 
-    author_list = [a.name for a in book.authors] if book.authors else []
-    contributor_roles = [{"Name": name} for name in author_list]
+    epub_file = _get_kobo_compatible_file_edition(book.files)
+    if not epub_file:
+        raise HTTPException(status_code=404, detail="No compatible file")
 
-    # Kobo expects a JSON array here, not a bare object (confirmed by both
-    # CWA and grimmory). Returning a single object causes the device to
-    # silently skip the download stage.
-    return [
-        {
-            "Title": book.title,
-            "Subtitle": getattr(book, 'subtitle', '') or "",
-            "Contributors": author_list,
-            "ContributorRoles": contributor_roles,
-            "Description": book.description or "",
-            "Language": book.language or "en",
-            "Isbn": getattr(book, 'isbn', '') or "",
-            "Publisher": {"Name": getattr(book, 'publisher', '') or ""},
-            "EntitlementId": book_uuid,
-            "CrossRevisionId": book_uuid,
-            "RevisionId": book_uuid,
-            "WorkId": book_uuid,
-        }
-    ]
+    base_url = _get_base_url(request)
+    entry = _build_edition_entry(
+        edition=book,
+        edition_file=epub_file,
+        state=None,
+        auth_token=sync_token.token,
+        base_url=base_url,
+        is_new=False,
+    )
+
+    # Extract BookMetadata from the entitlement envelope and return as
+    # a JSON array (CWA convention — device expects a list).
+    envelope = entry.get("ChangedEntitlement") or entry.get("NewEntitlement", {})
+    metadata = envelope.get("BookMetadata", {})
+
+    return JSONResponse(
+        content=[metadata],
+        media_type="application/json; charset=utf-8",
+    )
 
 
 @kobo_device_router.get("/kobo/{auth_token}/v1/library/{book_uuid}/state")
