@@ -155,7 +155,10 @@ async def kobo_library_sync(
     }
     sync_token_b64 = _b64.b64encode(_json.dumps(sync_state).encode()).decode()
 
-    response = JSONResponse(content=items)
+    response = JSONResponse(
+        content=items,
+        media_type="application/json; charset=utf-8",
+    )
     response.headers["x-kobo-sync"] = "continue" if has_more else ""
     response.headers["x-kobo-synctoken"] = sync_token_b64
     response.headers["x-kobo-apitoken"] = "e30="

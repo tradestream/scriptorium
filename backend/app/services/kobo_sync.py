@@ -621,12 +621,9 @@ def _build_edition_entry(
                 "Status": "Active",
             },
             "BookMetadata": {
-                "Categories": [],
+                "Categories": ["00000000-0000-0000-0000-000000000001"],
                 "ContributorRoles": [{"Name": name} for name in author_list],
                 "Contributors": author_list,
-                # Cover cache-busting: include cover_hash so cover updates
-                # propagate to the device instead of being masked by a
-                # stable uuid-only id.
                 "CoverImageId": (
                     f"{edition.uuid}-{edition.cover_hash}"
                     if edition.cover_hash
@@ -638,7 +635,6 @@ def _build_edition_entry(
                 "Description": (work.description if work else None) or "",
                 "DownloadUrls": _build_download_urls(edition, edition.files or [], kobo_base),
                 "EntitlementId": edition.uuid,
-                "Genre": "00000000-0000-0000-0000-000000000001",
                 "IsEligibleForKoboLove": False,
                 "IsInternetArchive": False,
                 "IsPreOrder": False,
@@ -707,7 +703,7 @@ def _build_book_entry(
                 "Status": "Active",
             },
             "BookMetadata": {
-                "Categories": [],
+                "Categories": ["00000000-0000-0000-0000-000000000001"],
                 "ContributorRoles": [{"Name": name} for name in author_list],
                 "Contributors": author_list,
                 "CoverImageId": (
@@ -719,7 +715,6 @@ def _build_book_entry(
                 "Description": book.description or "",
                 "DownloadUrls": _build_download_urls(book, book.files or [], kobo_base),
                 "EntitlementId": book.uuid,
-                "Genre": "00000000-0000-0000-0000-000000000001",
                 "IsEligibleForKoboLove": False,
                 "IsInternetArchive": False,
                 "IsPreOrder": False,
