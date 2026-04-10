@@ -209,6 +209,10 @@ async def kobo_library_sync(
     response.headers["x-kobo-sync"] = "continue" if has_more else ""
     response.headers["x-kobo-synctoken"] = sync_token_b64
     response.headers["x-kobo-apitoken"] = "e30="
+    # Nickel's LibraryParser::parseHeaders reads these two headers.
+    # Missing headers may cause the parser to skip processing entitlements.
+    response.headers["x-kobo-recent-reads"] = ""
+    response.headers["x-kobo-sync-mode"] = ""
 
     return response
 
