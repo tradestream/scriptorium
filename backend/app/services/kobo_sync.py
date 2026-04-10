@@ -566,13 +566,12 @@ def _build_download_urls(
     urls = []
     for f in candidates:
         fmt = f.format.lower()
-        # Sideloaded EPUB/KEPUB are served as "SignedNoDrm" per CWA and
-        # grimmory convention — DrmType "None" causes some Kobo firmwares
-        # to silently reject the download client-side without issuing any
-        # HTTP request to the server.
+        # CWA does NOT include DrmType in DownloadUrls — Nickel firmware
+        # chokes on the unexpected field and stores a boolean in the
+        # DownloadUrl sqlite column instead of the actual URL, causing
+        # downloads to silently fail with zero server-side traffic.
         urls.append(
             {
-                "DrmType": "SignedNoDrm",
                 "Format": fmt.upper(),
                 "Size": f.file_size,
                 "Url": f"{kobo_base}/v1/library/{edition.uuid}/download/{fmt}",
@@ -635,11 +634,10 @@ def _build_edition_entry(
                 ),
                 "CrossRevisionId": edition.uuid,
                 "CurrentDisplayPrice": {"CurrencyCode": "USD", "TotalAmount": 0},
+                "CurrentLoveDisplayPrice": {"TotalAmount": 0},
                 "Description": (work.description if work else None) or "",
                 "DownloadUrls": _build_download_urls(edition, edition.files or [], kobo_base),
                 "EntitlementId": edition.uuid,
-                "ExternalIds": [{"Id": edition.isbn, "Source": "ISBN"}] if edition.isbn else [],
-                "Isbn": edition.isbn or "",
                 "Genre": "00000000-0000-0000-0000-000000000001",
                 "IsEligibleForKoboLove": False,
                 "IsInternetArchive": False,
@@ -648,10 +646,9 @@ def _build_edition_entry(
                 "Language": edition.language or (work.language if work else None) or "en",
                 "PhoneticPronunciations": {},
                 "PublicationDate": _kobo_timestamp(edition.published_date),
-                "Publisher": {"Name": edition.publisher or ""},
+                "Publisher": {"Imprint": "", "Name": edition.publisher or ""},
                 "RevisionId": edition.uuid,
                 "Title": work.title if work else edition.uuid,
-                "Subtitle": work.subtitle if work and hasattr(work, 'subtitle') and work.subtitle else "",
                 "WorkId": edition.uuid,
             },
         }
@@ -718,11 +715,10 @@ def _build_book_entry(
                 ),
                 "CrossRevisionId": book.uuid,
                 "CurrentDisplayPrice": {"CurrencyCode": "USD", "TotalAmount": 0},
+                "CurrentLoveDisplayPrice": {"TotalAmount": 0},
                 "Description": book.description or "",
                 "DownloadUrls": _build_download_urls(book, book.files or [], kobo_base),
                 "EntitlementId": book.uuid,
-                "ExternalIds": [{"Id": book.isbn, "Source": "ISBN"}] if book.isbn else [],
-                "Isbn": book.isbn or "",
                 "Genre": "00000000-0000-0000-0000-000000000001",
                 "IsEligibleForKoboLove": False,
                 "IsInternetArchive": False,
@@ -731,10 +727,9 @@ def _build_book_entry(
                 "Language": book.language or "en",
                 "PhoneticPronunciations": {},
                 "PublicationDate": _kobo_timestamp(book.published_date),
-                "Publisher": {"Name": ""},
+                "Publisher": {"Imprint": "", "Name": ""},
                 "RevisionId": book.uuid,
                 "Title": book.title,
-                "Subtitle": getattr(book, 'subtitle', '') or "",
                 "WorkId": book.uuid,
             },
         }
