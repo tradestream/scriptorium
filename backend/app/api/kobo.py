@@ -780,6 +780,74 @@ async def _sync_content_progress(
 
 
 # ---------------------------------------------------------------------------
+# library_items — bare /library/{uuid} endpoint
+# ---------------------------------------------------------------------------
+# The initialization Resources tell the device to call
+#   library_items = .../v1/library/{ItemId}
+# for individual book details. Without this, the request falls through to
+# the catch-all and gets {}, causing Nickel to store the book with no
+# DownloadUrl. This endpoint returns the full entitlement so Nickel can
+# extract the DownloadUrl and initiate the download.
+
+@kobo_device_router.get("/kobo/{auth_token}/v1/library/{book_uuid}")
+async def kobo_library_item(
+    auth_token: str,
+    book_uuid: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return full entitlement for a single book.
+
+    Called by Nickel via the library_items Resource URL. Must include
+    DownloadUrls so the device can initiate wireless downloads.
+    """
+    sync_token = await _get_sync_token(auth_token, db)
+
+    from sqlalchemy.orm import selectinload
+    from app.models import Book, Work
+    from app.services.kobo_sync import (
+        _build_edition_entry,
+        _get_kobo_compatible_file_edition,
+    )
+
+    base = select(Book).options(
+        selectinload(Book.work).selectinload(Work.authors),
+        selectinload(Book.work).selectinload(Work.series),
+        selectinload(Book.files),
+    )
+    stmt = base.where(Book.uuid == book_uuid)
+    result = await db.execute(stmt)
+    book = result.scalar_one_or_none()
+    if book is None and book_uuid.isdigit():
+        stmt = base.where(Book.id == int(book_uuid))
+        result = await db.execute(stmt)
+        book = result.scalar_one_or_none()
+
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+
+    epub_file = _get_kobo_compatible_file_edition(book.files)
+    if not epub_file:
+        raise HTTPException(status_code=404, detail="No compatible file")
+
+    base_url = _get_base_url(request)
+    entry = _build_edition_entry(
+        edition=book,
+        edition_file=epub_file,
+        state=None,
+        auth_token=sync_token.token,
+        base_url=base_url,
+        is_new=False,
+    )
+
+    # Return the full entitlement envelope
+    return JSONResponse(
+        content=entry,
+        media_type="application/json; charset=utf-8",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Catch-all for unhandled Kobo endpoints
 # ---------------------------------------------------------------------------
 
