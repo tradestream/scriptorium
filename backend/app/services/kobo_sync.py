@@ -239,10 +239,17 @@ def build_initialization_response(auth_token: str, base_url: str) -> dict:
         "wishlist_page": "https://www.kobo.com/{region}/{language}/account/wishlist",
     }
 
-    # Override with our local URLs
+    # Override with our local URLs.
+    # Every URL the device uses for library operations MUST point here,
+    # not at storeapi.kobo.com. If any are missed, the device silently
+    # calls the Kobo store, gets nothing, and discards the entitlement.
     resources["library_sync"] = f"{kobo_base}/v1/library/sync"
     resources["library_items"] = f"{kobo_base}/v1/library/{{ItemId}}"
+    resources["library_metadata"] = f"{kobo_base}/v1/library/{{Ids}}/metadata"
+    resources["library_book"] = f"{kobo_base}/v1/library/{{LibraryItemId}}"
     resources["reading_state"] = f"{kobo_base}/v1/library/{{ItemId}}/state"
+    resources["get_download_keys"] = f"{kobo_base}/v1/library/downloadkeys"
+    resources["get_download_link"] = f"{kobo_base}/v1/library/downloadlink"
     resources["image_host"] = base_url
     resources["image_url_quality_template"] = (
         f"{base_url}/covers/{{ImageId}}/{{Width}}/{{Height}}/false/image.jpg"
