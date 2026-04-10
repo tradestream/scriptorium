@@ -239,26 +239,17 @@ def build_initialization_response(auth_token: str, base_url: str) -> dict:
         "wishlist_page": "https://www.kobo.com/{region}/{language}/account/wishlist",
     }
 
-    # Override with our local URLs.
-    # Every URL the device uses for library operations MUST point here,
-    # not at storeapi.kobo.com. If any are missed, the device silently
-    # calls the Kobo store, gets nothing, and discards the entitlement.
-    resources["library_sync"] = f"{kobo_base}/v1/library/sync"
-    resources["library_items"] = f"{kobo_base}/v1/library/{{ItemId}}"
-    resources["library_metadata"] = f"{kobo_base}/v1/library/{{Ids}}/metadata"
-    resources["library_book"] = f"{kobo_base}/v1/library/{{LibraryItemId}}"
-    resources["reading_state"] = f"{kobo_base}/v1/library/{{ItemId}}/state"
-    resources["get_download_keys"] = f"{kobo_base}/v1/library/downloadkeys"
-    resources["get_download_link"] = f"{kobo_base}/v1/library/downloadlink"
+    # Override ONLY the image URLs — matching Komga's minimal pattern.
+    # Komga (confirmed working) overrides only these 3 keys. All other
+    # library URLs (sync, metadata, state, tags) are routed via the
+    # api_endpoint base URL in Kobo eReader.conf, NOT via Resource
+    # overrides. Over-overriding Resources can confuse Nickel into
+    # discarding entitlements.
     resources["image_host"] = base_url
     resources["image_url_quality_template"] = (
         f"{base_url}/covers/{{ImageId}}/{{Width}}/{{Height}}/false/image.jpg"
     )
     resources["image_url_template"] = f"{base_url}/covers/{{ImageId}}/image.jpg"
-    resources["tags"] = f"{kobo_base}/v1/library/tags"
-    resources["tag_items"] = f"{kobo_base}/v1/library/tags/{{TagId}}/Items"
-    resources["delete_tag"] = f"{kobo_base}/v1/library/tags/{{TagId}}"
-    resources["delete_tag_items"] = f"{kobo_base}/v1/library/tags/{{TagId}}/items/delete"
 
     return {"Resources": resources}
 
