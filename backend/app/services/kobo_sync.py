@@ -564,12 +564,12 @@ def _build_download_urls(
     urls = []
     for f in candidates:
         fmt = f.format.lower()
-        # CWA does NOT include DrmType in DownloadUrls — Nickel firmware
-        # chokes on the unexpected field and stores a boolean in the
-        # DownloadUrl sqlite column instead of the actual URL, causing
-        # downloads to silently fail with zero server-side traffic.
+        # Komga (confirmed working) includes DrmType: "None". Nickel's
+        # firmware has a ContentUrl.setDrmType() method that reads this
+        # field. Omitting it may cause Nickel to reject the entitlement.
         urls.append(
             {
+                "DrmType": "None",
                 "Format": fmt.upper(),
                 "Size": f.file_size,
                 "Url": f"{kobo_base}/v1/library/{edition.uuid}/download/{fmt}",
