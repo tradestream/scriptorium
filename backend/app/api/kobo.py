@@ -84,6 +84,53 @@ def _get_base_url(request: Request) -> str:
     return f"{scheme}://{host}"
 
 
+# ---------------------------------------------------------------------------
+# Cover images — served at the image_url_quality_template path
+# ---------------------------------------------------------------------------
+# The initialization tells the device to fetch covers at:
+#   /covers/{ImageId}/{Width}/{Height}/{grayscale}/image.jpg
+# ImageId is "{uuid}-{cover_hash}" (for cache busting). We strip the
+# hash suffix, look up the cover file by UUID, and serve it.
+# WITHOUT this endpoint, every cover request 404s and Nickel may roll
+# back the entire entitlement, preventing books from appearing.
+
+@kobo_device_router.get("/covers/{image_id}/{width}/{height}/{grayscale}/image.jpg")
+@kobo_device_router.get("/covers/{image_id}/image.jpg")
+async def kobo_cover_image(
+    image_id: str,
+    width: int = 0,
+    height: int = 0,
+    grayscale: str = "false",
+    db: AsyncSession = Depends(get_db),
+):
+    """Serve a book cover image to the Kobo device."""
+    from app.config import get_settings
+    from app.models import Edition
+    settings = get_settings()
+
+    # Strip the -hash suffix to get the UUID
+    uuid = image_id.split("-", 5)
+    if len(uuid) >= 5:
+        # UUID is first 5 dash-separated segments: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+        edition_uuid = "-".join(uuid[:5])
+    else:
+        edition_uuid = image_id
+
+    stmt = select(Edition).where(Edition.uuid == edition_uuid)
+    result = await db.execute(stmt)
+    edition = result.scalar_one_or_none()
+
+    if not edition or not edition.cover_hash or not edition.cover_format:
+        raise HTTPException(status_code=404, detail="No cover")
+
+    cover_path = Path(settings.COVERS_PATH) / f"{edition.uuid}.{edition.cover_format}"
+    if not cover_path.exists():
+        raise HTTPException(status_code=404, detail="Cover file not found")
+
+    media_type = "image/jpeg" if edition.cover_format in ("jpg", "jpeg") else f"image/{edition.cover_format}"
+    return FileResponse(str(cover_path), media_type=media_type)
+
+
 @kobo_device_router.post("/kobo/{auth_token}/v1/auth/device")
 async def kobo_auth_device(
     auth_token: str,
