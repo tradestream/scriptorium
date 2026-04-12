@@ -559,29 +559,46 @@ def _build_download_urls(
     edition_files: list[EditionFile],
     kobo_base: str,
 ) -> list[dict]:
-    """Build the DownloadUrls list, preferring KEPUB exclusively when present.
+    """Build the DownloadUrls list for the Kobo device.
 
-    Matches CWA cps/kobo.py L49 + L584-603:
-      KOBO_FORMATS = {"KEPUB": ["KEPUB"], "EPUB": ["EPUB3", "EPUB"]}
-    For each source file, emit one DownloadUrls entry per advertised
-    kobo_format. EPUB sources emit TWO entries (EPUB3 and EPUB) pointing
-    at the same /download/epub URL — Nickel picks one based on firmware
-    capability. Without the EPUB3 advertisement some firmware versions
-    decline to auto-download the entitlement.
+    Format advertisement strategy (matches Komga KoboController.kt L753-760):
+      - If kepubify is available OR source is already KEPUB: advertise KEPUB
+        (device uses Kobo WebKit with chapter tracking, reading stats)
+      - If kepubify is NOT available and source is EPUB: advertise EPUB3 + EPUB
+        (CWA fallback — device uses Adobe Digital Editions WebKit)
+      - PDF sources: advertise PDF
 
-    DrmType is intentionally omitted (CWA kobo.py L601 comments it as
-    "Not required"). Including `DrmType: "None"` can cause Nickel's
-    ContentUrl.setDrmType() to reject the entitlement.
+    The download URL always uses the SOURCE format (/download/epub) — the
+    server converts to KEPUB transparently in get_download_path() via
+    ensure_kepub(). This matches Komga's pattern of keeping the endpoint
+    stable while converting on-the-fly.
+
+    DrmType is intentionally omitted (CWA kobo.py L601: "Not required").
     """
-    kobo_formats = {"kepub": ["KEPUB"], "epub": ["EPUB3", "EPUB"]}
+    from app.services.kepub import _find_kepubify
+
+    kepubify_available = _find_kepubify() is not None
     kepubs = [f for f in edition_files if f.format.lower() == "kepub"]
     candidates = kepubs if kepubs else [
-        f for f in edition_files if f.format.lower() == "epub"
+        f for f in edition_files if f.format.lower() in ("epub", "pdf")
     ]
     urls = []
     for f in candidates:
         fmt_key = f.format.lower()
-        for kobo_format in kobo_formats.get(fmt_key, []):
+        if fmt_key == "kepub":
+            formats_to_advertise = ["KEPUB"]
+        elif fmt_key == "epub" and kepubify_available:
+            # Komga pattern: advertise KEPUB when conversion is possible
+            formats_to_advertise = ["KEPUB"]
+        elif fmt_key == "epub":
+            # CWA fallback: no kepubify, serve raw EPUB
+            formats_to_advertise = ["EPUB3", "EPUB"]
+        elif fmt_key == "pdf":
+            formats_to_advertise = ["PDF"]
+        else:
+            continue
+
+        for kobo_format in formats_to_advertise:
             urls.append(
                 {
                     "Format": kobo_format,

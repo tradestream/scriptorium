@@ -12,6 +12,7 @@ Falls back to a simple file copy with .kepub.epub extension if not installed.
 import asyncio
 import hashlib
 import logging
+import os
 import shutil
 from pathlib import Path
 from typing import Optional
@@ -65,9 +66,20 @@ async def convert_to_kepub(epub_path: str) -> Optional[str]:
         logger.warning("EPUB not found for KEPUB conversion: %s", resolved)
         return None
 
-    # Output goes next to the original with .kepub.epub extension
+    # Output directory: prefer next to source, fall back to cache dir
+    # (library mounts may be read-only)
     kepub_name = _safe_kepub_name(source)
-    kepub_path = source.parent / kepub_name
+    output_dir = source.parent
+    kepub_path = output_dir / kepub_name
+
+    # Check if source dir is writable; if not, use cache dir
+    if not os.access(str(output_dir), os.W_OK):
+        settings = get_settings()
+        cache_dir = Path(settings.COVERS_PATH).parent / "kepub_cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        output_dir = cache_dir
+        kepub_path = output_dir / kepub_name
+        logger.debug("Library dir not writable, using cache: %s", output_dir)
 
     # If already converted, return existing
     if kepub_path.exists():
@@ -77,7 +89,7 @@ async def convert_to_kepub(epub_path: str) -> Optional[str]:
     if kepubify:
         try:
             proc = await asyncio.create_subprocess_exec(
-                kepubify, str(source), "-o", str(source.parent),
+                kepubify, str(source), "-o", str(output_dir),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
