@@ -561,29 +561,35 @@ def _build_download_urls(
 ) -> list[dict]:
     """Build the DownloadUrls list, preferring KEPUB exclusively when present.
 
-    CWA cps/kobo.py L584-586: if any KEPUB is available, emit ONLY kepub
-    entries; otherwise fall back to other compatible formats. Mixing a
-    KEPUB file with an EPUB label confuses the device.
+    Matches CWA cps/kobo.py L49 + L584-603:
+      KOBO_FORMATS = {"KEPUB": ["KEPUB"], "EPUB": ["EPUB3", "EPUB"]}
+    For each source file, emit one DownloadUrls entry per advertised
+    kobo_format. EPUB sources emit TWO entries (EPUB3 and EPUB) pointing
+    at the same /download/epub URL — Nickel picks one based on firmware
+    capability. Without the EPUB3 advertisement some firmware versions
+    decline to auto-download the entitlement.
+
+    DrmType is intentionally omitted (CWA kobo.py L601 comments it as
+    "Not required"). Including `DrmType: "None"` can cause Nickel's
+    ContentUrl.setDrmType() to reject the entitlement.
     """
+    kobo_formats = {"kepub": ["KEPUB"], "epub": ["EPUB3", "EPUB"]}
     kepubs = [f for f in edition_files if f.format.lower() == "kepub"]
     candidates = kepubs if kepubs else [
-        f for f in edition_files if f.format.lower() in ("epub", "pdf")
+        f for f in edition_files if f.format.lower() == "epub"
     ]
     urls = []
     for f in candidates:
-        fmt = f.format.lower()
-        # Komga (confirmed working) includes DrmType: "None". Nickel's
-        # firmware has a ContentUrl.setDrmType() method that reads this
-        # field. Omitting it may cause Nickel to reject the entitlement.
-        urls.append(
-            {
-                "DrmType": "None",
-                "Format": fmt.upper(),
-                "Size": f.file_size,
-                "Url": f"{kobo_base}/v1/library/{edition.uuid}/download/{fmt}",
-                "Platform": "Generic",
-            }
-        )
+        fmt_key = f.format.lower()
+        for kobo_format in kobo_formats.get(fmt_key, []):
+            urls.append(
+                {
+                    "Format": kobo_format,
+                    "Size": f.file_size,
+                    "Url": f"{kobo_base}/v1/library/{edition.uuid}/download/{fmt_key}",
+                    "Platform": "Generic",
+                }
+            )
     return urls
 
 
@@ -614,7 +620,12 @@ def _build_edition_entry(
         envelope_key: {
             "BookEntitlement": {
                 "Accessibility": "Full",
-                "ActivePeriod": {"From": _kobo_timestamp(edition.created_at)},
+                # ActivePeriod.From must be <= "now" for Nickel to treat the
+                # entitlement as currently active. CWA cps/kobo.py L504 uses
+                # datetime.now(timezone.utc); using edition.created_at can
+                # cause devices with clock drift to interpret old entitlements
+                # as expired.
+                "ActivePeriod": {"From": _kobo_timestamp(_utcnow())},
                 "Created": _kobo_timestamp(edition.created_at),
                 "CrossRevisionId": edition.uuid,
                 "Id": edition.uuid,
@@ -666,8 +677,23 @@ def _build_edition_entry(
             "Id": series_name,
         }
 
-    if state:
-        entry[envelope_key]["ReadingState"] = _build_reading_state(edition.uuid, state)
+    # Komga KoboController.kt L361-368 + comment at L397:
+    #   "Kobo does not process ChangedEntitlement even if it contains a
+    #    ReadingState"
+    # Pattern: ALWAYS include a ReadingState on NewEntitlement, using an
+    # empty "ReadyToRead" default when the book has no stored state. Kobo
+    # firmware appears to expect every NewEntitlement to carry a reading
+    # state; omitting it can cause Nickel to silently discard the entry.
+    # For ChangedEntitlement, Kobo ignores the embedded ReadingState — so
+    # reading-state updates for already-known books should be emitted as
+    # separate ChangedReadingState envelopes (TODO: implement that path).
+    if is_new:
+        if state:
+            entry[envelope_key]["ReadingState"] = _build_reading_state(edition.uuid, state)
+        else:
+            entry[envelope_key]["ReadingState"] = _build_empty_reading_state(
+                edition.uuid, edition.created_at
+            )
 
     return entry
 
@@ -750,6 +776,39 @@ def _build_book_entry(
         entry[envelope_key]["ReadingState"] = _build_reading_state(book.uuid, state)
 
     return entry
+
+
+def _build_empty_reading_state(entity_uuid: str, created_at: datetime) -> dict:
+    """Build a default empty ReadingState for a book with no recorded progress.
+
+    Matches Komga's getEmptyReadProgressForBook() pattern — ReadyToRead
+    status at 0%. Used when emitting NewEntitlement for a book the user has
+    never opened. Without this, Nickel may reject the entitlement as
+    malformed (Komga found this empirically; see KoboController.kt L365).
+    """
+    ts = _kobo_timestamp(created_at)
+    return {
+        "EntitlementId": entity_uuid,
+        "Created": ts,
+        "LastModified": ts,
+        "PriorityTimestamp": ts,
+        "StatusInfo": {
+            "LastModified": ts,
+            "Status": "ReadyToRead",
+            "TimesStartedReading": 0,
+        },
+        "Statistics": {
+            "LastModified": ts,
+            "SpentReadingMinutes": 0,
+            "RemainingTimeMinutes": 0,
+        },
+        "CurrentBookmark": {
+            "LastModified": ts,
+            "ContentSourceProgressPercent": 0,
+            "Location": {"Source": "", "Type": "KoboSpan", "Value": ""},
+            "ProgressPercent": 0,
+        },
+    }
 
 
 def _build_reading_state(entity_uuid: str, state: KoboBookState) -> dict:
@@ -1031,7 +1090,10 @@ async def get_download_path(
         )
     )
     result = await db.execute(stmt)
-    edition_file = result.scalar_one_or_none()
+    # Use scalars().first() instead of scalar_one_or_none() because some
+    # editions have multiple files with the same format (e.g. duplicate
+    # imports). Taking the first match is safe — all point to the same book.
+    edition_file = result.scalars().first()
 
     if edition_file:
         from app.config import resolve_path
