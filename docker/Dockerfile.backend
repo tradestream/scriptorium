@@ -1,9 +1,19 @@
 FROM python:3.12-slim
 
-# Install Calibre CLI tools for ebook conversion/metadata
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
+
+# Install kepubify for EPUB→KEPUB conversion (Kobo enhanced format)
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "amd64" ]; then KEPUB_ARCH="64bit"; \
+    elif [ "$ARCH" = "arm64" ]; then KEPUB_ARCH="arm64"; \
+    else KEPUB_ARCH="64bit"; fi && \
+    curl -fsSL "https://github.com/pgaskin/kepubify/releases/latest/download/kepubify-linux-${KEPUB_ARCH}" \
+      -o /usr/local/bin/kepubify && \
+    chmod +x /usr/local/bin/kepubify && \
+    kepubify --version
 
 WORKDIR /app
 

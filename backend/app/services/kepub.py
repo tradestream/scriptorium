@@ -38,6 +38,22 @@ def _find_kepubify() -> Optional[str]:
     return _kepubify_path
 
 
+def _safe_kepub_name(source: Path) -> str:
+    """Generate a KEPUB filename safe for ext4's 255-byte limit.
+
+    kepubify creates temp files like `.kepubify.{name}_converted.kepub.epub.{random}`
+    which adds ~40 chars of overhead. Anna's Archive filenames can be 230+ chars,
+    blowing past the limit. Truncate the stem to 200 chars to stay safe.
+    """
+    stem = source.stem
+    if len(stem.encode("utf-8")) > 200:
+        # Truncate to 200 bytes, respecting UTF-8 boundaries
+        encoded = stem.encode("utf-8")[:200]
+        stem = encoded.decode("utf-8", errors="ignore").rstrip()
+        logger.info("Truncated long filename for kepubify: %s... (%d bytes)", stem[:50], len(encoded))
+    return stem + ".kepub.epub"
+
+
 async def convert_to_kepub(epub_path: str) -> Optional[str]:
     """Convert an EPUB file to KEPUB format.
 
@@ -50,7 +66,7 @@ async def convert_to_kepub(epub_path: str) -> Optional[str]:
         return None
 
     # Output goes next to the original with .kepub.epub extension
-    kepub_name = source.stem + ".kepub.epub"
+    kepub_name = _safe_kepub_name(source)
     kepub_path = source.parent / kepub_name
 
     # If already converted, return existing

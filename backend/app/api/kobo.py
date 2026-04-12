@@ -121,8 +121,10 @@ async def kobo_cover_image(
     result = await db.execute(stmt)
     edition = result.scalar_one_or_none()
 
-    if not edition or not edition.cover_hash or not edition.cover_format:
+    if not edition or not edition.cover_format:
         raise HTTPException(status_code=404, detail="No cover")
+    # cover_hash is only used for cache-busting in the CoverImageId URL;
+    # it's not required to serve the actual cover file.
 
     cover_path = Path(settings.COVERS_PATH) / f"{edition.uuid}.{edition.cover_format}"
     if not cover_path.exists():
