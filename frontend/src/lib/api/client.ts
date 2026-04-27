@@ -1207,6 +1207,12 @@ export async function getBookProgress(bookId: number | string): Promise<ReadProg
   return fetchAPI(`/books/${bookId}/progress`);
 }
 
+export async function resetFurthestPosition(
+  bookId: number | string,
+): Promise<{ ok: boolean; furthest_pct: number }> {
+  return fetchAPI(`/books/${bookId}/progress/reset-furthest`, { method: 'POST' });
+}
+
 export async function sendBookToDevice(
   bookId: number | string,
   recipient: string,

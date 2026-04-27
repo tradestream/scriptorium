@@ -31,6 +31,16 @@
   let initialCfi = $state<string>('');
   let progressLoaded = $state(false);
 
+  // Sync-to-furthest prompt state. When the server reports a furthest_pct
+  // meaningfully ahead of the current cursor (e.g. another device read
+  // further into the book), we surface a one-tap "jump to furthest"
+  // banner. Threshold is intentionally large to avoid noise from rounding.
+  let furthestCfi = $state<string | undefined>(undefined);
+  let furthestPct = $state<number>(0);
+  let currentPct = $state<number>(0);
+  let dismissedFurthestPrompt = $state(false);
+  const FURTHEST_PROMPT_THRESHOLD_PCT = 2;
+
   // Session reading-time timer. We only count time spent with the tab visible
   // (visibilitychange suspends the count) so leaving a tab open doesn't
   // inflate ReadingState.total_time_seconds. The delta accumulates between
@@ -78,11 +88,23 @@
       if (saved && (saved as any).cfi) {
         initialCfi = (saved as any).cfi;
       }
+      if (saved) {
+        currentPct = (saved as any).percentage ?? 0;
+        furthestPct = (saved as any).furthest_percentage ?? 0;
+        furthestCfi = (saved as any).furthest_cfi ?? undefined;
+      }
     } catch {
       // non-critical
     }
     progressLoaded = true;
   });
+
+  let showFurthestPrompt = $derived(
+    !dismissedFurthestPrompt
+    && furthestCfi
+    && furthestCfi !== initialCfi
+    && furthestPct - currentPct >= FURTHEST_PROMPT_THRESHOLD_PCT
+  );
 
   onDestroy(() => {
     if (typeof document !== 'undefined') {
@@ -132,6 +154,20 @@
   function handleLocationChange(location: string) {
     currentLocation = location;
   }
+
+  // Sync-to-furthest action: replace initialCfi with the furthest cursor
+  // and bump readerKey so EpubReader remounts and displays from there.
+  let readerKey = $state(0);
+  function jumpToFurthest() {
+    if (!furthestCfi) return;
+    initialCfi = furthestCfi;
+    currentPct = furthestPct;
+    dismissedFurthestPrompt = true;
+    readerKey += 1;
+  }
+  function dismissFurthestPrompt() {
+    dismissedFurthestPrompt = true;
+  }
 </script>
 
 {#if !book}
@@ -154,17 +190,42 @@
     <div class="relative flex-1 overflow-hidden">
       {#if format === 'epub'}
         {#if progressLoaded}
-          <EpubReader
-            bookId={book.id}
-            fileId={file.id}
-            initialCfi={initialCfi}
-            onClose={handleClose}
-            onProgress={handleProgress}
-            onLocationChange={handleLocationChange}
-          />
+          {#key readerKey}
+            <EpubReader
+              bookId={book.id}
+              fileId={file.id}
+              initialCfi={initialCfi}
+              onClose={handleClose}
+              onProgress={handleProgress}
+              onLocationChange={handleLocationChange}
+            />
+          {/key}
         {:else}
           <div class="flex h-full items-center justify-center bg-black text-white/60 text-sm">
             Loading…
+          </div>
+        {/if}
+
+        {#if showFurthestPrompt}
+          <div class="absolute left-1/2 top-4 z-30 -translate-x-1/2">
+            <div class="flex items-center gap-3 rounded-full border bg-background/95 px-4 py-2 text-sm shadow-lg backdrop-blur">
+              <span class="font-medium">
+                You read further on another device ({furthestPct.toFixed(0)}% vs {currentPct.toFixed(0)}%).
+              </span>
+              <button
+                class="rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:opacity-90"
+                onclick={jumpToFurthest}
+              >
+                Jump to furthest
+              </button>
+              <button
+                class="rounded-full px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
+                onclick={dismissFurthestPrompt}
+                aria-label="Dismiss"
+              >
+                ✕
+              </button>
+            </div>
           </div>
         {/if}
       {:else if format === 'pdf'}

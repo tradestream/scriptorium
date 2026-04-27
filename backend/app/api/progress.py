@@ -130,6 +130,31 @@ async def get_book_progress(
     # consumer still gets a sensible integer.
     current_page = int(round((pct / 100.0) * total_pages)) if total_pages else 0
 
+    # Furthest-read watermark for the "Sync to Furthest Position?" UX.
+    # The watermark is monotonically non-decreasing (only manual reset
+    # regresses it). When it's ahead of the current cursor, the reader
+    # surfaces a one-tap "jump to furthest" prompt.
+    furthest_pct = (ep.furthest_pct if ep else 0.0) * 100.0
+    furthest_cfi: Optional[str] = None
+    if ep and ep.furthest_format == "cfi" and ep.furthest_value:
+        furthest_cfi = ep.furthest_value
+    elif ep and ep.furthest_format == "kobo_span" and ep.furthest_value:
+        from app.services.kobo_spans import span_to_cfi
+        from app.models.edition import EditionFile
+
+        chapter, _, span_id = ep.furthest_value.partition("#")
+        if chapter and span_id and not span_id.startswith("spine#"):
+            epub_file = (
+                await db.execute(
+                    select(EditionFile).where(
+                        EditionFile.edition_id == edition.id,
+                        EditionFile.format == "epub",
+                    )
+                )
+            ).scalars().first()
+            if epub_file is not None:
+                furthest_cfi = await span_to_cfi(chapter, span_id, epub_file.id, db)
+
     return {
         "current_page": current_page,
         "total_pages": total_pages,
@@ -140,7 +165,50 @@ async def get_book_progress(
         "last_opened": rs.last_opened.isoformat() if (rs and rs.last_opened) else None,
         "started_at": rs.started_at.isoformat() if (rs and rs.started_at) else None,
         "completed_at": rs.completed_at.isoformat() if (rs and rs.completed_at) else None,
+        "furthest_percentage": furthest_pct,
+        "furthest_cfi": furthest_cfi,
     }
+
+
+@router.post("/books/{book_id}/progress/reset-furthest", status_code=status.HTTP_200_OK)
+async def reset_furthest_position(
+    book_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Reset the furthest-read watermark on this edition for the current user.
+
+    Per the design (`personal/design/unified_progress_schema.md` §8.4),
+    furthest-read is monotonic non-decreasing in normal sync — only
+    this explicit user action regresses it. Useful for re-reads on
+    shared accounts so the "Sync to furthest" prompt doesn't keep
+    pulling the new reader to where the previous reader stopped.
+
+    The watermark is dropped to the current cursor's pct (not to zero —
+    if you're partway through a re-read, that's where furthest should
+    be). ``furthest_reset_at`` records the audit trail.
+    """
+    from app.models.reading import EditionPosition
+
+    ep = (
+        await db.execute(
+            select(EditionPosition).where(
+                EditionPosition.user_id == current_user.id,
+                EditionPosition.edition_id == book_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if ep is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No progress to reset")
+
+    now = datetime.utcnow()
+    ep.furthest_format = ep.current_format
+    ep.furthest_value = ep.current_value
+    ep.furthest_pct = ep.current_pct or 0.0
+    ep.furthest_updated_at = now
+    ep.furthest_reset_at = now
+    await db.commit()
+    return {"ok": True, "furthest_pct": (ep.furthest_pct or 0.0) * 100.0}
 
 
 @router.put("/books/{book_id}/progress")
