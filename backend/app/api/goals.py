@@ -9,7 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import User
-from app.models.progress import ReadingGoal, ReadProgress
+from app.models.progress import ReadingGoal
+from app.models.reading import ReadingState
 
 from .auth import get_current_user
 
@@ -30,12 +31,17 @@ class GoalRead(BaseModel):
 
 
 async def _completed_this_year(db: AsyncSession, user_id: int, year: int) -> int:
+    """Count Works the user completed in ``year``.
+
+    Uses the unified ReadingState (work-level lifecycle) so re-reads or
+    multi-format completions of the same Work count as one.
+    """
     result = await db.scalar(
-        select(func.count(ReadProgress.id))
+        select(func.count(ReadingState.id))
         .where(
-            ReadProgress.user_id == user_id,
-            ReadProgress.status == "completed",
-            extract("year", ReadProgress.completed_at) == year,
+            ReadingState.user_id == user_id,
+            ReadingState.status == "completed",
+            extract("year", ReadingState.completed_at) == year,
         )
     )
     return result or 0

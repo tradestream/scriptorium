@@ -59,26 +59,57 @@ async def get_book_progress(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get reading progress for a specific book."""
-    stmt = (
-        select(ReadProgress)
-        .where(ReadProgress.edition_id == book_id, ReadProgress.user_id == current_user.id)
-        .order_by(ReadProgress.updated_at.desc())
-    )
-    result = await db.execute(stmt)
-    progress = result.scalar_one_or_none()
-    if not progress:
+    """Get reading progress for a specific book.
+
+    Reads from the unified progress schema (EditionPosition for cursor /
+    pct / total_pages / cfi, ReadingState for lifecycle status / rating
+    / timestamps). Response shape preserved for the existing frontend
+    consumers.
+    """
+    from app.models.reading import EditionPosition, ReadingState
+
+    edition = (await db.execute(select(Book).where(Book.id == book_id))).scalar_one_or_none()
+    if edition is None:
         return None
+
+    ep = (
+        await db.execute(
+            select(EditionPosition).where(
+                EditionPosition.user_id == current_user.id,
+                EditionPosition.edition_id == book_id,
+            )
+        )
+    ).scalar_one_or_none()
+    rs = (
+        await db.execute(
+            select(ReadingState).where(
+                ReadingState.user_id == current_user.id,
+                ReadingState.work_id == edition.work_id,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if ep is None and rs is None:
+        return None
+
+    cfi = ep.current_value if (ep and ep.current_format == "cfi") else None
+    pct = (ep.current_pct if ep else 0.0) * 100.0
+    total_pages = ep.total_pages if ep else None
+    # current_page is a derived display value — frontend uses
+    # `pct + cfi`. Approximate from pct × total_pages so any older
+    # consumer still gets a sensible integer.
+    current_page = int(round((pct / 100.0) * total_pages)) if total_pages else 0
+
     return {
-        "current_page": progress.current_page,
-        "total_pages": progress.total_pages,
-        "percentage": progress.percentage,
-        "status": progress.status,
-        "rating": progress.rating,
-        "cfi": progress.cfi,
-        "last_opened": progress.last_opened.isoformat() if progress.last_opened else None,
-        "started_at": progress.started_at.isoformat() if progress.started_at else None,
-        "completed_at": progress.completed_at.isoformat() if progress.completed_at else None,
+        "current_page": current_page,
+        "total_pages": total_pages,
+        "percentage": pct,
+        "status": rs.status if rs else "want_to_read",
+        "rating": rs.rating if rs else None,
+        "cfi": cfi,
+        "last_opened": rs.last_opened.isoformat() if (rs and rs.last_opened) else None,
+        "started_at": rs.started_at.isoformat() if (rs and rs.started_at) else None,
+        "completed_at": rs.completed_at.isoformat() if (rs and rs.completed_at) else None,
     }
 
 

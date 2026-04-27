@@ -343,16 +343,18 @@ async def get_series(
     books_result = await db.execute(books_stmt)
     rows = books_result.unique().all()
 
-    # Fetch read status via UserEdition
+    # Fetch read status from the unified ReadingState (work-keyed).
+    from app.models.reading import ReadingState
     edition_ids = [r[0].id for r in rows]
     read_status: dict[int, str] = {}
     if edition_ids:
-        ue_result = await db.execute(
-            select(UserEdition.edition_id, UserEdition.status, UserEdition.percentage)
-            .where(UserEdition.user_id == current_user.id)
-            .where(UserEdition.edition_id.in_(edition_ids))
+        rs_result = await db.execute(
+            select(Edition.id, ReadingState.status)
+            .join(ReadingState, ReadingState.work_id == Edition.work_id)
+            .where(ReadingState.user_id == current_user.id)
+            .where(Edition.id.in_(edition_ids))
         )
-        for ed_id, st, pct in ue_result:
+        for ed_id, st in rs_result:
             current = read_status.get(ed_id)
             if current != "completed":
                 read_status[ed_id] = st

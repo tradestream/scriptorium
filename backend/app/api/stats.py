@@ -1,4 +1,4 @@
-"""Reading statistics — aggregated from UserEdition and ReadSession tables."""
+"""Reading statistics — aggregated from ReadingState + EditionPosition + ReadSession + KoboBookState."""
 
 from collections import Counter
 from datetime import date, datetime, timedelta
@@ -13,7 +13,7 @@ from sqlalchemy.orm import joinedload
 from app.api.auth import get_current_user
 from app.database import get_db
 from app.models import User
-from app.models.edition import Edition, UserEdition
+from app.models.edition import Edition
 from app.models.progress import KoboBookState
 from app.models.read_session import ReadSession
 from app.models.work import Work
@@ -85,21 +85,61 @@ async def get_reading_stats(
     current_user: User = Depends(get_current_user),
 ):
     """Return reading statistics for the current user."""
+    from app.models.reading import EditionPosition, ReadingState
 
-    # ── UserEdition records (canonical per-user reading state) ───────────────
-    ue_result = await db.execute(
-        select(UserEdition)
-        .where(UserEdition.user_id == current_user.id)
-        .options(
-            joinedload(UserEdition.edition).options(
-                joinedload(Edition.work).options(
-                    joinedload(Work.authors),
-                    joinedload(Work.tags)
+    # ── ReadingState records (canonical per-user, per-work lifecycle) ────────
+    # Plus one display Edition per work (any will do; pick the lowest id for
+    # determinism) and the EditionPosition with the freshest activity for
+    # percentage / pages-read calculations.
+    rs_rows = (
+        await db.execute(
+            select(ReadingState).where(ReadingState.user_id == current_user.id)
+        )
+    ).scalars().all()
+    work_ids = [rs.work_id for rs in rs_rows]
+
+    work_to_edition: dict[int, Edition] = {}
+    if work_ids:
+        ed_rows = (
+            await db.execute(
+                select(Edition)
+                .where(Edition.work_id.in_(work_ids))
+                .options(
+                    joinedload(Edition.work).options(
+                        joinedload(Work.authors), joinedload(Work.tags)
+                    )
+                )
+                .order_by(Edition.id)
+            )
+        ).unique().scalars().all()
+        for e in ed_rows:
+            work_to_edition.setdefault(e.work_id, e)
+
+    work_to_pct: dict[int, float] = {}
+    work_to_pages: dict[int, Optional[int]] = {}
+    if work_ids:
+        ep_rows = (
+            await db.execute(
+                select(EditionPosition).where(
+                    EditionPosition.user_id == current_user.id
                 )
             )
-        )
-    )
-    user_editions = ue_result.unique().scalars().all()
+        ).scalars().all()
+        for ep in ep_rows:
+            ed = next(
+                (e for e in work_to_edition.values() if e.id == ep.edition_id), None
+            )
+            if ed is None:
+                continue
+            wid = ed.work_id
+            # Prefer the freshest EditionPosition for percentage display.
+            stamp = ep.current_updated_at or ep.updated_at
+            existing_stamp = work_to_pct.get(f"_stamp_{wid}")  # type: ignore[arg-type]
+            if existing_stamp is None or (stamp and stamp > existing_stamp):
+                work_to_pct[wid] = (ep.current_pct or 0.0) * 100.0
+                work_to_pct[f"_stamp_{wid}"] = stamp  # type: ignore[assignment]
+                if ep.total_pages is not None:
+                    work_to_pages[wid] = ep.total_pages
 
     # ── Sessions ─────────────────────────────────────────────────────────────
     sess_result = await db.execute(
@@ -118,26 +158,41 @@ async def get_reading_stats(
     time_reading_seconds = sum(k.time_spent_reading for k in kobo_states)
 
     # ── Basic counts ─────────────────────────────────────────────────────────
-    status_counter: Counter = Counter(ue.status for ue in user_editions)
-    pages_read = sum((ue.current_page or 0) for ue in user_editions)
+    status_counter: Counter = Counter(rs.status for rs in rs_rows)
+    pages_read = 0
+    for rs in rs_rows:
+        pct = work_to_pct.get(rs.work_id, 0.0)
+        pages = work_to_pages.get(rs.work_id)
+        if pages:
+            pages_read += int(round((pct / 100.0) * pages))
 
     now = datetime.utcnow()
     year_start = datetime(now.year, 1, 1)
     sessions_this_year = sum(1 for s in sessions if s.started_at >= year_start)
 
     # ── Helper accessors ─────────────────────────────────────────────────────
-    def _ue_author(ue: UserEdition) -> Optional[str]:
+    def _rs_author(rs: ReadingState) -> Optional[str]:
+        ed = work_to_edition.get(rs.work_id)
+        if ed is None:
+            return None
         try:
-            authors = ue.edition.work.authors
+            authors = ed.work.authors
             return authors[0].name if authors else None
         except Exception:
             return None
 
-    def _ue_title(ue: UserEdition) -> str:
+    def _rs_title(rs: ReadingState) -> str:
+        ed = work_to_edition.get(rs.work_id)
+        if ed is None:
+            return f"Work {rs.work_id}"
         try:
-            return ue.edition.work.title
+            return ed.work.title
         except Exception:
-            return f"Edition {ue.edition_id}"
+            return f"Work {rs.work_id}"
+
+    def _rs_display_edition_id(rs: ReadingState) -> int:
+        ed = work_to_edition.get(rs.work_id)
+        return ed.id if ed else rs.work_id
 
     def _sess_author(s: ReadSession) -> Optional[str]:
         try:
@@ -153,31 +208,31 @@ async def get_reading_stats(
             return f"Work {s.work_id}"
 
     # ── Currently reading ────────────────────────────────────────────────────
-    reading_ues = [ue for ue in user_editions if ue.status == "reading"]
-    reading_ues.sort(key=lambda ue: ue.last_opened or datetime.min, reverse=True)
+    reading_rs = [rs for rs in rs_rows if rs.status == "reading"]
+    reading_rs.sort(key=lambda rs: rs.last_opened or datetime.min, reverse=True)
     currently_reading = [
         _BookProgress(
-            id=ue.edition_id,
-            title=_ue_title(ue),
-            author=_ue_author(ue),
-            percentage=round(ue.percentage, 1),
-            last_opened=ue.last_opened.isoformat() if ue.last_opened else None,
+            id=_rs_display_edition_id(rs),
+            title=_rs_title(rs),
+            author=_rs_author(rs),
+            percentage=round(work_to_pct.get(rs.work_id, 0.0), 1),
+            last_opened=rs.last_opened.isoformat() if rs.last_opened else None,
         )
-        for ue in reading_ues[:10]
+        for rs in reading_rs[:10]
     ]
 
     # ── Recently completed ────────────────────────────────────────────────────
-    completed_ues = [ue for ue in user_editions if ue.status == "completed" and ue.completed_at]
-    completed_ues.sort(key=lambda ue: ue.completed_at or datetime.min, reverse=True)
+    completed_rs = [rs for rs in rs_rows if rs.status == "completed" and rs.completed_at]
+    completed_rs.sort(key=lambda rs: rs.completed_at or datetime.min, reverse=True)
     recently_completed = [
         _BookCompleted(
-            id=ue.edition_id,
-            title=_ue_title(ue),
-            author=_ue_author(ue),
-            completed_at=ue.completed_at.isoformat() if ue.completed_at else None,
-            rating=ue.rating,
+            id=_rs_display_edition_id(rs),
+            title=_rs_title(rs),
+            author=_rs_author(rs),
+            completed_at=rs.completed_at.isoformat() if rs.completed_at else None,
+            rating=rs.rating,
         )
-        for ue in completed_ues[:10]
+        for rs in completed_rs[:10]
     ]
 
     # ── Recent sessions ───────────────────────────────────────────────────────
@@ -200,9 +255,9 @@ async def get_reading_stats(
     for i in range(11, -1, -1):
         d = (now.replace(day=1) - timedelta(days=i * 30)).replace(day=1)
         months_map[d.strftime("%Y-%m")] = 0
-    for ue in user_editions:
-        if ue.status == "completed" and ue.completed_at:
-            key = ue.completed_at.strftime("%Y-%m")
+    for rs in rs_rows:
+        if rs.status == "completed" and rs.completed_at:
+            key = rs.completed_at.strftime("%Y-%m")
             if key in months_map:
                 months_map[key] += 1
     completions_by_month = [{"month": k, "count": v} for k, v in sorted(months_map.items())]
@@ -245,7 +300,7 @@ async def get_reading_stats(
         current_streak = streak
 
     # ── Ratings ───────────────────────────────────────────────────────────────
-    ratings = [ue.rating for ue in user_editions if ue.rating]
+    ratings = [rs.rating for rs in rs_rows if rs.rating]
     avg_rating = round(sum(ratings) / len(ratings), 2) if ratings else None
     rating_counter: Counter = Counter(str(r) for r in ratings)
     rating_distribution = dict(rating_counter)
@@ -292,16 +347,19 @@ async def get_reading_stats(
 
     # ── Top genres / tags ─────────────────────────────────────────────────────
     tag_counter: Counter = Counter()
-    for ue in user_editions:
+    for rs in rs_rows:
+        ed = work_to_edition.get(rs.work_id)
+        if ed is None:
+            continue
         try:
-            for tag in ue.edition.work.tags:
+            for tag in ed.work.tags:
                 tag_counter[tag.name] += 1
         except Exception:
             pass
     top_genres = [{"tag": t, "count": c} for t, c in tag_counter.most_common(10)]
 
     return ReadingStats(
-        total_books=len(user_editions),
+        total_books=len(rs_rows),
         books_reading=status_counter.get("reading", 0),
         books_completed=status_counter.get("completed", 0),
         books_abandoned=status_counter.get("abandoned", 0),

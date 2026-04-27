@@ -54,20 +54,22 @@ def _build_smart_query(filters: dict, user_id: int):
     elif filters.get("has_isbn") is False:
         stmt = stmt.where(Edition.isbn.is_(None))
     if filters.get("status"):
+        from app.models.reading import ReadingState
         stmt = stmt.where(
-            Edition.id.in_(
-                select(ReadProgress.edition_id).where(
-                    ReadProgress.user_id == user_id,
-                    ReadProgress.status == filters["status"],
+            Edition.work_id.in_(
+                select(ReadingState.work_id).where(
+                    ReadingState.user_id == user_id,
+                    ReadingState.status == filters["status"],
                 )
             )
         )
     if filters.get("min_rating"):
+        from app.models.reading import ReadingState
         stmt = stmt.where(
-            Edition.id.in_(
-                select(ReadProgress.edition_id).where(
-                    ReadProgress.user_id == user_id,
-                    ReadProgress.rating >= filters["min_rating"],
+            Edition.work_id.in_(
+                select(ReadingState.work_id).where(
+                    ReadingState.user_id == user_id,
+                    ReadingState.rating >= filters["min_rating"],
                 )
             )
         )

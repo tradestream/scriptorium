@@ -364,13 +364,20 @@ async def get_shelf_books(
             joinedload(Book.files), joinedload(Book.contributors),
             joinedload(Book.location_ref),
         )
-        # Determine if any rules need a progress join
+        # Determine if any rules need a progress join. Smart-shelf
+        # progress filters now query the unified ReadingState
+        # (work-keyed) — joined onto Book via Book.work_id since
+        # ReadingState.work_id is the canonical lifecycle row.
+        from app.models.reading import ReadingState
         progress_fields = {"status", "rating", "min_rating"}
         needs_progress = any(r.get("field") in progress_fields for r in rules)
         if needs_progress:
             book_stmt = book_stmt.join(
-                ReadProgress,
-                and_(ReadProgress.edition_id == Book.id, ReadProgress.user_id == current_user.id),
+                ReadingState,
+                and_(
+                    ReadingState.work_id == Book.work_id,
+                    ReadingState.user_id == current_user.id,
+                ),
                 isouter=False,
             )
         for rule in rules:
@@ -387,15 +394,15 @@ async def get_shelf_books(
             elif field == "language":
                 book_stmt = book_stmt.where(Book.language.ilike(f"%{value}%"))
             elif field == "status":
-                book_stmt = book_stmt.where(ReadProgress.status == value)
+                book_stmt = book_stmt.where(ReadingState.status == value)
             elif field == "rating":
                 try:
-                    book_stmt = book_stmt.where(ReadProgress.rating == int(value))
+                    book_stmt = book_stmt.where(ReadingState.rating == int(value))
                 except (ValueError, TypeError):
                     pass
             elif field == "min_rating":
                 try:
-                    book_stmt = book_stmt.where(ReadProgress.rating >= int(value))
+                    book_stmt = book_stmt.where(ReadingState.rating >= int(value))
                 except (ValueError, TypeError):
                     pass
 
