@@ -1,14 +1,43 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+def _validate_email(value: str) -> str:
+    """Lightweight email check that accepts internal / .local addresses.
+
+    Pydantic's ``EmailStr`` rejects valid TLDs like ``.local`` and ``.lan``
+    that self-hosted deployments use; ``UserRead.email`` is already a
+    plain ``str`` for the same reason. We enforce the minimum invariant
+    instead: one ``@``, non-empty local + domain parts, no whitespace,
+    bounded length. Lowercase + strip on the way in for consistent
+    storage.
+    """
+    if not isinstance(value, str):
+        raise ValueError("email must be a string")
+    cleaned = value.strip().lower()
+    if len(cleaned) < 3 or len(cleaned) > 255:
+        raise ValueError("email length must be 3-255")
+    if any(ch.isspace() for ch in cleaned):
+        raise ValueError("email must not contain whitespace")
+    if cleaned.count("@") != 1:
+        raise ValueError("email must contain exactly one '@'")
+    local, _, domain = cleaned.partition("@")
+    if not local or not domain or "." not in domain[1:]:
+        # require at least one '.' in the domain past the first char so
+        # something like "a@b" is rejected but "x@host.local" passes
+        raise ValueError("email must have a local part and a dotted domain")
+    return cleaned
 
 
 class UserBase(BaseModel):
     """User base schema."""
 
     username: str = Field(min_length=3, max_length=100)
-    email: EmailStr
+    email: str = Field(min_length=3, max_length=255)
+
+    _email_validator = field_validator("email")(_validate_email)
 
 
 class UserCreate(UserBase):

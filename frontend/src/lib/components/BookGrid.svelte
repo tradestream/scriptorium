@@ -78,7 +78,9 @@
             </span>
           {/if}
           {#if book.abs_item_id}
-            <Headphones class="hidden h-3.5 w-3.5 text-muted-foreground/40 sm:block" title="Audiobook available" />
+            <span title="Audiobook available" aria-label="Audiobook available" class="hidden sm:inline-flex">
+              <Headphones class="h-3.5 w-3.5 text-muted-foreground/40" aria-hidden="true" />
+            </span>
           {/if}
           <span class="hidden text-[11px] tabular-nums text-muted-foreground/40 md:block">
             {formatDate(book.created_at)}

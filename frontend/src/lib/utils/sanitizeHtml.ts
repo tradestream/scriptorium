@@ -16,7 +16,7 @@
  * allowlist (no scripts, no event handlers, no javascript: URIs).
  */
 
-import DOMPurify from 'dompurify';
+import DOMPurify, { type Config } from 'dompurify';
 import { marked } from 'marked';
 
 // Tags we allow in rendered prose. Common formatting + headings + lists
@@ -33,7 +33,7 @@ const ALLOWED_TAGS = [
 
 const ALLOWED_ATTR = ['href', 'title', 'alt', 'src', 'class'];
 
-const PURIFY_CONFIG: DOMPurify.Config = {
+const PURIFY_CONFIG: Config = {
   ALLOWED_TAGS,
   ALLOWED_ATTR,
   // Block any URL whose protocol isn't in this list. Critically excludes

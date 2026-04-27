@@ -46,11 +46,11 @@ async def test_register_duplicate_username(client):
 async def test_login_success(client):
     await client.post(
         "/api/v1/auth/register",
-        json={"username": "loginuser", "email": "login@test.local", "password": "pw123"},
+        json={"username": "loginuser", "email": "login@test.local", "password": "loginpass123"},
     )
     resp = await client.post(
         "/api/v1/auth/login",
-        json={"username": "loginuser", "password": "pw123"},
+        json={"username": "loginuser", "password": "loginpass123"},
     )
     assert resp.status_code == 200
     data = resp.json()

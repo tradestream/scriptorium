@@ -30,15 +30,15 @@ async def test_create_library_requires_admin(client):
     # Register a non-admin user
     await client.post(
         "/api/v1/auth/register",
-        json={"username": "firstforlibtest", "email": "first_lib@test.local", "password": "pw"},
+        json={"username": "firstforlibtest", "email": "first_lib@test.local", "password": "testpass123"},
     )
     await client.post(
         "/api/v1/auth/register",
-        json={"username": "nonadmin", "email": "nonadmin_lib@test.local", "password": "pw"},
+        json={"username": "nonadmin", "email": "nonadmin_lib@test.local", "password": "testpass123"},
     )
     login = await client.post(
         "/api/v1/auth/login",
-        json={"username": "nonadmin", "password": "pw"},
+        json={"username": "nonadmin", "password": "testpass123"},
     )
     token = login.json()["access_token"]
 
