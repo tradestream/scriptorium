@@ -10,7 +10,9 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const BASE = 'http://localhost:8000/api/v1';
+const FRONTEND_URL = process.env.PLAYWRIGHT_FRONTEND_URL ?? 'http://localhost:5173';
+const BACKEND_URL = process.env.PLAYWRIGHT_BACKEND_URL ?? 'http://localhost:8000';
+const BASE = `${BACKEND_URL}/api/v1`;
 const TEST_USER = { username: 'pw_test', email: 'pw_test@scriptorium.app', password: 'TestPass1234' };
 
 async function apiPost(url: string, body: object, token?: string) {
@@ -55,7 +57,7 @@ export default async function globalSetup() {
   const page = await context.newPage();
 
   // Navigate to the app and set the token in localStorage
-  await page.goto('http://localhost:5173/auth/login');
+  await page.goto(`${FRONTEND_URL}/auth/login`);
   await page.evaluate((t) => {
     localStorage.setItem('auth_token', t);
   }, token);
