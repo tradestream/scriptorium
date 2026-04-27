@@ -147,7 +147,19 @@
         <span class="w-3.5 shrink-0"></span>
       </div>
 
-      <DragDropProvider onDragOver={(event) => { editEntries = move(editEntries, event as any); }}>
+      <DragDropProvider
+        onDragOver={(event) => {
+          // ``move`` returns the drag library's opaque ``Items`` shape,
+          // not ``EditEntry[]`` — driving sort with the _key array and
+          // remapping back to entries keeps the typed contract intact.
+          const keys = editEntries.map((e) => e._key);
+          const reordered = move(keys, event) as number[];
+          const byKey = new Map(editEntries.map((e) => [e._key, e]));
+          editEntries = reordered
+            .map((k) => byKey.get(k))
+            .filter((e): e is EditEntry => e !== undefined);
+        }}
+      >
         {#each editEntries as entry, i (entry._key)}
           <SortableSeriesEntry {entry} index={i} onRemove={() => removeEntry(i)} />
         {/each}

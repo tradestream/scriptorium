@@ -1203,16 +1203,18 @@
                   {book.interest_level}
                 </span>
               {/if}
-              {#if isAdmin && !book.flesch_kincaid_grade}
+              {#if isAdmin && book && !book.flesch_kincaid_grade}
                 <button
                   class="rounded-full border border-dashed px-2.5 py-1 text-xs text-muted-foreground/60 hover:text-muted-foreground hover:border-muted-foreground transition-colors disabled:opacity-40"
                   disabled={computingFk}
                   onclick={async () => {
+                    if (!book) return;
+                    const bookId = book.id;
                     computingFk = true;
                     try {
-                      const r = await computeReadingLevel(book.id);
+                      const r = await computeReadingLevel(bookId);
                       if (r.flesch_kincaid_grade) {
-                        book = await getBook(book.id);
+                        book = await getBook(bookId);
                       }
                     } catch { /* ignore */ }
                     computingFk = false;
