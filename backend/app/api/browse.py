@@ -13,7 +13,7 @@ from sqlalchemy.orm import joinedload
 
 from app.database import get_db
 from app.models import Author, Series, Tag, User
-from app.models.edition import Edition, UserEdition
+from app.models.edition import Edition
 from app.models.library import Library
 from app.models.work import Work, work_authors, work_series, work_tags
 from app.schemas.book import BookRead

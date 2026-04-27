@@ -90,9 +90,6 @@ class Edition(Base):
     contributors: Mapped[list["EditionContributor"]] = relationship(
         "EditionContributor", back_populates="edition", cascade="all, delete-orphan"
     )
-    user_editions: Mapped[list["UserEdition"]] = relationship(
-        "UserEdition", back_populates="edition", cascade="all, delete-orphan"
-    )
     loans: Mapped[list["Loan"]] = relationship(
         "Loan", back_populates="edition", cascade="all, delete-orphan"
     )
@@ -242,45 +239,6 @@ class EditionContributor(Base):
     role: Mapped[str] = mapped_column(String(50), index=True)  # translator
 
     edition: Mapped["Edition"] = relationship("Edition", back_populates="contributors")
-
-
-class UserEdition(Base):
-    """Per-user relationship with a specific Edition.
-
-    The canonical home for reading status, progress, rating, and review.
-    Replaces ReadProgress as the primary per-user reading state table.
-    Device-level Kobo sync state lives in KoboBookState; KOReader sync
-    lives in KOReaderProgress.
-    """
-
-    __tablename__ = "user_editions"
-    __table_args__ = (UniqueConstraint("user_id", "edition_id", name="uq_user_edition"),)
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    edition_id: Mapped[int] = mapped_column(ForeignKey("editions.id"), index=True)
-
-    # Reading state
-    status: Mapped[str] = mapped_column(
-        String(50), default="want_to_read"
-    )  # want_to_read | reading | completed | abandoned
-
-    # Progress (watermark — highest position seen across all devices)
-    current_page: Mapped[int] = mapped_column(default=0)
-    total_pages: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    percentage: Mapped[float] = mapped_column(Float, default=0.0)
-
-    # Personal evaluation
-    rating: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # 1–5
-    review: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    last_opened: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
-
-    edition: Mapped["Edition"] = relationship("Edition", back_populates="user_editions")
 
 
 class Loan(Base):

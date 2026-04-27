@@ -66,39 +66,6 @@ class KoboTokenShelf(Base):
     shelf_id: Mapped[int] = mapped_column(ForeignKey("shelves.id"), index=True)
 
 
-class KoboBookState(Base):
-    """Per-edition reading state synced with a Kobo device.
-
-    Stores the Kobo-specific reading state fields (StatusInfo, Statistics,
-    CurrentBookmark) so we can round-trip them back to the device accurately.
-    """
-
-    __tablename__ = "kobo_book_states"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    edition_id: Mapped[int] = mapped_column(ForeignKey("editions.id"), index=True)
-
-    # Kobo StatusInfo
-    status: Mapped[str] = mapped_column(
-        String(50), default="ReadyToRead"
-    )  # ReadyToRead, Reading, Finished
-    times_started_reading: Mapped[int] = mapped_column(default=0)
-
-    # Kobo Statistics
-    total_pages: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    current_page: Mapped[int] = mapped_column(default=0)
-    time_spent_reading: Mapped[int] = mapped_column(default=0)  # seconds
-
-    # Kobo CurrentBookmark
-    content_source_progress: Mapped[float] = mapped_column(Float, default=0.0)  # 0.0-1.0
-    spine_index: Mapped[int] = mapped_column(default=0)
-    content_id: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
-
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
-
-
 class KoboSyncedBook(Base):
     """Lookup table: tracks which editions have been sent to a device.
 
@@ -150,32 +117,6 @@ class KOReaderProgress(Base):
     percentage: Mapped[float] = mapped_column(Float, default=0.0)
     device: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     device_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
-
-
-class ReadProgress(Base):
-    """Reading progress tracking (cross-device, unified)."""
-
-    __tablename__ = "read_progress"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    edition_id: Mapped[int] = mapped_column(ForeignKey("editions.id"))
-    current_page: Mapped[int] = mapped_column(default=0)
-    total_pages: Mapped[Optional[int]] = mapped_column(nullable=True)
-    percentage: Mapped[float] = mapped_column(default=0.0)
-    status: Mapped[str] = mapped_column(
-        String(50), default="reading"
-    )  # want_to_read, reading, completed, abandoned
-    rating: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # 1-5
-    # EPUB CFI from the web reader (epubjs format) so we can restore the
-    # cursor at the same paragraph on next open. Only the web reader writes
-    # this; Kobo state lives in KoboBookState (with real koboSpan ids).
-    cfi: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    last_opened: Mapped[datetime] = mapped_column(DateTime, default=func.now())
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
 
 

@@ -72,7 +72,7 @@ async def abs_libraries(current_user: User = Depends(get_current_user)):
 
 @router.post("/sync-progress")
 async def abs_sync_progress(current_user: User = Depends(get_current_user)):
-    """Pull listening progress from ABS → Scriptorium ReadProgress for the current user."""
+    """Pull listening progress from ABS into the unified progress schema."""
     s = get_settings()
     if not s.ABS_URL or not s.ABS_API_KEY:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="AudiobookShelf not configured")

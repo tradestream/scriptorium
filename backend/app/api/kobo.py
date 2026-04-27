@@ -327,21 +327,37 @@ async def kobo_get_reading_state(
     """Get the reading state for a specific book."""
     sync_token = await _get_sync_token(auth_token, db)
 
-    from app.models.progress import KoboBookState
-    from app.services.kobo_sync import _build_reading_state, _find_edition_by_any_id
+    from app.models.reading import EditionPosition, ReadingState
+    from app.services.kobo_sync import (
+        _build_reading_state,
+        _find_edition_by_any_id,
+        _resolve_emit_span,
+    )
 
     book = await _find_edition_by_any_id(book_uuid, db)
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
 
-    state_stmt = select(KoboBookState).where(
-        KoboBookState.user_id == sync_token.user_id,
-        KoboBookState.edition_id == book.id,
-    )
-    state_result = await db.execute(state_stmt)
-    state = state_result.scalar_one_or_none()
+    ep = (
+        await db.execute(
+            select(EditionPosition).where(
+                EditionPosition.user_id == sync_token.user_id,
+                EditionPosition.edition_id == book.id,
+            )
+        )
+    ).scalar_one_or_none()
+    rs = None
+    if book.work_id is not None:
+        rs = (
+            await db.execute(
+                select(ReadingState).where(
+                    ReadingState.user_id == sync_token.user_id,
+                    ReadingState.work_id == book.work_id,
+                )
+            )
+        ).scalar_one_or_none()
 
-    if not state:
+    if ep is None and rs is None:
         # Kobo expects a JSON array at this endpoint (confirmed by CWA).
         return [
             {
@@ -355,7 +371,28 @@ async def kobo_get_reading_state(
             }
         ]
 
-    return [_build_reading_state(book_uuid, state)]
+    # Resolve a real KoboSpan id when our cursor format permits. Pull
+    # the EditionFile rows directly (book.files lazy-load can MissingGreenlet
+    # in this async path).
+    from app.models.edition import EditionFile
+    files = list(
+        (
+            await db.execute(
+                select(EditionFile).where(EditionFile.edition_id == book.id)
+            )
+        ).scalars().all()
+    )
+    span_chapter, span_id = await _resolve_emit_span(ep, files, db)
+
+    return [
+        _build_reading_state(
+            book_uuid,
+            ep=ep,
+            rs=rs,
+            span_chapter_href=span_chapter,
+            span_id=span_id,
+        )
+    ]
 
 
 @kobo_device_router.put("/kobo/{auth_token}/v1/library/{book_uuid}/state")
@@ -804,13 +841,20 @@ async def _sync_content_progress(
     """Sync reading progress from Kobo Content table rows.
 
     Smart merge: only update if TimeSpentReading is higher (prevents
-    data loss when a book is removed from the device and Kobo zeros data).
+    data loss when a book is removed from the device and Kobo zeros
+    data). Writes go through the unified write_progress helper —
+    EditionPosition cumulative time_spent_seconds takes the role
+    KoboBookState.time_spent_reading used to play.
     """
     from app.services.kobo_annotations import resolve_volume_id
-    from app.models.progress import KoboBookState
+    from app.services.kobo_sync import _get_or_create_kobo_device
+    from app.services.unified_progress import write_progress
+    from app.models.edition import Edition
+    from app.models.reading import EditionPosition
 
     updated = 0
     skipped = 0
+    device = await _get_or_create_kobo_device(user_id, db)
 
     for row in content_rows:
         content_id = row.get("ContentID") or row.get("content_id", "")
@@ -826,33 +870,47 @@ async def _sync_content_progress(
             skipped += 1
             continue
 
-        # Find or create KoboBookState
-        state_result = await db.execute(
-            select(KoboBookState).where(
-                KoboBookState.user_id == user_id,
-                KoboBookState.edition_id == edition_id,
-            )
-        )
-        state = state_result.scalar_one_or_none()
+        edition = await db.get(Edition, edition_id)
+        if edition is None:
+            skipped += 1
+            continue
 
-        if state:
-            # Smart merge: only update if device has more reading time
-            if time_spent > state.time_spent_reading:
-                state.time_spent_reading = time_spent
-                state.content_source_progress = float(pct) / 100 if pct > 1 else float(pct)
-                updated += 1
-            else:
-                skipped += 1
-        else:
-            state = KoboBookState(
-                user_id=user_id,
-                edition_id=edition_id,
-                time_spent_reading=time_spent,
-                content_source_progress=float(pct) / 100 if pct > 1 else float(pct),
-                status="Reading" if pct < 100 else "Finished",
+        # Smart merge: skip when this device hasn't read any longer than
+        # the cumulative recorded time. Avoids regressing time totals when
+        # the device wipes per-title stats.
+        ep = (
+            await db.execute(
+                select(EditionPosition).where(
+                    EditionPosition.user_id == user_id,
+                    EditionPosition.edition_id == edition_id,
+                )
             )
-            db.add(state)
-            updated += 1
+        ).scalar_one_or_none()
+        prior_seconds = ep.time_spent_seconds if ep else 0
+        incoming_seconds = int(time_spent or 0)
+        delta = max(0, incoming_seconds - prior_seconds)
+        if ep is not None and delta == 0 and (not pct or pct == 0):
+            skipped += 1
+            continue
+
+        # Normalize percent: device reports either 0–1 fractions or 0–100
+        # depending on column origin.
+        cursor_pct = (
+            float(pct) if (pct is not None and pct <= 1) else float(pct or 0) / 100.0
+        )
+
+        await write_progress(
+            db,
+            user_id=user_id,
+            edition=edition,
+            cursor_format="percent",
+            cursor_value=str(round(cursor_pct * 100, 4)),
+            cursor_pct=cursor_pct,
+            device_id=device.id,
+            time_spent_delta_seconds=delta,
+            status_hint="completed" if cursor_pct >= 0.97 else None,
+        )
+        updated += 1
 
     await db.commit()
     return {"updated": updated, "skipped": skipped}

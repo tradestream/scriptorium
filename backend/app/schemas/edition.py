@@ -1,4 +1,11 @@
-"""Schemas for Edition, EditionFile, UserEdition, and Loan."""
+"""Schemas for Edition, EditionFile, per-user reading state, and Loan.
+
+UserEditionRead/Update are wire-shape preserved across the unified-
+progress migration: the underlying tables changed (ReadingState +
+EditionPosition replace UserEdition), but these schemas continue to
+describe the per-(user, edition) reading-state payload the frontend
+already speaks.
+"""
 
 from datetime import datetime
 from typing import Optional

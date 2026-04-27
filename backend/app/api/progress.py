@@ -10,9 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.database import get_db
-from app.models import Book, ReadProgress
+from app.models import Book
 from app.models.library import Library
-from app.models.progress import Device, KoboBookState
+from app.models.progress import Device
 from app.models.work import Work
 from app.models.read_session import ReadSession
 from app.models.user import User
@@ -218,73 +218,44 @@ async def update_book_progress(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Upsert reading progress for a book (web reader auto-saves here)."""
-    # Verify book exists
-    book_result = await db.execute(select(Book).where(Book.id == book_id))
-    if not book_result.scalar_one_or_none():
+    """Upsert reading progress for a book (web reader auto-saves here).
+
+    Writes only into the unified progress schema (EditionPosition +
+    ReadingState + DevicePosition) via the shared write_progress helper.
+    The legacy ReadProgress dual-write was removed in step 4 of the
+    progress migration; see personal/design/unified_progress_schema.md.
+    """
+    from app.services.unified_progress import write_progress
+
+    edition = (await db.execute(select(Book).where(Book.id == book_id))).scalar_one_or_none()
+    if edition is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
 
     device = await _get_or_create_web_device(db, current_user.id)
-
-    stmt = select(ReadProgress).where(
-        ReadProgress.edition_id == book_id,
-        ReadProgress.user_id == current_user.id,
-    )
-    result = await db.execute(stmt)
-    progress = result.scalar_one_or_none()
-
     now = datetime.utcnow()
-    if not progress:
-        progress = ReadProgress(
-            user_id=current_user.id,
-            edition_id=book_id,
-            device_id=device.id,
-            started_at=now,
-        )
-        db.add(progress)
 
-    progress.current_page = data.current_page
-    progress.total_pages = data.total_pages
-    progress.percentage = data.percentage
-    progress.status = data.status
-    progress.last_opened = now
-    if data.rating is not None:
-        progress.rating = data.rating
-    if data.cfi is not None:
-        progress.cfi = data.cfi
+    cursor_pct = (data.percentage or 0) / 100.0
+    if data.cfi:
+        cursor_format = "cfi"
+        cursor_value: str = data.cfi
+    else:
+        cursor_format = "percent"
+        cursor_value = str(data.percentage or 0)
 
-    if data.status == "completed" and not progress.completed_at:
-        progress.completed_at = now
-
-    # Step 3a dual-write: also publish into the unified progress schema
-    # so EditionPosition / ReadingState catch up alongside the legacy
-    # ReadProgress row. Read paths still serve from ReadProgress until
-    # step 3b lands. See personal/design/unified_progress_schema.md.
-    edition = (await db.execute(select(Book).where(Book.id == book_id))).scalar_one_or_none()
-    if edition is not None:
-        from app.services.unified_progress import write_progress
-
-        cursor_pct = (data.percentage or 0) / 100.0
-        if data.cfi:
-            cursor_format = "cfi"
-            cursor_value: str = data.cfi
-        else:
-            cursor_format = "percent"
-            cursor_value = str(data.percentage or 0)
-        await write_progress(
-            db,
-            user_id=current_user.id,
-            edition=edition,
-            cursor_format=cursor_format,
-            cursor_value=cursor_value,
-            cursor_pct=cursor_pct,
-            device_id=device.id,
-            total_pages=data.total_pages,
-            time_spent_delta_seconds=max(0, data.time_spent_delta_seconds or 0),
-            status_hint=data.status if data.status in ("completed", "abandoned") else None,
-            rating=data.rating,
-            timestamp=now,
-        )
+    await write_progress(
+        db,
+        user_id=current_user.id,
+        edition=edition,
+        cursor_format=cursor_format,
+        cursor_value=cursor_value,
+        cursor_pct=cursor_pct,
+        device_id=device.id,
+        total_pages=data.total_pages,
+        time_spent_delta_seconds=max(0, data.time_spent_delta_seconds or 0),
+        status_hint=data.status if data.status in ("completed", "abandoned") else None,
+        rating=data.rating,
+        timestamp=now,
+    )
 
     await db.commit()
     return {"ok": True}
@@ -297,39 +268,67 @@ async def patch_book_status(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Set reading status and/or rating without touching reading position."""
-    book_result = await db.execute(select(Book).where(Book.id == book_id))
-    if not book_result.scalar_one_or_none():
+    """Set reading status and/or rating without touching reading position.
+
+    Routes through the unified write_progress helper, which handles the
+    status-transition rules (e.g. setting started_at on first ``reading``
+    transition, bumping times_completed on ``completed``). Rating updates
+    apply to ReadingState; an explicit ``None`` clears the rating.
+    """
+    from app.services.unified_progress import write_progress
+    from app.models.reading import EditionPosition, ReadingState
+
+    edition = (await db.execute(select(Book).where(Book.id == book_id))).scalar_one_or_none()
+    if edition is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
 
     device = await _get_or_create_web_device(db, current_user.id)
-
-    stmt = select(ReadProgress).where(
-        ReadProgress.edition_id == book_id,
-        ReadProgress.user_id == current_user.id,
-    )
-    result = await db.execute(stmt)
-    progress = result.scalar_one_or_none()
-
     now = datetime.utcnow()
-    if not progress:
-        progress = ReadProgress(
-            user_id=current_user.id,
-            edition_id=book_id,
-            device_id=device.id,
-            started_at=now if data.status not in ("want_to_read", None) else None,
+
+    # Read the existing cursor so we can pass through pct unchanged when the
+    # caller is just toggling status / rating.
+    ep = (
+        await db.execute(
+            select(EditionPosition).where(
+                EditionPosition.user_id == current_user.id,
+                EditionPosition.edition_id == book_id,
+            )
         )
-        db.add(progress)
+    ).scalar_one_or_none()
+    cursor_pct = ep.current_pct if ep else 0.0
+    cursor_format = ep.current_format if ep else "percent"
+    cursor_value = ep.current_value if ep else "0"
 
-    if data.status is not None:
-        progress.status = data.status
-        if data.status == "completed" and not progress.completed_at:
-            progress.completed_at = now
+    rating = data.rating
+    if rating is not None:
+        rating = max(1, min(5, rating))
 
-    if data.rating is not None:
-        progress.rating = max(1, min(5, data.rating))
-    elif "rating" in (data.model_fields_set or set()):
-        progress.rating = None  # explicit None clears it
+    await write_progress(
+        db,
+        user_id=current_user.id,
+        edition=edition,
+        cursor_format=cursor_format,
+        cursor_value=cursor_value,
+        cursor_pct=cursor_pct,
+        device_id=device.id,
+        status_hint=data.status,
+        rating=rating,
+        timestamp=now,
+    )
+
+    # Explicit-None rating clears — write_progress doesn't apply None as
+    # a clear, so handle that case directly on ReadingState.
+    if rating is None and "rating" in (data.model_fields_set or set()):
+        rs = (
+            await db.execute(
+                select(ReadingState).where(
+                    ReadingState.user_id == current_user.id,
+                    ReadingState.work_id == edition.work_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if rs is not None:
+            rs.rating = None
 
     await db.commit()
     return {"ok": True}
@@ -340,18 +339,22 @@ async def get_reading_stats(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Reading statistics for the current user."""
+    """Reading statistics for the current user (work-keyed, hidden-aware)."""
+    from app.models.reading import EditionPosition, ReadingState
+
     uid = current_user.id
 
-    # Status counts (exclude hidden libraries)
+    # Status counts: ReadingState rows whose work has at least one Edition
+    # in a non-hidden library. The DISTINCT on Work prevents double-counting
+    # if a Work has multiple visible editions.
     async def count_status(s: str) -> int:
         r = await db.scalar(
-            select(func.count(ReadProgress.id))
-            .join(Book, Book.id == ReadProgress.edition_id)
+            select(func.count(func.distinct(ReadingState.work_id)))
+            .join(Book, Book.work_id == ReadingState.work_id)
             .join(Library, Library.id == Book.library_id)
             .where(
-                ReadProgress.user_id == uid,
-                ReadProgress.status == s,
+                ReadingState.user_id == uid,
+                ReadingState.status == s,
                 Library.is_hidden == False,
             )
         )
@@ -361,17 +364,28 @@ async def get_reading_stats(
     books_completed = await count_status("completed")
     books_abandoned = await count_status("abandoned")
 
-    # Pages read (exclude hidden libraries)
-    pages_read = await db.scalar(
-        select(func.sum(ReadProgress.current_page))
-        .join(Book, Book.id == ReadProgress.edition_id)
-        .join(Library, Library.id == Book.library_id)
-        .where(ReadProgress.user_id == uid, Library.is_hidden == False)
-    ) or 0
+    # Pages read: derive from EditionPosition.current_pct × total_pages
+    # for each visible edition the user has progress on.
+    rows = (
+        await db.execute(
+            select(EditionPosition.current_pct, EditionPosition.total_pages)
+            .join(Book, Book.id == EditionPosition.edition_id)
+            .join(Library, Library.id == Book.library_id)
+            .where(EditionPosition.user_id == uid, Library.is_hidden == False)
+        )
+    ).all()
+    pages_read = sum(
+        int(round((pct or 0.0) * pages))
+        for pct, pages in rows
+        if pages
+    )
 
-    # Time spent reading from Kobo (seconds)
+    # Time spent reading: prefer the work-level total when available
+    # (web reader session timer + Kobo deltas both feed this).
     time_reading = await db.scalar(
-        select(func.sum(KoboBookState.time_spent_reading)).where(KoboBookState.user_id == uid)
+        select(func.sum(ReadingState.total_time_seconds)).where(
+            ReadingState.user_id == uid
+        )
     ) or 0
 
     # Total books in library (exclude hidden)
@@ -381,70 +395,68 @@ async def get_reading_stats(
         .where(Library.is_hidden == False)
     ) or 0
 
-    # Currently reading (most recently opened, up to 5, exclude hidden)
-    rp_stmt = (
-        select(ReadProgress)
-        .join(Book, Book.id == ReadProgress.edition_id)
-        .join(Library, Library.id == Book.library_id)
-        .where(
-            ReadProgress.user_id == uid,
-            ReadProgress.status == "reading",
-            Library.is_hidden == False,
+    # Currently reading (most recently opened, up to 5, exclude hidden).
+    # We pick one canonical Edition per Work for display.
+    reading_rs = (
+        await db.execute(
+            select(ReadingState)
+            .where(ReadingState.user_id == uid, ReadingState.status == "reading")
+            .order_by(ReadingState.last_opened.desc().nulls_last())
+            .limit(5)
         )
-        .order_by(ReadProgress.last_opened.desc())
-        .limit(5)
-    )
-    rp_result = await db.execute(rp_stmt)
-    reading_rows = rp_result.scalars().all()
+    ).scalars().all()
+
+    async def _display_row(rs: ReadingState) -> dict | None:
+        ed_row = await db.execute(
+            select(Book)
+            .join(Library, Library.id == Book.library_id)
+            .where(Book.work_id == rs.work_id, Library.is_hidden == False)
+            .options(joinedload(Book.work).options(joinedload(Work.authors)))
+            .limit(1)
+        )
+        book = ed_row.unique().scalar_one_or_none()
+        if book is None:
+            return None
+        ep = (
+            await db.execute(
+                select(EditionPosition).where(
+                    EditionPosition.user_id == uid,
+                    EditionPosition.edition_id == book.id,
+                )
+            )
+        ).scalar_one_or_none()
+        return {
+            "id": book.id,
+            "title": book.title,
+            "author": book.authors[0].name if book.authors else None,
+            "percentage": round((ep.current_pct if ep else 0.0) * 100.0, 1),
+            "last_opened": rs.last_opened.isoformat() if rs.last_opened else None,
+            "completed_at": rs.completed_at.isoformat() if rs.completed_at else None,
+        }
 
     currently_reading = []
-    for rp in reading_rows:
-        book_row = await db.execute(
-            select(Book).where(Book.id == rp.edition_id).options(joinedload(Book.work).options(joinedload(Work.authors)))
-        )
-        book = book_row.unique().scalar_one_or_none()
-        if book:
-            currently_reading.append(
-                {
-                    "id": book.id,
-                    "title": book.title,
-                    "author": book.authors[0].name if book.authors else None,
-                    "percentage": round(rp.percentage, 1),
-                    "last_opened": rp.last_opened.isoformat() if rp.last_opened else None,
-                }
-            )
+    for rs in reading_rs:
+        row = await _display_row(rs)
+        if row is not None:
+            row.pop("completed_at", None)
+            currently_reading.append(row)
 
     # Recently completed (up to 5, exclude hidden)
-    rc_stmt = (
-        select(ReadProgress)
-        .join(Book, Book.id == ReadProgress.edition_id)
-        .join(Library, Library.id == Book.library_id)
-        .where(
-            ReadProgress.user_id == uid,
-            ReadProgress.status == "completed",
-            Library.is_hidden == False,
+    completed_rs = (
+        await db.execute(
+            select(ReadingState)
+            .where(ReadingState.user_id == uid, ReadingState.status == "completed")
+            .order_by(ReadingState.completed_at.desc().nulls_last())
+            .limit(5)
         )
-        .order_by(ReadProgress.completed_at.desc())
-        .limit(5)
-    )
-    rc_result = await db.execute(rc_stmt)
-    completed_rows = rc_result.scalars().all()
-
+    ).scalars().all()
     recently_completed = []
-    for rp in completed_rows:
-        book_row = await db.execute(
-            select(Book).where(Book.id == rp.edition_id).options(joinedload(Book.work).options(joinedload(Work.authors)))
-        )
-        book = book_row.unique().scalar_one_or_none()
-        if book:
-            recently_completed.append(
-                {
-                    "id": book.id,
-                    "title": book.title,
-                    "author": book.authors[0].name if book.authors else None,
-                    "completed_at": rp.completed_at.isoformat() if rp.completed_at else None,
-                }
-            )
+    for rs in completed_rs:
+        row = await _display_row(rs)
+        if row is not None:
+            row.pop("percentage", None)
+            row.pop("last_opened", None)
+            recently_completed.append(row)
 
     # Sessions this year (finished reads in the current calendar year)
     year_start = datetime(datetime.utcnow().year, 1, 1)

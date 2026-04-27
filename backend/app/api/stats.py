@@ -1,4 +1,4 @@
-"""Reading statistics — aggregated from ReadingState + EditionPosition + ReadSession + KoboBookState."""
+"""Reading statistics — aggregated from ReadingState + EditionPosition + ReadSession."""
 
 from collections import Counter
 from datetime import date, datetime, timedelta
@@ -14,7 +14,6 @@ from app.api.auth import get_current_user
 from app.database import get_db
 from app.models import User
 from app.models.edition import Edition
-from app.models.progress import KoboBookState
 from app.models.read_session import ReadSession
 from app.models.work import Work
 
@@ -150,12 +149,16 @@ async def get_reading_stats(
     )
     sessions = sess_result.unique().scalars().all()
 
-    # ── Kobo reading time ────────────────────────────────────────────────────
-    kobo_result = await db.execute(
-        select(KoboBookState).where(KoboBookState.user_id == current_user.id)
-    )
-    kobo_states = kobo_result.scalars().all()
-    time_reading_seconds = sum(k.time_spent_reading for k in kobo_states)
+    # ── Reading time + per-edition activity (unified schema) ─────────────────
+    # EditionPosition.time_spent_seconds is fed by both the web reader's
+    # session timer and Kobo's SpentReadingMinutes deltas; one query per
+    # user instead of the old per-source aggregation.
+    ep_rows = (
+        await db.execute(
+            select(EditionPosition).where(EditionPosition.user_id == current_user.id)
+        )
+    ).scalars().all()
+    time_reading_seconds = sum((ep.time_spent_seconds or 0) for ep in ep_rows)
 
     # ── Basic counts ─────────────────────────────────────────────────────────
     status_counter: Counter = Counter(rs.status for rs in rs_rows)
@@ -305,44 +308,46 @@ async def get_reading_stats(
     rating_counter: Counter = Counter(str(r) for r in ratings)
     rating_distribution = dict(rating_counter)
 
-    # ── Peak reading hours (from Kobo updated_at + session started_at) ────────
+    # ── Peak reading hours / DOW (EditionPosition.updated_at signals
+    # any device write; ReadSession.started_at backs it up). ────────
     hour_counter: Counter = Counter()
-    for k in kobo_states:
-        if k.updated_at:
-            hour_counter[k.updated_at.hour] += 1
+    dow_counter: Counter = Counter()
+    for ep in ep_rows:
+        when = ep.current_updated_at or ep.updated_at
+        if when:
+            hour_counter[when.hour] += 1
+            dow_counter[when.weekday()] += 1
     for s in sessions:
         if s.started_at:
             hour_counter[s.started_at.hour] += 1
-    peak_hours = [{"hour": h, "count": c} for h, c in sorted(hour_counter.items())]
-
-    # ── Day-of-week distribution ──────────────────────────────────────────────
-    dow_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    dow_counter: Counter = Counter()
-    for k in kobo_states:
-        if k.updated_at:
-            dow_counter[k.updated_at.weekday()] += 1
-    for s in sessions:
-        if s.started_at:
             dow_counter[s.started_at.weekday()] += 1
+    peak_hours = [{"hour": h, "count": c} for h, c in sorted(hour_counter.items())]
+    dow_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     day_of_week = [{"day": dow_names[d], "count": dow_counter.get(d, 0)} for d in range(7)]
 
-    # ── Reading speed (pages per hour from Kobo data) ─────────────────────────
+    # ── Reading speed (pages per hour) ────────────────────────────────────────
     reading_speed = None
     speed_samples = []
-    for k in kobo_states:
-        if k.time_spent_reading > 60 and k.current_page > 0:
-            hours = k.time_spent_reading / 3600
-            speed_samples.append(k.current_page / hours)
+    for ep in ep_rows:
+        seconds = ep.time_spent_seconds or 0
+        pages = ep.total_pages or 0
+        pct = ep.current_pct or 0.0
+        pages_read_here = int(round(pct * pages)) if pages else 0
+        if seconds > 60 and pages_read_here > 0:
+            hours = seconds / 3600
+            speed_samples.append(pages_read_here / hours)
     if speed_samples:
         avg_speed = sum(speed_samples) / len(speed_samples)
         reading_speed = {"pages_per_hour": round(avg_speed, 1), "books_sampled": len(speed_samples)}
 
-    # ── Time reading by month (from Kobo updated_at) ──────────────────────────
+    # ── Time reading by month ─────────────────────────────────────────────────
     time_month_map: dict[str, int] = {}
-    for k in kobo_states:
-        if k.updated_at and k.time_spent_reading > 0:
-            key = k.updated_at.strftime("%Y-%m")
-            time_month_map[key] = time_month_map.get(key, 0) + k.time_spent_reading
+    for ep in ep_rows:
+        when = ep.current_updated_at or ep.updated_at
+        seconds = ep.time_spent_seconds or 0
+        if when and seconds > 0:
+            key = when.strftime("%Y-%m")
+            time_month_map[key] = time_month_map.get(key, 0) + seconds
     time_by_month = [{"month": k, "seconds": v} for k, v in sorted(time_month_map.items())]
 
     # ── Top genres / tags ─────────────────────────────────────────────────────

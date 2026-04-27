@@ -1,4 +1,4 @@
-"""Editions API — CRUD for specific copies of a Work, plus UserEdition and Loan management."""
+"""Editions API — CRUD for specific copies of a Work, per-user reading state, and Loan management."""
 
 import hashlib
 import logging
@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
-from app.models import Edition, EditionContributor, EditionFile, Loan, User, UserEdition, Work
+from app.models import Edition, EditionContributor, EditionFile, Loan, User, Work
 from app.schemas.edition import (
     EditionCreate, EditionRead, EditionUpdate, EditionWithWorkRead,
     LoanCreate, LoanRead, LoanUpdate,
@@ -385,7 +385,12 @@ async def rehash_edition_file(
     }
 
 
-# ── UserEdition (reading status) ──────────────────────────────────────────────
+# ── User reading state (unified) ──────────────────────────────────────────────
+#
+# These endpoints preserve the legacy /editions/{id}/user-edition surface for
+# the frontend, but now read from ReadingState (work-level lifecycle) +
+# EditionPosition (per-edition cursor) and write through the unified
+# write_progress helper.
 
 @router.get("/{edition_id}/user-edition", response_model=Optional[UserEditionRead])
 async def get_user_edition(
@@ -393,15 +398,52 @@ async def get_user_edition(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Return the current user's reading relationship with this edition, or null."""
-    result = await db.execute(
-        select(UserEdition).where(
-            UserEdition.edition_id == edition_id,
-            UserEdition.user_id == current_user.id,
+    """Return the current user's reading state for this edition, or null."""
+    from app.models.reading import EditionPosition, ReadingState
+
+    edition = await db.get(Edition, edition_id)
+    if edition is None:
+        return None
+
+    rs = (
+        await db.execute(
+            select(ReadingState).where(
+                ReadingState.user_id == current_user.id,
+                ReadingState.work_id == edition.work_id,
+            )
         )
-    )
-    ue = result.scalar_one_or_none()
-    return UserEditionRead.model_validate(ue) if ue else None
+    ).scalar_one_or_none()
+    ep = (
+        await db.execute(
+            select(EditionPosition).where(
+                EditionPosition.user_id == current_user.id,
+                EditionPosition.edition_id == edition_id,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if rs is None and ep is None:
+        return None
+
+    pct = (ep.current_pct if ep else 0.0) * 100.0
+    total_pages = ep.total_pages if ep else None
+    current_page = int(round((pct / 100.0) * total_pages)) if total_pages else 0
+    return UserEditionRead.model_validate({
+        "id": rs.id if rs else 0,
+        "user_id": current_user.id,
+        "edition_id": edition_id,
+        "status": rs.status if rs else "want_to_read",
+        "current_page": current_page,
+        "total_pages": total_pages,
+        "percentage": pct,
+        "rating": rs.rating if rs else None,
+        "review": rs.review if rs else None,
+        "started_at": rs.started_at if rs else None,
+        "completed_at": rs.completed_at if rs else None,
+        "last_opened": rs.last_opened if rs else None,
+        "created_at": rs.created_at if rs else datetime.utcnow(),
+        "updated_at": rs.updated_at if rs else datetime.utcnow(),
+    })
 
 
 @router.put("/{edition_id}/user-edition", response_model=UserEditionRead)
@@ -411,34 +453,76 @@ async def upsert_user_edition(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Create or update the current user's reading state for this edition."""
-    result = await db.execute(
-        select(UserEdition).where(
-            UserEdition.edition_id == edition_id,
-            UserEdition.user_id == current_user.id,
+    """Create or update the current user's reading state for this edition.
+
+    Routes through the unified write_progress helper. Status / rating /
+    review / lifecycle timestamps land on ReadingState; pct / total_pages
+    land on EditionPosition. The legacy ``current_page`` field is treated
+    as a derived display value: if provided alongside total_pages, we
+    convert it to a pct.
+    """
+    from app.models.progress import Device
+    from app.models.reading import EditionPosition, ReadingState
+    from app.services.unified_progress import write_progress
+
+    edition = await db.get(Edition, edition_id)
+    if edition is None:
+        raise HTTPException(status_code=404, detail="Edition not found")
+
+    # Find or create a "web" device for this user — the same one
+    # api/progress.py uses for unified writes.
+    device = (
+        await db.execute(
+            select(Device).where(
+                Device.user_id == current_user.id, Device.device_type == "web"
+            )
         )
+    ).scalar_one_or_none()
+    if device is None:
+        device = Device(
+            user_id=current_user.id, name="Web Browser", device_type="web"
+        )
+        db.add(device)
+        await db.flush()
+
+    # Reuse existing cursor data if the body doesn't include a position.
+    ep = (
+        await db.execute(
+            select(EditionPosition).where(
+                EditionPosition.user_id == current_user.id,
+                EditionPosition.edition_id == edition_id,
+            )
+        )
+    ).scalar_one_or_none()
+
+    incoming_pct = body.percentage if body.percentage is not None else None
+    if incoming_pct is None and body.current_page is not None and body.total_pages:
+        incoming_pct = (body.current_page / max(1, body.total_pages)) * 100.0
+
+    cursor_pct = (incoming_pct / 100.0) if incoming_pct is not None else (
+        ep.current_pct if ep else 0.0
     )
-    ue = result.scalar_one_or_none()
-    if ue is None:
-        ue = UserEdition(user_id=current_user.id, edition_id=edition_id)
-        db.add(ue)
+    cursor_format = ep.current_format if (ep and ep.current_format) else "percent"
+    cursor_value = ep.current_value if (ep and ep.current_value) else str(round(cursor_pct * 100, 4))
 
-    for field in ("status", "current_page", "total_pages", "percentage",
-                  "rating", "review", "started_at", "completed_at", "last_opened"):
-        val = getattr(body, field, None)
-        if val is not None:
-            setattr(ue, field, val)
-
-    # Auto-set started_at on first transition to "reading"
-    if body.status == "reading" and ue.started_at is None:
-        ue.started_at = datetime.utcnow()
-    # Auto-set completed_at
-    if body.status == "completed" and ue.completed_at is None:
-        ue.completed_at = datetime.utcnow()
-
+    await write_progress(
+        db,
+        user_id=current_user.id,
+        edition=edition,
+        cursor_format=cursor_format,
+        cursor_value=cursor_value,
+        cursor_pct=cursor_pct,
+        device_id=device.id,
+        total_pages=body.total_pages,
+        status_hint=body.status if body.status in ("completed", "abandoned", "reading") else None,
+        rating=body.rating,
+        review=body.review,
+    )
     await db.commit()
-    await db.refresh(ue)
-    return UserEditionRead.model_validate(ue)
+
+    # Return the fresh shape via the GET handler logic — keeps response
+    # consistent with frontend expectations.
+    return await get_user_edition(edition_id=edition_id, db=db, current_user=current_user)
 
 
 # ── Loans ─────────────────────────────────────────────────────────────────────

@@ -4,9 +4,9 @@ Base = declarative_base()
 
 from app.models.book import Author, Book, BookContributor, BookFile, Series, Tag, book_authors, book_series, book_tags
 from app.models.work import Work, WorkContributor, work_authors, work_tags, work_series
-from app.models.edition import Edition, EditionFile, EditionContributor, UserEdition, Loan
+from app.models.edition import Edition, EditionFile, EditionContributor, Loan
 from app.models.library import Library, LibraryAccess
-from app.models.progress import Device, KOReaderProgress, KoboBookState, KoboSyncToken, KoboTokenShelf, ReadProgress, ReadingGoal
+from app.models.progress import Device, KOReaderProgress, KoboSyncToken, KoboTokenShelf, ReadingGoal
 from app.models.shelf import Shelf, ShelfBook
 from app.models.user import User
 from app.models.analysis import AnalysisTemplate, BookAnalysis, ComputationalAnalysis, BookPromptConfig
@@ -46,7 +46,6 @@ __all__ = [
     "Edition",
     "EditionFile",
     "EditionContributor",
-    "UserEdition",
     "Loan",
     # Infrastructure
     "Library",
@@ -54,11 +53,9 @@ __all__ = [
     "User",
     "Shelf",
     "ShelfBook",
-    "ReadProgress",
     "Device",
     "KoboSyncToken",
     "KoboTokenShelf",
-    "KoboBookState",
     "KOReaderProgress",
     "ReadingGoal",
     "AnalysisTemplate",

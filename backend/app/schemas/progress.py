@@ -28,35 +28,7 @@ class DeviceRead(DeviceBase):
         from_attributes = True
 
 
-class ReadProgressBase(BaseModel):
-    """Read progress base schema."""
-
-    current_page: int = 0
-    total_pages: Optional[int] = None
-    percentage: float = 0.0
-    status: str = "reading"
-
-
-class ReadProgressUpdate(BaseModel):
-    """Read progress update schema."""
-
-    current_page: Optional[int] = None
-    total_pages: Optional[int] = None
-    percentage: Optional[float] = None
-    status: Optional[str] = None
-
-
-class ReadProgressRead(ReadProgressBase):
-    """Read progress read schema."""
-
-    id: int
-    user_id: int
-    book_id: int
-    device_id: int
-    started_at: Optional[datetime]
-    completed_at: Optional[datetime]
-    last_opened: datetime
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
+# ReadProgress* schemas were retired in step 4 of the unified-progress
+# migration. The replacement surface lives on the inline ProgressUpdate
+# Pydantic model in api/progress.py and the UserEditionRead/Update
+# schemas in schemas/edition.py.

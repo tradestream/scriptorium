@@ -24,15 +24,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
-from app.models import Book, BookFile, Edition, EditionFile, Library, User, UserEdition, Work
+from app.models import Book, BookFile, Edition, EditionFile, Library, User, Work
 from app.models.progress import (
     Device,
-    KoboBookState,
     KoboShelfArchive,
     KoboSyncedBook,
     KoboSyncToken,
     KoboTokenShelf,
-    ReadProgress,
 )
 from app.models.shelf import Shelf, ShelfBook
 
@@ -825,86 +823,6 @@ def _build_edition_entry(
     return entry
 
 
-def _build_book_entry(
-    book: Book,
-    book_file: BookFile,
-    state: Optional[KoboBookState],
-    auth_token: str,
-    base_url: str,
-    is_new: bool = True,
-) -> dict:
-    """Legacy: build a Kobo entry from a Book record (used until migration 0034)."""
-    kobo_base = f"{base_url}/kobo/{auth_token}"
-
-    author_list: list[str] = []
-    if book.authors:
-        author_list = [a.name for a in book.authors]
-
-    series_name = None
-    series_number = None
-    if book.series:
-        series_name = book.series[0].name
-
-    envelope_key = "NewEntitlement" if is_new else "ChangedEntitlement"
-
-    entry: dict[str, Any] = {
-        envelope_key: {
-            "BookEntitlement": {
-                "Accessibility": "Full",
-                "ActivePeriod": {"From": _kobo_timestamp(book.created_at)},
-                "Created": _kobo_timestamp(book.created_at),
-                "CrossRevisionId": book.uuid,
-                "Id": book.uuid,
-                "IsHiddenFromArchive": False,
-                "IsLocked": False,
-                "IsRemoved": False,
-                "LastModified": _kobo_timestamp(book.updated_at),
-                "OriginCategory": "Imported",
-                "RevisionId": book.uuid,
-                "Status": "Active",
-            },
-            "BookMetadata": {
-                "Categories": ["00000000-0000-0000-0000-000000000001"],
-                "ContributorRoles": [{"Name": name} for name in author_list],
-                "Contributors": author_list,
-                "CoverImageId": (
-                    f"{book.uuid}-{book.cover_hash}" if book.cover_hash else None
-                ),
-                "CrossRevisionId": book.uuid,
-                "CurrentDisplayPrice": {"CurrencyCode": "USD", "TotalAmount": 0},
-                "CurrentLoveDisplayPrice": {"TotalAmount": 0},
-                "Description": book.description or "",
-                "DownloadUrls": _build_download_urls(book, book.files or [], kobo_base),
-                "EntitlementId": book.uuid,
-                "IsEligibleForKoboLove": False,
-                "IsInternetArchive": False,
-                "IsPreOrder": False,
-                "IsSocialEnabled": True,
-                "Language": book.language or "en",
-                "PhoneticPronunciations": {},
-                "PublicationDate": _kobo_timestamp(book.published_date),
-                "Publisher": {"Imprint": "", "Name": ""},
-                "RevisionId": book.uuid,
-                "Title": book.title,
-                "WorkId": book.uuid,
-            },
-        }
-    }
-
-    if series_name:
-        entry[envelope_key]["BookMetadata"]["Series"] = {
-            "Name": series_name,
-            "Number": str(series_number) if series_number else "0",
-            "NumberFloat": float(series_number) if series_number else 0.0,
-            "Id": series_name,
-        }
-
-    if state and is_new:
-        entry[envelope_key]["ReadingState"] = _build_reading_state(book.uuid, state)
-
-    return entry
-
-
 def _build_empty_reading_state(entity_uuid: str, created_at: datetime) -> dict:
     """Build a default empty ReadingState for a book with no recorded progress.
 
@@ -1150,253 +1068,121 @@ async def update_reading_state(
     user_id: int,
     state_data: dict,
     db: AsyncSession,
-) -> Optional[KoboBookState]:
+) -> Optional["EditionPosition"]:
     """Process a reading state update from a Kobo device.
 
-    Looks up by UUID (which is identical on both Edition and Book rows during
-    the transition period). Prefers Edition; falls back to Book.
-    Updates KoboBookState and UserEdition (the canonical user reading state).
+    Resolves the device's payload into a unified-progress write via
+    ``write_progress``. Returns the updated ``EditionPosition`` (caller
+    only checks truthiness for the success-result envelope).
     """
-    # Edition and Book are the same model (alias), so a single lookup is
-    # sufficient. Accept either a UUID string or a numeric id — older
-    # Scriptorium releases served Kobo entitlements with numeric ids as
-    # the EntitlementId, and those are still cached on user devices.
-    edition = await _find_edition_by_any_id(book_uuid, db)
+    from app.models.reading import EditionPosition as _EP
+    from app.services.unified_progress import write_progress
 
+    edition = await _find_edition_by_any_id(book_uuid, db)
     if edition is None:
         logger.warning("Reading state update for unknown UUID: %s", book_uuid)
         return None
-
     edition_id = edition.id
 
-    # Upsert KoboBookState
-    state_stmt = select(KoboBookState).where(
-        KoboBookState.user_id == user_id,
-        KoboBookState.edition_id == edition_id,
-    )
-    state_result = await db.execute(state_stmt)
-    kobo_state = state_result.scalar_one_or_none()
-
-    if not kobo_state:
-        # Explicitly initialize numeric fields — the SQLAlchemy column
-        # defaults don't apply to the Python object until after flush,
-        # and downstream code (e.g. _sync_to_user_edition) may read them
-        # before the session commits.
-        kobo_state = KoboBookState(
-            user_id=user_id,
-            edition_id=edition_id,
-            status="ReadyToRead",
-            times_started_reading=0,
-            current_page=0,
-            time_spent_reading=0,
-            content_source_progress=0.0,
-            spine_index=0,
-        )
-        db.add(kobo_state)
-
+    # ── Status: translate Kobo's enum into our canonical lifecycle hint.
     status_info = state_data.get("StatusInfo", {})
-    if "Status" in status_info:
-        kobo_state.status = status_info["Status"]
-    if "TimesStartedReading" in status_info:
-        kobo_state.times_started_reading = status_info["TimesStartedReading"]
+    raw_status = status_info.get("Status")
+    kobo_to_canonical = {
+        "ReadyToRead": None,           # no hint — let cursor pct decide
+        "Reading": "reading",
+        "Finished": "completed",
+    }
+    status_hint = kobo_to_canonical.get(raw_status)
 
-    statistics = state_data.get("Statistics", {})
-    if "SpentReadingMinutes" in statistics:
-        kobo_state.time_spent_reading = statistics["SpentReadingMinutes"] * 60
-
+    # ── Cursor position. Three layers of fallback for the bookmark:
+    # 1. Real koboSpan id from the device → ``chapter_href#span_id``.
+    # 2. Synthetic ``spine#N`` we emitted → ``chapter_href#spine#N``.
+    # 3. No bookmark, just a ContentSourceProgressPercent → format=percent.
     bookmark = state_data.get("CurrentBookmark", {})
+    location = bookmark.get("Location", {}) or {}
+    chapter_source = location.get("Source", "") or ""
+    val = location.get("Value", "") or ""
 
-    is_finished = kobo_state.status == "Finished"
-    if not is_finished:
-        if "ContentSourceProgressPercent" in bookmark:
-            kobo_state.content_source_progress = bookmark["ContentSourceProgressPercent"]
-        elif "ProgressPercent" in bookmark:
-            kobo_state.content_source_progress = bookmark["ProgressPercent"]
+    cursor_format = "percent"
+    cursor_value = "0"
+    if val.startswith("spine#") or "#" in val:
+        # Real koboSpan id or our synthetic — pack into the kobo_span shape.
+        cursor_format = "kobo_span"
+        cursor_value = f"{chapter_source}#{val}" if chapter_source else val
+    elif val and chapter_source:
+        cursor_format = "kobo_span"
+        cursor_value = f"{chapter_source}#{val}"
 
-        location = bookmark.get("Location", {})
-        chapter_source = location.get("Source", "")
-        if chapter_source:
-            kobo_state.content_id = chapter_source
-        val = location.get("Value", "")
-
-        # Two formats to handle in incoming bookmarks:
-        # 1. "spine#N" — a synthetic value we ourselves emitted before the
-        #    KEPUB span map was available; trust it directly.
-        # 2. A real koboSpan id like "kobo.27.1" — Nickel's native format.
-        #    Resolve it against the stored span map for this edition's
-        #    EPUB EditionFile to recover (spine_index, in-chapter fraction).
-        if val.startswith("spine#"):
-            try:
-                kobo_state.spine_index = int(val[6:])
-            except ValueError:
-                pass
-        elif val:
-            # Look up the EPUB EditionFile for this edition; the span map
-            # is keyed by it.
-            from app.services.kobo_spans import resolve_span
-
-            files_result = await db.execute(
-                select(EditionFile).where(EditionFile.edition_id == edition_id)
-            )
-            files = list(files_result.scalars().all())
-            epub_file = next(
-                (f for f in files if (f.format or "").lower() == "epub"), None
-            )
-            if epub_file is not None and chapter_source:
-                resolved = await resolve_span(
-                    epub_file.id, chapter_source, val, db
-                )
-                if resolved is not None:
-                    spine_index, _in_chapter, global_fraction = resolved
-                    kobo_state.spine_index = spine_index
-                    # Prefer the device-supplied progress percent when
-                    # present; fall back to span-derived global fraction.
-                    if (
-                        "ContentSourceProgressPercent" not in bookmark
-                        and "ProgressPercent" not in bookmark
-                    ):
-                        kobo_state.content_source_progress = global_fraction * 100.0
+    if "ContentSourceProgressPercent" in bookmark:
+        raw_pct = bookmark["ContentSourceProgressPercent"]
+    elif "ProgressPercent" in bookmark:
+        raw_pct = bookmark["ProgressPercent"]
     else:
-        kobo_state.content_source_progress = 100.0
+        raw_pct = None
 
-    kobo_state.updated_at = _utcnow()
+    # ``Finished`` always means 100% regardless of what the device sent.
+    if raw_status == "Finished":
+        cursor_pct = 1.0
+    elif raw_pct is not None:
+        cursor_pct = max(0.0, min(1.0, float(raw_pct) / 100.0))
+    else:
+        cursor_pct = None
 
-    # Sync to UserEdition (canonical). The legacy ReadProgress sync path
-    # was removed — its schema diverged from the helper's expectations
-    # (no device_id column) and UserEdition is the authoritative table.
-    await _sync_to_user_edition(user_id=user_id, edition_id=edition_id, kobo_state=kobo_state, db=db)
-
-    # Step 3a dual-write into the unified progress schema. Read paths
-    # still serve from KoboBookState/UserEdition until step 3b lands;
-    # this just keeps EditionPosition / DevicePosition / ReadingState
-    # in sync alongside. See personal/design/unified_progress_schema.md.
-    try:
-        from app.services.unified_progress import write_progress
-
-        device = await _get_or_create_kobo_device(user_id, db)
-
-        # Build the kobo_span cursor value: "chapter_href#span_id" if
-        # the device sent a real koboSpan id (post-3a Kobo work), or
-        # the synthetic "chapter_href#spine#N" form otherwise. Both
-        # round-trip back through resolve_span() at read time.
-        chapter = kobo_state.content_id or ""
-        # If content_id already includes a "#" (real koboSpan), prefer
-        # it; otherwise embed spine_index as a fallback.
-        if chapter and "#" in chapter:
-            cursor_value = chapter
+    # If we have *no* cursor signal at all (status-only update) reuse
+    # whatever EditionPosition already holds so we don't regress to 0.
+    if cursor_pct is None or (cursor_format == "percent" and not raw_pct):
+        existing = (
+            await db.execute(
+                select(_EP).where(_EP.user_id == user_id, _EP.edition_id == edition_id)
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            cursor_pct = cursor_pct if cursor_pct is not None else (existing.current_pct or 0.0)
+            if cursor_format == "percent" and existing.current_format and existing.current_value:
+                cursor_format = existing.current_format
+                cursor_value = existing.current_value
         else:
-            cursor_value = f"{chapter}#spine#{kobo_state.spine_index or 0}"
+            cursor_pct = 0.0
+    if cursor_format == "percent":
+        cursor_value = str(round(cursor_pct * 100.0, 4))
 
-        # KoboBookState stores percent as 0-100 (the wire format from
-        # the device); EditionPosition stores 0.0-1.0.
-        cursor_pct = (kobo_state.content_source_progress or 0.0) / 100.0
+    # ── Time-spent delta. Kobo reports SpentReadingMinutes cumulatively
+    # per device, so subtract whatever EditionPosition already has to
+    # avoid double-counting on every sync.
+    statistics = state_data.get("Statistics", {})
+    delta_seconds = 0
+    if "SpentReadingMinutes" in statistics:
+        incoming_seconds = int(statistics["SpentReadingMinutes"]) * 60
+        existing = (
+            await db.execute(
+                select(_EP.time_spent_seconds).where(
+                    _EP.user_id == user_id, _EP.edition_id == edition_id
+                )
+            )
+        ).scalar_one_or_none() or 0
+        delta_seconds = max(0, incoming_seconds - existing)
 
-        # Translate Kobo's status enum to our canonical strings for
-        # status_hint. ReadyToRead is intentionally not a hint — leave
-        # the helper to derive the lifecycle from cursor position.
-        kobo_status_hints = {"Finished": "completed", "Reading": "reading"}
-        status_hint = kobo_status_hints.get(kobo_state.status)
+    device = await _get_or_create_kobo_device(user_id, db)
 
-        await write_progress(
-            db,
-            user_id=user_id,
-            edition=edition,
-            cursor_format="kobo_span",
-            cursor_value=cursor_value,
-            cursor_pct=cursor_pct,
-            device_id=device.id,
-            total_pages=kobo_state.total_pages,
-            status_hint=status_hint,
-            timestamp=_utcnow(),
-        )
-    except Exception as exc:  # pragma: no cover — defensive
-        logger.warning(
-            "Unified progress dual-write failed for edition %s: %s",
-            edition_id, exc,
-        )
+    await write_progress(
+        db,
+        user_id=user_id,
+        edition=edition,
+        cursor_format=cursor_format,
+        cursor_value=cursor_value,
+        cursor_pct=cursor_pct or 0.0,
+        device_id=device.id,
+        time_spent_delta_seconds=delta_seconds,
+        status_hint=status_hint,
+        timestamp=_utcnow(),
+    )
 
     await db.commit()
-    await db.refresh(kobo_state)
-    return kobo_state
-
-
-async def _sync_to_user_edition(
-    user_id: int,
-    edition_id: int,
-    kobo_state: KoboBookState,
-    db: AsyncSession,
-) -> None:
-    """Sync Kobo reading state into the UserEdition table."""
-    from app.models.edition import UserEdition
-
-    stmt = select(UserEdition).where(
-        UserEdition.user_id == user_id,
-        UserEdition.edition_id == edition_id,
-    )
-    result = await db.execute(stmt)
-    ue = result.scalar_one_or_none()
-
-    if not ue:
-        ue = UserEdition(user_id=user_id, edition_id=edition_id)
-        db.add(ue)
-
-    status_map = {
-        "ReadyToRead": "want_to_read",
-        "Reading": "reading",
-        "Finished": "completed",
-    }
-    ue.status = status_map.get(kobo_state.status, "reading")
-    ue.percentage = kobo_state.content_source_progress
-    ue.current_page = kobo_state.current_page
-    if kobo_state.total_pages:
-        ue.total_pages = kobo_state.total_pages
-    ue.last_opened = _utcnow()
-
-    if ue.status == "completed" and not ue.completed_at:
-        ue.completed_at = _utcnow()
-    if (kobo_state.times_started_reading or 0) > 0 and not ue.started_at:
-        ue.started_at = _utcnow()
-
-
-async def _sync_to_read_progress(
-    user_id: int,
-    book_id: int,
-    kobo_state: KoboBookState,
-    db: AsyncSession,
-) -> None:
-    """Legacy: sync Kobo reading state into ReadProgress (kept for transition)."""
-    stmt = select(ReadProgress).where(
-        ReadProgress.user_id == user_id,
-        ReadProgress.edition_id == book_id,
-    )
-    result = await db.execute(stmt)
-    progress = result.scalar_one_or_none()
-
-    if not progress:
-        device = await _get_or_create_kobo_device(user_id, db)
-        progress = ReadProgress(
-            user_id=user_id,
-            edition_id=book_id,
-            device_id=device.id,
+    return (
+        await db.execute(
+            select(_EP).where(_EP.user_id == user_id, _EP.edition_id == edition_id)
         )
-        db.add(progress)
-
-    status_map = {
-        "ReadyToRead": "reading",
-        "Reading": "reading",
-        "Finished": "completed",
-    }
-    progress.status = status_map.get(kobo_state.status, "reading")
-    progress.percentage = kobo_state.content_source_progress
-    progress.current_page = kobo_state.current_page
-    if kobo_state.total_pages:
-        progress.total_pages = kobo_state.total_pages
-    progress.last_opened = _utcnow()
-
-    if progress.status == "completed" and not progress.completed_at:
-        progress.completed_at = _utcnow()
-    if kobo_state.times_started_reading > 0 and not progress.started_at:
-        progress.started_at = _utcnow()
+    ).scalar_one_or_none()
 
 
 async def _get_or_create_kobo_device(

@@ -11,7 +11,6 @@ from app.models import User
 from app.models.book import Author, Book, Series, Tag
 from app.models.edition import Edition, EditionFile
 from app.models.work import Work
-from app.models.progress import ReadProgress
 from app.models.collection import Collection, CollectionBook
 from app.schemas.book import BookRead
 from app.schemas.collection import (

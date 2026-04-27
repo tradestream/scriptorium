@@ -8,7 +8,6 @@ from sqlalchemy.orm import joinedload
 
 from app.database import get_db
 from app.models import Author, Book, Series, Shelf, ShelfBook, Tag, User
-from app.models.progress import ReadProgress
 from app.models.work import Work
 from app.schemas.shelf import ShelfBookAdd, ShelfCreate, ShelfRead, ShelfUpdate
 

@@ -2,7 +2,7 @@
 
 Connects to a self-hosted AudiobookShelf instance and:
 - Fetches libraries and their items (audiobooks/ebooks)
-- Syncs listening progress → Scriptorium ReadProgress
+- Syncs listening progress → unified EditionPosition + ReadingState
 - Matches ABS items to existing Scriptorium books (by ISBN, ASIN, title+author)
 - Imports new ABS items as Scriptorium book records
 """
@@ -262,12 +262,12 @@ async def sync_covers(overwrite: bool = False) -> dict:
 
 
 async def sync_progress(db_user_id: int) -> dict:
-    """Pull listening progress from ABS and upsert into Scriptorium UserEdition / ReadProgress.
+    """Pull listening progress from ABS and publish into the unified schema.
 
-    Prefers the new Edition/UserEdition model; falls back to legacy Book/ReadProgress
-    for rows that haven't been migrated yet.
-
-    Returns a summary dict with counts.
+    Each in-progress item is matched to an Edition by ``abs_item_id`` and
+    written via ``write_progress``: cursor format ``audio_seconds`` when
+    we have the playhead, otherwise ``percent``. ABS becomes one more
+    write-source alongside the web reader and Kobo sync.
     """
     client = _get_client()
     if not client:
@@ -275,9 +275,9 @@ async def sync_progress(db_user_id: int) -> dict:
 
     from sqlalchemy import select
     from app.database import get_session_factory
-    from app.models.book import Book
-    from app.models.edition import Edition, UserEdition
-    from app.models.progress import ReadProgress
+    from app.models.edition import Edition
+    from app.models.progress import Device
+    from app.services.unified_progress import write_progress
 
     updated = 0
     matched = 0
@@ -291,94 +291,64 @@ async def sync_progress(db_user_id: int) -> dict:
 
     factory = get_session_factory()
     async with factory() as db:
+        # One virtual ABS device per user — same shape as the Kobo /
+        # web devices already created by their respective sync paths.
+        abs_device = (
+            await db.execute(
+                select(Device).where(
+                    Device.user_id == db_user_id,
+                    Device.device_type == "audiobookshelf",
+                )
+            )
+        ).scalar_one_or_none()
+        if abs_device is None:
+            abs_device = Device(
+                user_id=db_user_id,
+                name="AudiobookShelf",
+                device_type="audiobookshelf",
+            )
+            db.add(abs_device)
+            await db.flush()
+
         for item in in_progress:
             prog = _progress_from_item(item)
             if not prog:
                 continue
 
             abs_id = prog["abs_item_id"]
-            pct = round(prog["progress"] * 100, 1)
-            status = "completed" if prog["is_finished"] else ("reading" if pct > 0 else "want_to_read")
+            cursor_pct = max(0.0, min(1.0, float(prog["progress"] or 0.0)))
+            status_hint = "completed" if prog["is_finished"] else None
 
-            finished_dt: datetime | None = None
-            if prog["finished_at"]:
-                try:
-                    finished_dt = datetime.utcfromtimestamp(int(prog["finished_at"]) / 1000)
-                except (ValueError, TypeError):
-                    pass
-
-            started_dt: datetime | None = None
-            if prog["started_at"]:
-                try:
-                    started_dt = datetime.utcfromtimestamp(int(prog["started_at"]) / 1000)
-                except (ValueError, TypeError):
-                    pass
-
-            # ── Try Edition first (new model) ─────────────────────────────────
-            edition = (await db.execute(
-                select(Edition).where(Edition.abs_item_id == abs_id).limit(1)
-            )).scalar_one_or_none()
-
-            if edition:
-                matched += 1
-                ue = (await db.execute(
-                    select(UserEdition).where(
-                        UserEdition.user_id == db_user_id,
-                        UserEdition.edition_id == edition.id,
-                    )
-                )).scalar_one_or_none()
-                if ue is None:
-                    ue = UserEdition(
-                        user_id=db_user_id,
-                        edition_id=edition.id,
-                        status=status,
-                        percentage=prog["progress"],
-                        started_at=started_dt,
-                        completed_at=finished_dt if prog["is_finished"] else None,
-                    )
-                    db.add(ue)
-                else:
-                    ue.status = status
-                    ue.percentage = prog["progress"]
-                    if started_dt and not ue.started_at:
-                        ue.started_at = started_dt
-                    if prog["is_finished"] and finished_dt:
-                        ue.completed_at = finished_dt
-                updated += 1
-                continue
-
-            # ── Fall back to legacy Book / ReadProgress ───────────────────────
-            book = (await db.execute(
-                select(Book).where(Book.abs_item_id == abs_id).limit(1)
-            )).scalar_one_or_none()
-            if not book:
+            edition = (
+                await db.execute(
+                    select(Edition).where(Edition.abs_item_id == abs_id).limit(1)
+                )
+            ).scalar_one_or_none()
+            if edition is None:
                 skipped += 1
                 continue
-
             matched += 1
-            rp = (await db.execute(
-                select(ReadProgress).where(
-                    ReadProgress.user_id == db_user_id,
-                    ReadProgress.edition_id == book.id,
-                )
-            )).scalar_one_or_none()
-            if rp is None:
-                rp = ReadProgress(
-                    user_id=db_user_id,
-                    edition_id=book.id,
-                    status=status,
-                    percentage=prog["progress"],
-                    started_at=started_dt,
-                    completed_at=finished_dt if prog["is_finished"] else None,
-                )
-                db.add(rp)
+
+            # Prefer audio_seconds cursor when ABS gave us a playhead;
+            # fall back to percent for items without a position.
+            current_time = prog.get("current_time")
+            if current_time is not None:
+                cursor_format = "audio_seconds"
+                cursor_value = str(round(float(current_time), 3))
             else:
-                rp.status = status
-                rp.percentage = prog["progress"]
-                if started_dt and not rp.started_at:
-                    rp.started_at = started_dt
-                if prog["is_finished"] and finished_dt:
-                    rp.completed_at = finished_dt
+                cursor_format = "percent"
+                cursor_value = str(round(cursor_pct * 100, 4))
+
+            await write_progress(
+                db,
+                user_id=db_user_id,
+                edition=edition,
+                cursor_format=cursor_format,
+                cursor_value=cursor_value,
+                cursor_pct=cursor_pct,
+                device_id=abs_device.id,
+                status_hint=status_hint,
+            )
             updated += 1
 
         await db.commit()
