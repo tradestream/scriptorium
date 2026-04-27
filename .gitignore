@@ -33,3 +33,16 @@ frontend/tests/.auth/
 frontend/test-results/
 
 .claude/
+
+# Personal materials — analyses, reference books, one-off scripts, prompts,
+# firmware mods. Not app code, not needed to run the app. See personal/README.md.
+/personal/
+
+# Belt-and-suspenders: catch any future analysis output that lands in repo root
+# instead of personal/analyses/<book>/.
+/*_Analysis.md
+/*_Analysis.epub
+/*_Analyses.md
+/*_Analyses.epub
+/*_Synthesis.md
+/*_Synthesis.epub
