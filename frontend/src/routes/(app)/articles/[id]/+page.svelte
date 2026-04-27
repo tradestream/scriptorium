@@ -4,6 +4,7 @@
   import { ArrowLeft, Star, Archive, ExternalLink, Highlighter } from 'lucide-svelte';
   import * as api from '$lib/api/client';
   import type { ArticleDetail } from '$lib/api/client';
+  import { sanitizeMarkdown } from '$lib/utils/sanitizeHtml';
 
   let { data } = $props();
   let article = $state(data.article as ArticleDetail);
@@ -82,14 +83,9 @@
   {#if article.markdown_content}
     <Separator class="my-6" />
     <article class="prose prose-sm dark:prose-invert max-w-none">
-      {@html article.markdown_content
-        .replace(/^# .+$/gm, (m) => `<h1>${m.slice(2)}</h1>`)
-        .replace(/^## .+$/gm, (m) => `<h2>${m.slice(3)}</h2>`)
-        .replace(/^### .+$/gm, (m) => `<h3>${m.slice(4)}</h3>`)
-        .replace(/\n\n/g, '</p><p>')
-        .replace(/^/, '<p>')
-        .replace(/$/, '</p>')
-      }
+      <!-- Article content comes from Instapaper / external HTML sources;
+           sanitize before {@html} render to block stored XSS. -->
+      {@html sanitizeMarkdown(article.markdown_content)}
     </article>
   {:else}
     <div class="mt-8 text-center text-sm text-muted-foreground">

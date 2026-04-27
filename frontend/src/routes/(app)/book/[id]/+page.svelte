@@ -17,6 +17,7 @@
   import { enrichBookStream } from "$lib/api/client";
   import type { Book, Shelf, Collection, Annotation, ReadSession, User } from "$lib/types/index";
   import type { PageData } from './$types';
+  import { sanitizeHtml } from "$lib/utils/sanitizeHtml";
 
   let { data }: { data: PageData } = $props();
   let book = $state<Book | null>(data.book ?? null);
@@ -1099,7 +1100,11 @@
           {/if}
 
           {#if book.description}
-            <div class="mt-4 leading-relaxed text-muted-foreground prose prose-sm dark:prose-invert max-w-none [&>br]:block [&>br]:mt-2">{@html book.description}</div>
+            <!-- book.description comes from external metadata providers
+                 (Google Books, Open Library, Hardcover, Goodreads, ISBNDB,
+                 LibraryThing). Sanitize before {@html} render to block
+                 stored XSS via a malicious / compromised provider. -->
+            <div class="mt-4 leading-relaxed text-muted-foreground prose prose-sm dark:prose-invert max-w-none [&>br]:block [&>br]:mt-2">{@html sanitizeHtml(book.description)}</div>
           {/if}
 
           <Separator class="my-6" />
