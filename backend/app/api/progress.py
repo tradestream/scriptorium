@@ -127,6 +127,35 @@ async def update_book_progress(
     if data.status == "completed" and not progress.completed_at:
         progress.completed_at = now
 
+    # Step 3a dual-write: also publish into the unified progress schema
+    # so EditionPosition / ReadingState catch up alongside the legacy
+    # ReadProgress row. Read paths still serve from ReadProgress until
+    # step 3b lands. See personal/design/unified_progress_schema.md.
+    edition = (await db.execute(select(Book).where(Book.id == book_id))).scalar_one_or_none()
+    if edition is not None:
+        from app.services.unified_progress import write_progress
+
+        cursor_pct = (data.percentage or 0) / 100.0
+        if data.cfi:
+            cursor_format = "cfi"
+            cursor_value: str = data.cfi
+        else:
+            cursor_format = "percent"
+            cursor_value = str(data.percentage or 0)
+        await write_progress(
+            db,
+            user_id=current_user.id,
+            edition=edition,
+            cursor_format=cursor_format,
+            cursor_value=cursor_value,
+            cursor_pct=cursor_pct,
+            device_id=device.id,
+            total_pages=data.total_pages,
+            status_hint=data.status if data.status in ("completed", "abandoned") else None,
+            rating=data.rating,
+            timestamp=now,
+        )
+
     await db.commit()
     return {"ok": True}
 

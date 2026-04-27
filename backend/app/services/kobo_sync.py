@@ -1138,6 +1138,55 @@ async def update_reading_state(
     # (no device_id column) and UserEdition is the authoritative table.
     await _sync_to_user_edition(user_id=user_id, edition_id=edition_id, kobo_state=kobo_state, db=db)
 
+    # Step 3a dual-write into the unified progress schema. Read paths
+    # still serve from KoboBookState/UserEdition until step 3b lands;
+    # this just keeps EditionPosition / DevicePosition / ReadingState
+    # in sync alongside. See personal/design/unified_progress_schema.md.
+    try:
+        from app.services.unified_progress import write_progress
+
+        device = await _get_or_create_kobo_device(user_id, db)
+
+        # Build the kobo_span cursor value: "chapter_href#span_id" if
+        # the device sent a real koboSpan id (post-3a Kobo work), or
+        # the synthetic "chapter_href#spine#N" form otherwise. Both
+        # round-trip back through resolve_span() at read time.
+        chapter = kobo_state.content_id or ""
+        # If content_id already includes a "#" (real koboSpan), prefer
+        # it; otherwise embed spine_index as a fallback.
+        if chapter and "#" in chapter:
+            cursor_value = chapter
+        else:
+            cursor_value = f"{chapter}#spine#{kobo_state.spine_index or 0}"
+
+        # KoboBookState stores percent as 0-100 (the wire format from
+        # the device); EditionPosition stores 0.0-1.0.
+        cursor_pct = (kobo_state.content_source_progress or 0.0) / 100.0
+
+        # Translate Kobo's status enum to our canonical strings for
+        # status_hint. ReadyToRead is intentionally not a hint — leave
+        # the helper to derive the lifecycle from cursor position.
+        kobo_status_hints = {"Finished": "completed", "Reading": "reading"}
+        status_hint = kobo_status_hints.get(kobo_state.status)
+
+        await write_progress(
+            db,
+            user_id=user_id,
+            edition=edition,
+            cursor_format="kobo_span",
+            cursor_value=cursor_value,
+            cursor_pct=cursor_pct,
+            device_id=device.id,
+            total_pages=kobo_state.total_pages,
+            status_hint=status_hint,
+            timestamp=_utcnow(),
+        )
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.warning(
+            "Unified progress dual-write failed for edition %s: %s",
+            edition_id, exc,
+        )
+
     await db.commit()
     await db.refresh(kobo_state)
     return kobo_state
