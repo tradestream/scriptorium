@@ -26,7 +26,7 @@ from app.schemas.analysis import (
 )
 from app.services.analysis import run_analysis
 
-from .auth import get_current_user
+from .auth import assert_edition_access, get_current_user
 
 router = APIRouter()
 
@@ -45,12 +45,19 @@ def _book_with_rels():
 async def list_book_analyses(
     book_id: int,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    """List all analyses for a book."""
+    """List all analyses for the Work this edition belongs to.
+
+    The path parameter is an *edition* id (the URL convention for the
+    book API surface), but ``BookAnalysis`` is keyed by ``work_id``.
+    Resolve to the edition first (which also enforces library access),
+    then query by ``edition.work_id``.
+    """
+    edition = await assert_edition_access(db, current_user, book_id)
     stmt = (
         select(BookAnalysis)
-        .where(BookAnalysis.work_id == book_id)
+        .where(BookAnalysis.work_id == edition.work_id)
         .order_by(BookAnalysis.created_at.desc())
     )
     result = await db.execute(stmt)
@@ -63,12 +70,13 @@ async def get_book_analysis(
     book_id: int,
     analysis_id: int,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Get a specific analysis with full content."""
+    edition = await assert_edition_access(db, current_user, book_id)
     stmt = (
         select(BookAnalysis)
-        .where(BookAnalysis.id == analysis_id, BookAnalysis.work_id == book_id)
+        .where(BookAnalysis.id == analysis_id, BookAnalysis.work_id == edition.work_id)
         .options(joinedload(BookAnalysis.template))
     )
     result = await db.execute(stmt)
@@ -86,19 +94,14 @@ async def create_book_analysis(
     request: AnalysisRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Trigger an LLM analysis for a book.
 
     The analysis runs in the background. Poll the status via GET.
     Returns immediately with status='running'.
     """
-    # Verify book exists
-    stmt = select(Book).where(Book.id == book_id)
-    result = await db.execute(stmt)
-    book = result.scalar_one_or_none()
-    if not book:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+    await assert_edition_access(db, current_user, book_id)
 
     # Run analysis (for now, synchronously — will be backgrounded with task queue later)
     analysis = await run_analysis(
@@ -117,11 +120,12 @@ async def delete_book_analysis(
     book_id: int,
     analysis_id: int,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Delete a saved analysis."""
+    edition = await assert_edition_access(db, current_user, book_id)
     stmt = select(BookAnalysis).where(
-        BookAnalysis.id == analysis_id, BookAnalysis.work_id == book_id
+        BookAnalysis.id == analysis_id, BookAnalysis.work_id == edition.work_id
     )
     result = await db.execute(stmt)
     analysis = result.scalar_one_or_none()
@@ -148,9 +152,10 @@ async def set_esoteric_reading(
     """Set or clear the esoteric reading for an analysis. Admin only."""
     if not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+    edition = await assert_edition_access(db, current_user, book_id)
     result = await db.execute(
         select(BookAnalysis).options(joinedload(BookAnalysis.template)).where(
-            BookAnalysis.id == analysis_id, BookAnalysis.work_id == book_id
+            BookAnalysis.id == analysis_id, BookAnalysis.work_id == edition.work_id
         )
     )
     analysis = result.unique().scalar_one_or_none()
@@ -349,9 +354,10 @@ class ComputationalAnalysisRead(BaseModel):
 async def list_computational_analyses(
     book_id: int,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """List all computational esoteric analyses for a book."""
+    await assert_edition_access(db, current_user, book_id)
     stmt = (
         select(ComputationalAnalysis)
         .where(ComputationalAnalysis.edition_id == book_id)
@@ -379,9 +385,10 @@ async def get_computational_analysis(
     book_id: int,
     analysis_id: int,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Get a specific computational analysis with full results."""
+    await assert_edition_access(db, current_user, book_id)
     stmt = select(ComputationalAnalysis).where(
         ComputationalAnalysis.id == analysis_id,
         ComputationalAnalysis.edition_id == book_id,
@@ -408,7 +415,7 @@ async def run_computational_analysis(
     book_id: int,
     request: ComputationalAnalysisRequest,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Run computational esoteric analysis on a book.
 
@@ -419,6 +426,7 @@ async def run_computational_analysis(
     - 'center': Find the physical center of the text
     - 'exoteric_esoteric': Measure pious vs. subversive language ratio
     """
+    await assert_edition_access(db, current_user, book_id)
     # Verify book exists and extract text (eagerly load rels for text extraction)
     stmt = select(Book).where(Book.id == book_id).options(*_book_with_rels())
     result = await db.execute(stmt)
@@ -551,9 +559,10 @@ async def delete_computational_analysis(
     book_id: int,
     analysis_id: int,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Delete a saved computational analysis."""
+    await assert_edition_access(db, current_user, book_id)
     stmt = select(ComputationalAnalysis).where(
         ComputationalAnalysis.id == analysis_id,
         ComputationalAnalysis.edition_id == book_id,
@@ -572,12 +581,13 @@ async def delete_computational_analysis(
 async def export_esoteric_epub(
     book_id: int,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Export all esoteric analyses for a book as a downloadable EPUB."""
     from fastapi.responses import Response
     from app.services.analysis_export import build_analysis_epub
 
+    await assert_edition_access(db, current_user, book_id)
     # Get book info
     stmt = select(Book).where(Book.id == book_id).options(
         joinedload(Book.work).options(joinedload(Work.authors))
@@ -647,6 +657,7 @@ async def export_esoteric_to_library(
 
     if not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Admin only")
+    await assert_edition_access(db, current_user, book_id)
 
     # Get book info
     stmt = select(Book).where(Book.id == book_id).options(
@@ -784,10 +795,7 @@ async def set_esoteric_enabled(
     """Toggle esoteric analysis availability for a book. Admin only."""
     if not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
-    result = await db.execute(select(Book).where(Book.id == book_id))
-    book = result.scalar_one_or_none()
-    if not book:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+    book = await assert_edition_access(db, current_user, book_id)
     book.esoteric_enabled = data.enabled
     await db.commit()
     return {"book_id": book_id, "esoteric_enabled": book.esoteric_enabled}
@@ -848,14 +856,15 @@ class PromptConfigRead(_BaseModel):
 async def list_prompt_configs(
     book_id: int,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    """List all per-book prompt overrides."""
+    """List all prompt overrides for the Work this edition belongs to."""
     from sqlalchemy.orm import joinedload as _jl
+    edition = await assert_edition_access(db, current_user, book_id)
     result = await db.execute(
         select(BookPromptConfig)
         .options(_jl(BookPromptConfig.template))
-        .where(BookPromptConfig.work_id == book_id)
+        .where(BookPromptConfig.work_id == edition.work_id)
         .order_by(BookPromptConfig.created_at)
     )
     configs = result.unique().scalars().all()
@@ -876,15 +885,13 @@ async def upsert_prompt_config(
     book_id: int,
     data: PromptConfigUpsert,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    """Create or update a per-book prompt override for a template."""
-    bk_result = await db.execute(select(Book).where(Book.id == book_id))
-    if not bk_result.scalar_one_or_none():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+    """Create or update a per-Work prompt override for a template."""
+    edition = await assert_edition_access(db, current_user, book_id)
 
     stmt = select(BookPromptConfig).where(
-        BookPromptConfig.work_id == book_id,
+        BookPromptConfig.work_id == edition.work_id,
         BookPromptConfig.template_id == data.template_id,
     )
     result = await db.execute(stmt)
@@ -899,7 +906,7 @@ async def upsert_prompt_config(
             config.notes = data.notes
     else:
         config = BookPromptConfig(
-            book_id=book_id, template_id=data.template_id,
+            work_id=edition.work_id, template_id=data.template_id,
             custom_system_prompt=data.custom_system_prompt,
             custom_user_prompt=data.custom_user_prompt, notes=data.notes,
         )
@@ -931,11 +938,15 @@ async def delete_prompt_config(
     book_id: int,
     config_id: int,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    """Delete a per-book prompt override."""
+    """Delete a per-Work prompt override."""
+    edition = await assert_edition_access(db, current_user, book_id)
     result = await db.execute(
-        select(BookPromptConfig).where(BookPromptConfig.id == config_id, BookPromptConfig.work_id == book_id)
+        select(BookPromptConfig).where(
+            BookPromptConfig.id == config_id,
+            BookPromptConfig.work_id == edition.work_id,
+        )
     )
     config = result.scalar_one_or_none()
     if not config:
@@ -958,13 +969,14 @@ class TextPreviewResponse(_BaseModel):
 async def get_text_preview(
     book_id: int,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Return a preview of the LLM-optimized text that would be sent for analysis.
 
     Useful for verifying extraction quality and debugging prompt issues
     before triggering a full (potentially expensive) AI analysis.
     """
+    await assert_edition_access(db, current_user, book_id)
     stmt = select(Book).where(Book.id == book_id)
     result = await db.execute(stmt)
     book = result.scalar_one_or_none()
@@ -1012,9 +1024,10 @@ class LiteraryAnalysisRead(BaseModel):
 async def list_literary_analyses(
     book_id: int,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """List all literary/poetic analyses for a book."""
+    await assert_edition_access(db, current_user, book_id)
     stmt = (
         select(ComputationalAnalysis)
         .where(
@@ -1043,7 +1056,7 @@ async def run_literary_analysis(
     book_id: int,
     request: LiteraryAnalysisRequest,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Run literary/poetic computational analysis on any book.
 
@@ -1052,6 +1065,7 @@ async def run_literary_analysis(
     - 'literary_full_prose': Full 30-tool prose analysis
     - 'literary_<tool>': Individual tool (e.g. literary_meter, literary_rhyme_scheme)
     """
+    await assert_edition_access(db, current_user, book_id)
     try:
         from app.services.literary_analyzer import LiteraryAnalyzer
     except Exception as exc:
@@ -1122,9 +1136,10 @@ async def delete_literary_analysis(
     book_id: int,
     analysis_id: int,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Delete a literary analysis."""
+    await assert_edition_access(db, current_user, book_id)
     result = await db.execute(
         select(ComputationalAnalysis).where(
             ComputationalAnalysis.id == analysis_id,
