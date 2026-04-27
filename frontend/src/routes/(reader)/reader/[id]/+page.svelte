@@ -1,6 +1,6 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import EpubReader from '$lib/components/EpubReader.svelte';
   import PdfReader from '$lib/components/PdfReader.svelte';
   import ComicReader from '$lib/components/ComicReader.svelte';
@@ -31,7 +31,44 @@
   let initialCfi = $state<string>('');
   let progressLoaded = $state(false);
 
+  // Session reading-time timer. We only count time spent with the tab visible
+  // (visibilitychange suspends the count) so leaving a tab open doesn't
+  // inflate ReadingState.total_time_seconds. The delta accumulates between
+  // progress saves; each save reports & resets it.
+  let lastTimerStart = Date.now();
+  let pendingSeconds = 0;
+  let isVisible = typeof document !== 'undefined' ? !document.hidden : true;
+
+  function _flushTimer() {
+    if (!isVisible) return;
+    const now = Date.now();
+    pendingSeconds += Math.max(0, Math.round((now - lastTimerStart) / 1000));
+    lastTimerStart = now;
+  }
+  function _consumeDelta(): number {
+    _flushTimer();
+    const delta = pendingSeconds;
+    pendingSeconds = 0;
+    lastTimerStart = Date.now();
+    return delta;
+  }
+  function _onVisibility() {
+    if (typeof document === 'undefined') return;
+    if (document.hidden) {
+      _flushTimer();
+      isVisible = false;
+    } else {
+      isVisible = true;
+      lastTimerStart = Date.now();
+    }
+  }
+
   onMount(async () => {
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', _onVisibility);
+    }
+    lastTimerStart = Date.now();
+
     if (!book) {
       progressLoaded = true;
       return;
@@ -47,12 +84,36 @@
     progressLoaded = true;
   });
 
+  onDestroy(() => {
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', _onVisibility);
+    }
+    // Final flush — any time accumulated since the last save is reported
+    // with a no-position-change PUT so the session total is captured.
+    if (book && file) {
+      const delta = _consumeDelta();
+      if (delta > 0) {
+        const lastPct =
+          typeof currentLocation === 'string' ? undefined : undefined;
+        // Fire-and-forget; we don't await on unmount.
+        void saveReadProgress(book.id, {
+          percentage: lastPct ?? 0,
+          file_id: file.id,
+          format: file.format,
+          cfi: currentLocation,
+          time_spent_delta_seconds: delta,
+        }).catch(() => {});
+      }
+    }
+  });
+
   function handleClose() {
     goto(`/book/${book?.id}`);
   }
 
   async function handleProgress(page: number, total: number, pct: number) {
     if (!book || !file) return;
+    const delta = _consumeDelta();
     try {
       await saveReadProgress(book.id, {
         current_page: page + 1,
@@ -61,6 +122,7 @@
         file_id: file.id,
         format: file.format,
         cfi: currentLocation,
+        time_spent_delta_seconds: delta,
       });
     } catch {
       // non-critical

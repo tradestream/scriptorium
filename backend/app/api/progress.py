@@ -34,6 +34,12 @@ class ProgressUpdate(BaseModel):
     # we restore the cursor here on the next open instead of falling back
     # to current_page, which is a coarse location estimate.
     cfi: Optional[str] = None
+    # Reading-time delta in seconds since the previous progress save in
+    # this session. Each reader component runs a small session timer and
+    # reports the delta — the server sums it into EditionPosition and
+    # ReadingState so total reading time is comparable to Kobo's
+    # SpentReadingMinutes counter.
+    time_spent_delta_seconds: Optional[int] = None
 
 
 class StatusUpdate(BaseModel):
@@ -182,6 +188,7 @@ async def update_book_progress(
             cursor_pct=cursor_pct,
             device_id=device.id,
             total_pages=data.total_pages,
+            time_spent_delta_seconds=max(0, data.time_spent_delta_seconds or 0),
             status_hint=data.status if data.status in ("completed", "abandoned") else None,
             rating=data.rating,
             timestamp=now,

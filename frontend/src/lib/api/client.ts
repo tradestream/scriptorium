@@ -1196,6 +1196,8 @@ export async function saveReadProgress(
     file_id?: number;
     format?: string;
     cfi?: string;
+    /** Seconds elapsed since the last save in this session. */
+    time_spent_delta_seconds?: number;
   }
 ): Promise<ReadProgress> {
   return fetchAPI(`/books/${bookId}/progress`, { method: 'PUT', body: JSON.stringify(data) });
