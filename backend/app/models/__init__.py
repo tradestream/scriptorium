@@ -22,6 +22,7 @@ from app.models.article import Article, ArticleTag, ArticleHighlight
 from app.models.system import SystemSettings
 from app.models.background_job import BackgroundJob
 from app.models.kobo_span import KoboSpanMap
+from app.models.reading import ReadingState, EditionPosition, DevicePosition
 
 __all__ = [
     "Base",
