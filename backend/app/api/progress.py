@@ -17,7 +17,7 @@ from app.models.work import Work
 from app.models.read_session import ReadSession
 from app.models.user import User
 
-from .auth import get_current_user
+from .auth import assert_edition_access, get_current_user
 
 router = APIRouter()
 
@@ -74,9 +74,7 @@ async def get_book_progress(
     """
     from app.models.reading import EditionPosition, ReadingState
 
-    edition = (await db.execute(select(Book).where(Book.id == book_id))).scalar_one_or_none()
-    if edition is None:
-        return None
+    edition = await assert_edition_access(db, current_user, book_id)
 
     ep = (
         await db.execute(
@@ -190,6 +188,8 @@ async def reset_furthest_position(
     """
     from app.models.reading import EditionPosition
 
+    await assert_edition_access(db, current_user, book_id)
+
     ep = (
         await db.execute(
             select(EditionPosition).where(
@@ -227,9 +227,7 @@ async def update_book_progress(
     """
     from app.services.unified_progress import write_progress
 
-    edition = (await db.execute(select(Book).where(Book.id == book_id))).scalar_one_or_none()
-    if edition is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+    edition = await assert_edition_access(db, current_user, book_id)
 
     device = await _get_or_create_web_device(db, current_user.id)
     now = datetime.utcnow()
@@ -278,9 +276,7 @@ async def patch_book_status(
     from app.services.unified_progress import write_progress
     from app.models.reading import EditionPosition, ReadingState
 
-    edition = (await db.execute(select(Book).where(Book.id == book_id))).scalar_one_or_none()
-    if edition is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+    edition = await assert_edition_access(db, current_user, book_id)
 
     device = await _get_or_create_web_device(db, current_user.id)
     now = datetime.utcnow()

@@ -919,9 +919,13 @@ async def extract_metadata_from_url(
 ):
     """Extract Open Graph / Dublin Core metadata from a web page.
 
-    Useful for previewing metadata before applying it to a book.
-    Works with publisher pages, Goodreads, Amazon, etc.
+    Admin-only because the server makes an outbound HTTP fetch on the
+    caller's behalf. Even with the URL safety guard in
+    ``app.utils.url_safety``, we don't want every user to be able to
+    drive arbitrary outbound traffic from this host.
     """
+    if not current_user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
     from app.services.opengraph import extract_from_url
     return await extract_from_url(data.url)
 

@@ -29,13 +29,30 @@ _ISBN_PATTERN = re.compile(r'ISBN[-\s:]*(?:13[-\s:]*)?(?:978|979)[-\s]?\d[-\s]?\
 _ISBN_CLEAN = re.compile(r'[\s-]')
 
 
-async def extract_from_url(url: str, timeout: float = 15.0) -> dict:
+async def extract_from_url(
+    url: str,
+    timeout: float = 15.0,
+    *,
+    max_bytes: int = 5 * 1024 * 1024,
+) -> dict:
     """Fetch a URL and extract Open Graph / Dublin Core / HTML metadata.
+
+    Refuses to fetch URLs that resolve to internal infrastructure
+    (loopback, RFC1918, link-local cloud-metadata, etc.) — see
+    ``app.utils.url_safety``. Caps the read size at ``max_bytes`` to
+    keep a hostile / accidentally-huge page from spending all of our
+    memory.
 
     Returns dict with:
         title, description, image_url, authors (list), isbn,
         publisher, language, published_date, source_url
     """
+    from app.utils.url_safety import (
+        UnsafeURLError,
+        assert_safe_url,
+        safe_redirect_chain,
+    )
+
     result = {
         "title": None,
         "description": None,
@@ -49,14 +66,27 @@ async def extract_from_url(url: str, timeout: float = 15.0) -> dict:
     }
 
     try:
+        assert_safe_url(url)
+    except UnsafeURLError as exc:
+        logger.warning("Refused to fetch %s: %s", url, exc)
+        return result
+
+    try:
         async with httpx.AsyncClient(
             timeout=timeout,
             follow_redirects=True,
             headers={"User-Agent": "Scriptorium/1.0 (book metadata)"},
+            event_hooks={"response": [safe_redirect_chain()]},
         ) as client:
             resp = await client.get(url)
             resp.raise_for_status()
-            html = resp.text
+            # Cap response size — a hostile or buggy server could stream
+            # gigabytes; we only ever look at the first few KB of HTML.
+            html_bytes = resp.content[:max_bytes]
+            html = html_bytes.decode(resp.encoding or "utf-8", errors="replace")
+    except UnsafeURLError as exc:
+        logger.warning("Refused redirect during fetch of %s: %s", url, exc)
+        return result
     except Exception as exc:
         logger.warning("Failed to fetch %s: %s", url, exc)
         return result
