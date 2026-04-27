@@ -385,18 +385,30 @@ async def get_sync_payload(
     if has_more:
         editions = editions[:SYNC_PAGE_SIZE]
 
-    # Load KoboBookStates for these editions
+    # Batch-fetch unified progress rows for these editions (and their works).
+    from app.models.reading import EditionPosition as _EP, ReadingState as _RS
+
     edition_ids = [e.id for e in editions]
-    states_map: dict[int, KoboBookState] = {}
+    work_ids = [e.work_id for e in editions if e.work_id is not None]
+
+    ep_map: dict[int, _EP] = {}
+    rs_map: dict[int, _RS] = {}
     if edition_ids:
-        states_result = await db.execute(
-            select(KoboBookState).where(
-                KoboBookState.user_id == user_id,
-                KoboBookState.edition_id.in_(edition_ids),
+        for ep in (
+            await db.execute(
+                select(_EP).where(
+                    _EP.user_id == user_id, _EP.edition_id.in_(edition_ids)
+                )
             )
-        )
-        for state in states_result.scalars().all():
-            states_map[state.edition_id] = state
+        ).scalars().all():
+            ep_map[ep.edition_id] = ep
+    if work_ids:
+        for rs in (
+            await db.execute(
+                select(_RS).where(_RS.user_id == user_id, _RS.work_id.in_(work_ids))
+            )
+        ).scalars().all():
+            rs_map[rs.work_id] = rs
 
     items = []
     # Per-edition is_new is driven by books_last_created, NOT by whether
@@ -413,21 +425,21 @@ async def get_sync_payload(
             or (edition.created_at and edition.created_at > books_last_created)
         )
 
-        state = states_map.get(edition.id)
+        ep = ep_map.get(edition.id)
+        rs = rs_map.get(edition.work_id) if edition.work_id is not None else None
+
         # Resolve a real KoboSpan id for the bookmark when we have one
-        # extracted from this edition's KEPUB. Failure / absence falls
-        # back to the synthetic spine#N path inside _build_reading_state.
-        span_chapter_href: Optional[str] = None
-        span_id: Optional[str] = None
-        if state is not None:
-            span_chapter_href, span_id = await _resolve_span_for_state(
-                state, list(edition.files or []), db
-            )
+        # extracted from this edition's KEPUB. Falls back inside
+        # _build_reading_state to chapter-only restore otherwise.
+        span_chapter_href, span_id = await _resolve_emit_span(
+            ep, list(edition.files or []), db
+        )
 
         entry = _build_edition_entry(
             edition=edition,
             edition_file=epub_file,
-            state=state,
+            ep=ep,
+            rs=rs,
             auth_token=sync_token.token,
             base_url=base_url,
             is_new=edition_is_new,
@@ -451,26 +463,39 @@ async def get_sync_payload(
         synced_ids = {row[0] for row in synced_ids_result}
         candidate_ids = synced_ids - batch_edition_ids
         if candidate_ids:
-            extra_states_result = await db.execute(
-                select(KoboBookState, Edition)
-                .join(Edition, Edition.id == KoboBookState.edition_id)
-                .options(selectinload(Edition.files))
-                .where(
-                    KoboBookState.user_id == user_id,
-                    KoboBookState.edition_id.in_(candidate_ids),
-                    KoboBookState.updated_at > sync_token.reading_state_last_modified,
+            # Pull EditionPositions for any candidate that has changed since
+            # the last sync, joined with their Edition for span lookup.
+            extra_rows = (
+                await db.execute(
+                    select(_EP, Edition)
+                    .join(Edition, Edition.id == _EP.edition_id)
+                    .options(selectinload(Edition.files))
+                    .where(
+                        _EP.user_id == user_id,
+                        _EP.edition_id.in_(candidate_ids),
+                        _EP.current_updated_at
+                        > sync_token.reading_state_last_modified,
+                    )
                 )
-            )
-            for state, ed in extra_states_result:
-                span_chapter_href, span_id = await _resolve_span_for_state(
-                    state, list(ed.files or []), db
+            ).all()
+            for ep, ed in extra_rows:
+                rs = (
+                    await db.execute(
+                        select(_RS).where(
+                            _RS.user_id == user_id, _RS.work_id == ed.work_id
+                        )
+                    )
+                ).scalar_one_or_none() if ed.work_id is not None else None
+                span_chapter_href, span_id = await _resolve_emit_span(
+                    ep, list(ed.files or []), db
                 )
                 items.append(
                     {
                         "ChangedReadingState": {
                             "ReadingState": _build_reading_state(
                                 ed.uuid,
-                                state,
+                                ep=ep,
+                                rs=rs,
                                 span_chapter_href=span_chapter_href,
                                 span_id=span_id,
                             )
@@ -681,19 +706,22 @@ def _build_download_urls(
 def _build_edition_entry(
     edition: Edition,
     edition_file: EditionFile,
-    state: Optional[KoboBookState],
+    *,
+    ep: "Optional[EditionPosition]" = None,
+    rs: "Optional[ReadingState]" = None,
     auth_token: str,
     base_url: str,
     is_new: bool = True,
-    *,
     span_chapter_href: Optional[str] = None,
     span_id: Optional[str] = None,
 ) -> dict:
     """Build a single Kobo library sync entry for an Edition.
 
-    ``span_chapter_href`` / ``span_id`` are precomputed by the caller (see
-    ``_resolve_span_for_state``) so this stays a sync function. When both
-    are provided the emitted bookmark uses the real KoboSpan id.
+    ``ep`` and ``rs`` are the unified-progress rows the emit path now
+    reads from (see ``_load_emit_state``). ``span_chapter_href`` /
+    ``span_id`` are precomputed by ``_resolve_emit_span`` so this stays
+    a sync function. When both span values are provided the emitted
+    bookmark uses the real KoboSpan id.
     """
     kobo_base = f"{base_url}/kobo/{auth_token}"
     work = edition.work
@@ -781,10 +809,11 @@ def _build_edition_entry(
     # reading-state updates for already-known books should be emitted as
     # separate ChangedReadingState envelopes (TODO: implement that path).
     if is_new:
-        if state:
+        if ep is not None or rs is not None:
             entry[envelope_key]["ReadingState"] = _build_reading_state(
                 edition.uuid,
-                state,
+                ep=ep,
+                rs=rs,
                 span_chapter_href=span_chapter_href,
                 span_id=span_id,
             )
@@ -909,75 +938,162 @@ def _build_empty_reading_state(entity_uuid: str, created_at: datetime) -> dict:
     }
 
 
+# Canonical-status → Kobo wire-status. Kobo doesn't have an "abandoned"
+# concept; Whispersym/Komga both surface it as plain "Reading" so the
+# entitlement stays visible on the device.
+_KOBO_STATUS_FROM_CANONICAL = {
+    "want_to_read": "ReadyToRead",
+    "reading": "Reading",
+    "completed": "Finished",
+    "abandoned": "Reading",
+}
+
+
 def _build_reading_state(
     entity_uuid: str,
-    state: KoboBookState,
     *,
+    ep: Optional["EditionPosition"] = None,
+    rs: Optional["ReadingState"] = None,
     span_chapter_href: Optional[str] = None,
     span_id: Optional[str] = None,
 ) -> dict:
-    """Build the Kobo ReadingState object from our stored state.
+    """Build the Kobo ReadingState object from the unified-progress rows.
 
-    When ``span_chapter_href`` and ``span_id`` are provided, the bookmark
-    location uses the real KoboSpan id pulled from the generated KEPUB so
-    Kobo Nickel can restore the cursor at the correct paragraph. When the
-    span map is unavailable (no KEPUB conversion run yet, or a fixed-
-    layout title) we fall back to the synthetic ``spine#N`` token, which
-    Nickel accepts but only restores chapter-level position.
+    Reads ``ReadingState`` (work-level lifecycle: status, times_started,
+    timestamps) plus ``EditionPosition`` (cursor: pct, format, value,
+    time_spent). The legacy ``KoboBookState`` is no longer the source of
+    truth here — dual-write keeps it populated through step 4 only as a
+    rollback safety net.
+
+    When ``span_chapter_href`` + ``span_id`` are provided (computed by
+    ``_resolve_emit_span`` from the koboSpan map), the bookmark Source/
+    Value carry the real Kobo position so Nickel restores at the exact
+    paragraph. When the span map is unavailable, we fall back to a
+    synthetic ``spine#N`` token (chapter-only restore).
     """
-    status_info = {
-        "LastModified": _kobo_timestamp(state.updated_at),
-        "Status": state.status,
-        "TimesStartedReading": state.times_started_reading,
-    }
-    # Add timestamp fields that BookLore includes
-    if state.updated_at:
-        status_info["LastTimeStartedReading"] = _kobo_timestamp(state.updated_at)
-    if state.status == "Finished" and state.updated_at:
-        status_info["LastTimeFinished"] = _kobo_timestamp(state.updated_at)
+    if rs is None and ep is None:
+        # Should never happen — caller knows there's at least one source.
+        # Emit an empty-ish state so we don't crash the sync.
+        ts = _kobo_timestamp(_utcnow())
+        return _build_empty_reading_state(entity_uuid, _utcnow())
 
+    last_modified = (
+        ep.current_updated_at
+        if ep and ep.current_updated_at
+        else (rs.last_opened if rs and rs.last_opened else _utcnow())
+    )
+    created_at = (
+        ep.created_at if ep else (rs.created_at if rs else _utcnow())
+    )
+
+    status = _KOBO_STATUS_FROM_CANONICAL.get(
+        (rs.status if rs else "want_to_read"), "ReadyToRead"
+    )
+    times_started = rs.times_started if rs else 0
+
+    status_info: dict = {
+        "LastModified": _kobo_timestamp(last_modified),
+        "Status": status,
+        "TimesStartedReading": times_started,
+    }
+    if rs and rs.started_at:
+        status_info["LastTimeStartedReading"] = _kobo_timestamp(rs.started_at)
+    elif last_modified:
+        status_info["LastTimeStartedReading"] = _kobo_timestamp(last_modified)
+    if rs and rs.completed_at and status == "Finished":
+        status_info["LastTimeFinished"] = _kobo_timestamp(rs.completed_at)
+
+    # ContentSourceProgressPercent is on the wire as 0–100; EditionPosition
+    # stores the canonical 0–1 fraction.
+    pct = ((ep.current_pct if ep else 0.0) or 0.0) * 100.0
+
+    # Bookmark location: prefer precomputed real-span values; otherwise
+    # try to split the EditionPosition.current_value (kobo_span format
+    # stores "chapter_href#span_id"); fall back to chapter-only when the
+    # cursor isn't a kobo_span (e.g. cfi or percent — those don't carry
+    # a chapter reference, so emit empty Source + synthetic spine#0).
     if span_id is not None:
-        location_source = span_chapter_href or state.content_id or ""
+        location_source = span_chapter_href or _split_kobo_value_chapter(ep) or ""
         location_value = span_id
+    elif ep and ep.current_format == "kobo_span" and ep.current_value:
+        chapter, rest = _split_kobo_value(ep.current_value)
+        location_source = chapter or ""
+        # rest may be "spine#N" (synthetic) or a real koboSpan id.
+        location_value = rest or "spine#0"
     else:
-        location_source = state.content_id or ""
-        location_value = f"spine#{state.spine_index}"
+        location_source = ""
+        location_value = "spine#0"
+
+    seconds = ep.time_spent_seconds if ep else 0
 
     return {
         "EntitlementId": entity_uuid,
-        "Created": _kobo_timestamp(state.created_at),
-        "LastModified": _kobo_timestamp(state.updated_at),
-        "PriorityTimestamp": _kobo_timestamp(state.updated_at),
+        "Created": _kobo_timestamp(created_at),
+        "LastModified": _kobo_timestamp(last_modified),
+        "PriorityTimestamp": _kobo_timestamp(last_modified),
         "StatusInfo": status_info,
         "Statistics": {
-            "LastModified": _kobo_timestamp(state.updated_at),
-            "SpentReadingMinutes": state.time_spent_reading // 60,
+            "LastModified": _kobo_timestamp(last_modified),
+            "SpentReadingMinutes": (seconds or 0) // 60,
             "RemainingTimeMinutes": 0,
         },
         "CurrentBookmark": {
-            "LastModified": _kobo_timestamp(state.updated_at),
-            "ContentSourceProgressPercent": state.content_source_progress,
+            "LastModified": _kobo_timestamp(last_modified),
+            "ContentSourceProgressPercent": pct,
             "Location": {
                 "Source": location_source,
                 "Type": "KoboSpan",
                 "Value": location_value,
             },
-            "ProgressPercent": state.content_source_progress,
+            "ProgressPercent": pct,
         },
     }
 
 
-async def _resolve_span_for_state(
-    state: KoboBookState,
+def _split_kobo_value(value: str) -> tuple[str, str]:
+    """Split ``"chapter_href#span_id"`` into (chapter, span). Tolerant of
+    legacy ``"chapter_href#spine#N"`` — splits at the first ``#`` only."""
+    if not value:
+        return "", ""
+    if "#" not in value:
+        return value, ""
+    chapter, rest = value.split("#", 1)
+    return chapter, rest
+
+
+def _split_kobo_value_chapter(ep: Optional["EditionPosition"]) -> Optional[str]:
+    if not ep or not ep.current_value:
+        return None
+    chapter, _ = _split_kobo_value(ep.current_value)
+    return chapter or None
+
+
+async def _resolve_emit_span(
+    ep: "Optional[EditionPosition]",
     edition_files: list[EditionFile],
     db: AsyncSession,
 ) -> tuple[Optional[str], Optional[str]]:
-    """Pick the (chapter_href, span_id) to emit for a given reading state.
+    """Pick the (chapter_href, span_id) to emit for a given EditionPosition.
 
-    Looks for an EPUB EditionFile (the one whose .kepub_path holds the
-    KEPUB whose koboSpan ids we extracted). Returns (None, None) when no
-    map is available so callers fall back to synthetic spine#N.
+    Three cases:
+    1. The cursor is already in ``kobo_span`` format with a real span id
+       (not the legacy ``spine#N`` synthetic) — return the parts directly.
+    2. Anything else: look up the closest span by global progress against
+       the stored KoboSpan map for this edition's KEPUB.
+
+    Returns (None, None) when no koboSpan map is available, so the caller
+    falls back to chapter-only ``spine#N`` inside ``_build_reading_state``.
     """
+    if ep is None:
+        return None, None
+
+    # Case 1: cursor is already a real koboSpan id from a prior Kobo write.
+    if ep.current_format == "kobo_span" and ep.current_value:
+        chapter, rest = _split_kobo_value(ep.current_value)
+        if chapter and rest and not rest.startswith("spine#"):
+            return chapter, rest
+
+    # Case 2: derive from progress against the span map.
     epub = next(
         (f for f in edition_files if (f.format or "").lower() == "epub"), None
     )
@@ -985,7 +1101,7 @@ async def _resolve_span_for_state(
         return None, None
     from app.services.kobo_spans import span_for_progress
 
-    progress = (state.content_source_progress or 0.0) / 100.0
+    progress = ep.current_pct or 0.0
     resolved = await span_for_progress(epub.id, progress, db)
     if not resolved:
         return None, None
