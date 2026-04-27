@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     # Security
     SECRET_KEY: str = "your-secret-key-change-me-in-production"
     JWT_ALGORITHM: str = "HS256"
+    JWT_ISSUER: str = "scriptorium"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours
 
     # CORS

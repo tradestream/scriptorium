@@ -73,6 +73,7 @@
           bookId={book.id}
           fileId={file.id}
           onClose={handleClose}
+          onProgress={handleProgress}
           onLocationChange={handleLocationChange}
         />
       {:else if format === 'pdf'}

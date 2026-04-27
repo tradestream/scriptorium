@@ -34,6 +34,7 @@ def create_access_token(user_id: int, is_admin: bool = False, expires_delta: Opt
         "sub": str(user_id),
         "exp": expire,
         "iat": now,
+        "iss": settings.JWT_ISSUER,
         "admin": is_admin,
     }
 
@@ -42,9 +43,21 @@ def create_access_token(user_id: int, is_admin: bool = False, expires_delta: Opt
 
 
 def verify_token(token: str) -> Optional[dict]:
-    """Verify a JWT token and return payload."""
+    """Verify a JWT token and return payload.
+
+    Validates signature, expiry, and issuer. Tokens missing ``sub`` are
+    rejected. Tokens issued by a different ``iss`` (e.g. tokens forged or
+    minted by another service that happens to share our signing key) are
+    rejected.
+    """
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM],
+            issuer=settings.JWT_ISSUER,
+            options={"require": ["exp", "iat", "sub", "iss"]},
+        )
         user_id: str = payload.get("sub")
         if user_id is None:
             return None

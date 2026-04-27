@@ -60,6 +60,17 @@
         allowScriptedContent: false,
       });
 
+      // Defense in depth: EPUB XHTML can contain inline <script> tags that
+      // epubjs's allowScriptedContent flag doesn't strip. Set a strict iframe
+      // sandbox so anything epubjs renders from the EPUB cannot run scripts,
+      // submit forms, open popups, or navigate the top frame. allow-same-origin
+      // is required so epubjs can read contentDocument for layout/positioning.
+      rendition.hooks.render.register((view: any) => {
+        try {
+          view?.iframe?.setAttribute('sandbox', 'allow-same-origin');
+        } catch { /* non-critical */ }
+      });
+
       // Apply initial styles
       applyStyles();
 
