@@ -1,10 +1,11 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import { onMount } from 'svelte';
   import EpubReader from '$lib/components/EpubReader.svelte';
   import PdfReader from '$lib/components/PdfReader.svelte';
   import ComicReader from '$lib/components/ComicReader.svelte';
   import ReaderNotesPanel from '$lib/components/ReaderNotesPanel.svelte';
-  import { saveReadProgress } from '$lib/api/client';
+  import { getBookProgress, saveReadProgress } from '$lib/api/client';
   import { MessageSquarePlus } from 'lucide-svelte';
   import type { PageData } from './$types';
 
@@ -25,6 +26,26 @@
 
   let notesOpen = $state(false);
   let currentLocation = $state<string | undefined>(undefined);
+  // Saved CFI from the previous reading session — passed to EpubReader so
+  // the cursor is restored at the same paragraph instead of the chapter top.
+  let initialCfi = $state<string>('');
+  let progressLoaded = $state(false);
+
+  onMount(async () => {
+    if (!book) {
+      progressLoaded = true;
+      return;
+    }
+    try {
+      const saved = await getBookProgress(book.id);
+      if (saved && (saved as any).cfi) {
+        initialCfi = (saved as any).cfi;
+      }
+    } catch {
+      // non-critical
+    }
+    progressLoaded = true;
+  });
 
   function handleClose() {
     goto(`/book/${book?.id}`);
@@ -39,6 +60,7 @@
         percentage: pct,
         file_id: file.id,
         format: file.format,
+        cfi: currentLocation,
       });
     } catch {
       // non-critical
@@ -69,13 +91,20 @@
     <!-- Reader area -->
     <div class="relative flex-1 overflow-hidden">
       {#if format === 'epub'}
-        <EpubReader
-          bookId={book.id}
-          fileId={file.id}
-          onClose={handleClose}
-          onProgress={handleProgress}
-          onLocationChange={handleLocationChange}
-        />
+        {#if progressLoaded}
+          <EpubReader
+            bookId={book.id}
+            fileId={file.id}
+            initialCfi={initialCfi}
+            onClose={handleClose}
+            onProgress={handleProgress}
+            onLocationChange={handleLocationChange}
+          />
+        {:else}
+          <div class="flex h-full items-center justify-center bg-black text-white/60 text-sm">
+            Loading…
+          </div>
+        {/if}
       {:else if format === 'pdf'}
         <PdfReader
           bookId={book.id}

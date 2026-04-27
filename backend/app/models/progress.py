@@ -168,6 +168,10 @@ class ReadProgress(Base):
         String(50), default="reading"
     )  # want_to_read, reading, completed, abandoned
     rating: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # 1-5
+    # EPUB CFI from the web reader (epubjs format) so we can restore the
+    # cursor at the same paragraph on next open. Only the web reader writes
+    # this; Kobo state lives in KoboBookState (with real koboSpan ids).
+    cfi: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_opened: Mapped[datetime] = mapped_column(DateTime, default=func.now())

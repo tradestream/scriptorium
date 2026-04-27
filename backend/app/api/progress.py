@@ -30,6 +30,10 @@ class ProgressUpdate(BaseModel):
     format: Optional[str] = None
     status: str = "reading"  # want_to_read, reading, completed, abandoned
     rating: Optional[int] = None  # 1-5
+    # epubjs CFI of the current paragraph (web reader only). When present
+    # we restore the cursor here on the next open instead of falling back
+    # to current_page, which is a coarse location estimate.
+    cfi: Optional[str] = None
 
 
 class StatusUpdate(BaseModel):
@@ -71,6 +75,7 @@ async def get_book_progress(
         "percentage": progress.percentage,
         "status": progress.status,
         "rating": progress.rating,
+        "cfi": progress.cfi,
         "last_opened": progress.last_opened.isoformat() if progress.last_opened else None,
         "started_at": progress.started_at.isoformat() if progress.started_at else None,
         "completed_at": progress.completed_at.isoformat() if progress.completed_at else None,
@@ -116,6 +121,8 @@ async def update_book_progress(
     progress.last_opened = now
     if data.rating is not None:
         progress.rating = data.rating
+    if data.cfi is not None:
+        progress.cfi = data.cfi
 
     if data.status == "completed" and not progress.completed_at:
         progress.completed_at = now
