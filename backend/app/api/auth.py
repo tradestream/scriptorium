@@ -75,6 +75,28 @@ async def assert_edition_access(
     return edition
 
 
+# Path allowlist for query-string ``?token=`` auth. Browsers can't attach
+# Authorization headers to ``<img src>`` or ``<a download href>``, so we
+# accept the token in the URL for these endpoints only — and explicitly
+# reject it for everything else, so a leaked URL is constrained to a
+# media path rather than the full API surface.
+import re as _re
+
+_QUERY_TOKEN_ALLOWED_PATHS = _re.compile(
+    r"^/api/v\d+/("
+    r"books/\d+/cover"
+    r"|editions/\d+/cover"
+    r"|books/\d+/download/\d+"
+    r"|editions/\d+/download/\d+"
+    r"|books/\d+/files/\d+/manifest\.json"
+    r"|books/\d+/files/\d+/pages(/\d+)?"
+    r"|books/\d+/esoteric/export\.epub"
+    r"|admin/backup"
+    r"|events/ws"
+    r")/?$"
+)
+
+
 async def get_current_user(
     request: Request,
     header_token: Optional[str] = Depends(_oauth2_scheme),
@@ -84,11 +106,23 @@ async def get_current_user(
     """Get current authenticated user from JWT token or API key.
 
     Accepts the token from:
-    - Authorization: Bearer <token>  (JWT or sk_... API key)
-    - ?token=<token> query parameter  (streaming URLs: book downloads, comic pages, backups)
+    - ``Authorization: Bearer <token>`` (JWT or ``sk_...`` API key) — preferred.
+    - ``?token=<token>`` query parameter, **only** on the small allowlist
+      of media / streaming paths (covers, downloads, comic pages, the
+      esoteric EPUB export, admin backup, WS event upgrade). Any other
+      path with a query token is rejected so a JWT pasted into a
+      generic API URL doesn't auth past 401. Browsers can't attach
+      ``Authorization`` headers to ``<img src>`` or ``<a download>``,
+      which is why the allowlisted endpoints get this exception.
     """
     import hashlib
     from datetime import datetime, timezone
+
+    if query_token and not _QUERY_TOKEN_ALLOWED_PATHS.match(request.url.path):
+        # A query token on a non-media endpoint is most likely a leaked
+        # URL or a misconfigured client. Refuse to honor it. A header
+        # token on the same request would still authenticate normally.
+        query_token = None
 
     token = header_token or query_token
     if not token:
