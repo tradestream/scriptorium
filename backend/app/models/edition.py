@@ -65,6 +65,10 @@ class Edition(Base):
     identifiers_scanned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")
     # True after OPF/ComicInfo embedded metadata extraction
     opf_scanned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")
+    # True if the EPUB declares rendition:layout=pre-paginated (children's
+    # books, manga, photo books, comics-as-EPUB). Affects Kobo format
+    # advertisement (EPUB3FL) and skips KEPUB conversion for these titles.
+    is_fixed_layout: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())

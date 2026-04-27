@@ -598,6 +598,9 @@ def _build_download_urls(
     """Build the DownloadUrls list for the Kobo device.
 
     Format advertisement strategy (matches Komga KoboController.kt L753-760):
+      - If the EPUB is fixed-layout (rendition:layout=pre-paginated): advertise
+        EPUB3FL and serve the raw EPUB. KEPUB conversion breaks fixed-layout
+        rendering — Kobo Nickel handles fixed-layout natively under EPUB3FL.
       - If kepubify is available OR source is already KEPUB: advertise KEPUB
         (device uses Kobo WebKit with chapter tracking, reading stats)
       - If kepubify is NOT available and source is EPUB: advertise EPUB3 + EPUB
@@ -606,14 +609,14 @@ def _build_download_urls(
 
     The download URL always uses the SOURCE format (/download/epub) — the
     server converts to KEPUB transparently in get_download_path() via
-    ensure_kepub(). This matches Komga's pattern of keeping the endpoint
-    stable while converting on-the-fly.
+    ensure_kepub(), which itself skips conversion for fixed-layout titles.
 
     DrmType is intentionally omitted (CWA kobo.py L601: "Not required").
     """
     from app.services.kepub import _find_kepubify
 
     kepubify_available = _find_kepubify() is not None
+    is_fixed_layout = bool(getattr(edition, "is_fixed_layout", False))
     kepubs = [f for f in edition_files if f.format.lower() == "kepub"]
     candidates = kepubs if kepubs else [
         f for f in edition_files if f.format.lower() in ("epub", "pdf")
@@ -623,6 +626,10 @@ def _build_download_urls(
         fmt_key = f.format.lower()
         if fmt_key == "kepub":
             formats_to_advertise = ["KEPUB"]
+        elif fmt_key == "epub" and is_fixed_layout:
+            # Fixed-layout EPUBs (children's books, manga, photo books): the
+            # device renders these natively; KEPUB conversion mangles them.
+            formats_to_advertise = ["EPUB3FL"]
         elif fmt_key == "epub" and kepubify_available:
             # Komga pattern: advertise KEPUB when conversion is possible
             formats_to_advertise = ["KEPUB"]
@@ -1148,9 +1155,11 @@ async def get_download_path(
             return None
         accessible_lib_ids = await get_accessible_library_ids(db, user)
 
-    # Try EditionFile via Edition.uuid
+    # Try EditionFile via Edition.uuid. We pull the parent Edition's
+    # is_fixed_layout flag in the same query so ensure_kepub() can decide
+    # whether to skip conversion without an extra round-trip.
     stmt = (
-        select(EditionFile)
+        select(EditionFile, Edition.is_fixed_layout)
         .join(Edition, EditionFile.edition_id == Edition.id)
         .where(
             Edition.uuid == book_uuid,
@@ -1160,19 +1169,23 @@ async def get_download_path(
     if accessible_lib_ids is not None:
         stmt = stmt.where(Edition.library_id.in_(accessible_lib_ids))
     result = await db.execute(stmt)
-    # Use scalars().first() instead of scalar_one_or_none() because some
-    # editions have multiple files with the same format (e.g. duplicate
-    # imports). Taking the first match is safe — all point to the same book.
-    edition_file = result.scalars().first()
+    # Multiple files with the same format can exist (duplicate imports);
+    # the first match is safe — all point at the same book.
+    row = result.first()
+    edition_file = row[0] if row else None
+    is_fixed_layout = bool(row[1]) if row else False
 
     if edition_file:
         from app.config import resolve_path
 
-        # Auto-convert EPUB to KEPUB for better Kobo experience
+        # Auto-convert EPUB to KEPUB for better Kobo experience (skipped
+        # for fixed-layout titles, which Nickel renders natively).
         if file_format.lower() in ("epub", "kepub") and edition_file.format.lower() == "epub":
             try:
                 from app.services.kepub import ensure_kepub
-                kepub_path = await ensure_kepub(edition_file)
+                kepub_path = await ensure_kepub(
+                    edition_file, is_fixed_layout=is_fixed_layout
+                )
                 if kepub_path:
                     resolved = Path(resolve_path(kepub_path))
                     if resolved.exists():

@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -161,10 +161,12 @@ async def delete_edition(
 @router.get("/{edition_id}/cover")
 async def get_edition_cover(
     edition_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     from app.config import get_settings
+    from app.services.file_streaming import stream_file_response
     edition = await _get_edition_or_404(edition_id, db)
     await _assert_accessible(edition, current_user, db)
 
@@ -173,10 +175,16 @@ async def get_edition_cover(
 
     settings = get_settings()
     cover_path = Path(settings.COVERS_PATH) / f"{edition.uuid}.{edition.cover_format}"
-    if not cover_path.exists():
-        raise HTTPException(status_code=404, detail="Cover file not found")
-
-    return FileResponse(str(cover_path), media_type=f"image/{edition.cover_format}")
+    media_type = (
+        f"image/{edition.cover_format}" if edition.cover_format != "jpg" else "image/jpeg"
+    )
+    return stream_file_response(
+        request,
+        cover_path,
+        media_type=media_type,
+        cache_control="private, max-age=300",
+        etag_salt=edition.cover_hash,
+    )
 
 
 # ── File download ─────────────────────────────────────────────────────────────
@@ -185,9 +193,13 @@ async def get_edition_cover(
 async def download_edition_file(
     edition_id: int,
     file_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    from app.config import resolve_path
+    from app.services.file_streaming import stream_file_response
+
     edition = await _get_edition_or_404(edition_id, db)
     await _assert_accessible(edition, current_user, db)
 
@@ -195,14 +207,25 @@ async def download_edition_file(
     if ef is None:
         raise HTTPException(status_code=404, detail="File not found")
 
-    file_path = Path(ef.file_path)
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="File not on disk")
+    file_path = Path(resolve_path(ef.file_path))
 
-    return FileResponse(
-        str(file_path),
+    media_types = {
+        "epub": "application/epub+zip",
+        "kepub": "application/kepub+zip",
+        "pdf": "application/pdf",
+        "cbz": "application/vnd.comicbook+zip",
+        "cbr": "application/vnd.comicbook-rar",
+        "mobi": "application/x-mobipocket-ebook",
+        "azw3": "application/vnd.amazon.ebook",
+    }
+    media_type = media_types.get(
+        (ef.format or "").lower(), "application/octet-stream"
+    )
+    return stream_file_response(
+        request,
+        file_path,
+        media_type=media_type,
         filename=ef.filename,
-        media_type="application/octet-stream",
     )
 
 

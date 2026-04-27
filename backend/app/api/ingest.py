@@ -116,4 +116,28 @@ async def upload_book_file(
     with open(dest, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
+    # Verify the uploaded bytes actually match the advertised extension. The
+    # extension check above is just a routing hint; without a content sniff,
+    # an attacker can upload e.g. a CBR renamed to .epub and have the EPUB
+    # extractor parse RAR bytes (or a renamed XHTML file pulled into the
+    # web reader). Reject mismatches and remove the bad file.
+    from app.services.metadata import detect_format_from_content
+
+    ext_fmt = ext.lstrip(".")
+    sniffed = detect_format_from_content(dest)
+    # Accept the upload if either the sniffer agrees with the extension, or
+    # the sniffer can't make a call (e.g. no signature for .azw — leave the
+    # extension-trusted ingest path to handle those formats).
+    if sniffed is not None and sniffed != ext_fmt and not (
+        ext_fmt in {"azw", "azw3", "mobi"} and sniffed in {"azw", "azw3", "mobi"}
+    ):
+        try:
+            dest.unlink()
+        except OSError:
+            pass
+        raise HTTPException(
+            status_code=400,
+            detail=f"File contents are {sniffed!r} but filename claims {ext_fmt!r}",
+        )
+
     return {"filename": dest.name, "size": dest.stat().st_size, "status": "queued"}

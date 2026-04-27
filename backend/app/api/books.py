@@ -585,11 +585,13 @@ async def delete_book(
 @router.get("/{book_id}/cover")
 async def get_book_cover(
     book_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Serve the book's cover image."""
     from app.config import get_settings
+    from app.services.file_streaming import stream_file_response
     settings = get_settings()
 
     stmt = select(Edition).where(Edition.id == book_id)
@@ -602,11 +604,17 @@ async def get_book_cover(
     await assert_library_access(db, current_user, edition.library_id)
 
     cover_path = Path(settings.COVERS_PATH) / f"{edition.uuid}.{edition.cover_format}"
-    if not cover_path.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cover file not found")
 
     media_type = f"image/{edition.cover_format}" if edition.cover_format != "jpg" else "image/jpeg"
-    return FileResponse(str(cover_path), media_type=media_type)
+    # Covers change when the user re-uploads or enrichment fetches a new image;
+    # rely on the ETag for revalidation, allow short browser caching.
+    return stream_file_response(
+        request,
+        cover_path,
+        media_type=media_type,
+        cache_control="private, max-age=300",
+        etag_salt=edition.cover_hash,
+    )
 
 
 @router.put("/{book_id}/cover", response_model=BookRead)
@@ -744,6 +752,7 @@ async def set_cover_from_url(
 async def download_book_file(
     book_id: int,
     file_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -768,17 +777,26 @@ async def download_book_file(
     await assert_library_access(db, current_user, edition.library_id)
 
     from app.config import resolve_path
+    from app.services.file_streaming import stream_file_response
     file_path = Path(resolve_path(edition_file.file_path))
-    if not file_path.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="File not found on disk",
-        )
 
-    return FileResponse(
+    media_types = {
+        "epub": "application/epub+zip",
+        "kepub": "application/kepub+zip",
+        "pdf": "application/pdf",
+        "cbz": "application/vnd.comicbook+zip",
+        "cbr": "application/vnd.comicbook-rar",
+        "mobi": "application/x-mobipocket-ebook",
+        "azw3": "application/vnd.amazon.ebook",
+    }
+    media_type = media_types.get(
+        (edition_file.format or "").lower(), "application/octet-stream"
+    )
+    return stream_file_response(
+        request,
         file_path,
+        media_type=media_type,
         filename=edition_file.filename,
-        media_type="application/octet-stream",
     )
 
 

@@ -121,14 +121,22 @@ def hash_file(path: str) -> str:
     return h.hexdigest()
 
 
-async def ensure_kepub(edition_file) -> Optional[str]:
+async def ensure_kepub(edition_file, *, is_fixed_layout: bool = False) -> Optional[str]:
     """Ensure a KEPUB version exists for an EditionFile.
 
-    Returns the kepub_path if successful, or None.
+    Returns the kepub_path if successful, or None. Returns None for fixed-
+    layout EPUBs — KEPUB conversion mangles pre-paginated content (the
+    container reflows everything as a single ePub3 chapter), so we serve
+    the original .epub for those titles. Kobo Nickel handles fixed-layout
+    EPUB3 natively when advertised under the EPUB3FL format.
+
     Caches the result on the EditionFile model (kepub_path, kepub_hash).
     """
     if edition_file.format.lower() not in ("epub",):
         return None  # Only convert EPUBs
+
+    if is_fixed_layout:
+        return None
 
     # Already have a cached KEPUB?
     if edition_file.kepub_path:

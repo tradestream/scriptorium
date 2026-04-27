@@ -137,6 +137,7 @@ async def _import_book(
         cover_hash=cover_hash,
         cover_format=cover_format,
         cover_color=cover_color,
+        is_fixed_layout=bool(meta.get("is_fixed_layout")),
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
     )

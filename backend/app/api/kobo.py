@@ -414,6 +414,7 @@ async def kobo_download_book(
     auth_token: str,
     book_uuid: str,
     file_format: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """Download a book file to the Kobo device.
@@ -433,25 +434,17 @@ async def kobo_download_book(
     }
     media_type = media_types.get(file_format.lower(), "application/octet-stream")
 
-    # Kobo resumes partial downloads via Range + ETag/Last-Modified, so
-    # include both. ETag is based on (uuid, size, mtime) — stable enough
-    # to dedupe but changes when the file is rewritten.
-    import os
-    stat = os.stat(file_path)
-    etag = f'"{book_uuid}-{stat.st_size}-{int(stat.st_mtime)}"'
-    last_modified = datetime.utcfromtimestamp(stat.st_mtime).strftime(
-        "%a, %d %b %Y %H:%M:%S GMT"
-    )
-
-    return FileResponse(
-        path=str(file_path),
+    # Kobo resumes downloads via Range + ETag/Last-Modified; the shared
+    # streaming helper handles all of that plus If-Range fallback. We salt
+    # the ETag with the book UUID so the same on-disk path served as
+    # different entitlements doesn't collide in the device cache.
+    from app.services.file_streaming import stream_file_response
+    return stream_file_response(
+        request,
+        file_path,
         media_type=media_type,
         filename=file_path.name,
-        headers={
-            "ETag": etag,
-            "Last-Modified": last_modified,
-            "Accept-Ranges": "bytes",
-        },
+        etag_salt=book_uuid,
     )
 
 
