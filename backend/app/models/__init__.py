@@ -21,6 +21,7 @@ from app.models.location import Location
 from app.models.article import Article, ArticleTag, ArticleHighlight
 from app.models.system import SystemSettings
 from app.models.background_job import BackgroundJob
+from app.models.kobo_span import KoboSpanMap
 
 __all__ = [
     "Base",

@@ -149,6 +149,21 @@ async def ensure_kepub(edition_file, *, is_fixed_layout: bool = False) -> Option
     if kepub_path:
         edition_file.kepub_path = kepub_path
         edition_file.kepub_hash = hash_file(resolve_path(kepub_path))
+        # Extract per-chapter koboSpan ids so we can round-trip Kobo Nickel
+        # bookmarks against real positions instead of synthetic spine#N
+        # tokens. Failure is non-fatal — sync still works without spans, it
+        # just falls back to spine-level resolution.
+        try:
+            from sqlalchemy.ext.asyncio import async_object_session
+            from app.services.kobo_spans import extract_span_maps, store_span_maps
+
+            async_session = async_object_session(edition_file)
+            if async_session is not None:
+                maps = extract_span_maps(Path(resolve_path(kepub_path)))
+                if maps:
+                    await store_span_maps(edition_file.id, maps, async_session)
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.warning("Failed to extract KoboSpan map for %s: %s", kepub_path, exc)
         return kepub_path
 
     return None
