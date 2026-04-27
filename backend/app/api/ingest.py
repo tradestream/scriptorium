@@ -11,6 +11,7 @@ from app.models import User
 from app.schemas.shelf import IngestLogRead
 from app.services.ingest import ingest_service
 from app.services.scanner import BOOK_EXTENSIONS
+from app.utils.files import safe_child
 
 from .auth import get_current_user
 
@@ -103,7 +104,11 @@ async def upload_book_file(
     ingest_path = Path(settings.INGEST_PATH)
     ingest_path.mkdir(parents=True, exist_ok=True)
 
-    dest = ingest_path / file.filename
+    try:
+        dest = safe_child(ingest_path, file.filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     # Avoid overwriting
     if dest.exists():
         stem, suffix = dest.stem, dest.suffix
@@ -113,6 +118,8 @@ async def upload_book_file(
                 dest = candidate
                 break
 
+    # Stream the upload to disk so a hostile client can't pin arbitrary
+    # gigabytes in process memory before the format sniff below runs.
     with open(dest, "wb") as f:
         shutil.copyfileobj(file.file, f)
 

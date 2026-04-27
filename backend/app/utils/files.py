@@ -84,6 +84,33 @@ def safe_path(base_path: Path, relative_path: str) -> Path:
     return full_path
 
 
+def safe_child(base: Path, name: str) -> Path:
+    """Resolve ``base / name`` safely as a direct child of ``base``.
+
+    Hardened replacement for ``base / user_supplied_name`` in upload and
+    review-queue handlers. Rejects names that contain directory components,
+    null bytes, or that resolve outside ``base`` after symlink expansion.
+
+    Raises ``ValueError`` on any rejection so callers can translate to a 400.
+    """
+    if not name:
+        raise ValueError("filename must not be empty")
+    if "\x00" in name:
+        raise ValueError("filename must not contain null bytes")
+
+    # ``Path(name).name`` strips any directory components (including
+    # ``..``), so the cleaned form is always a single path segment.
+    cleaned = Path(name).name
+    if not cleaned or cleaned in {".", ".."} or cleaned != name:
+        raise ValueError(f"filename must be a simple name, got {name!r}")
+
+    base_resolved = base.resolve()
+    candidate = (base_resolved / cleaned).resolve()
+    if not candidate.is_relative_to(base_resolved):
+        raise ValueError(f"filename {name!r} escapes base directory")
+    return candidate
+
+
 def get_file_size(file_path: Path) -> int:
     """Get file size in bytes.
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import re
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -24,6 +25,7 @@ from app.config import get_settings
 from app.database import get_db
 from app.models import Library, User
 from app.services.scanner import BOOK_EXTENSIONS, _hash_file, _import_book
+from app.utils.files import safe_child
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -121,7 +123,10 @@ async def preview_metadata(
     configured enrichment providers in priority order.
     """
     drop_path = _loose_leaves_path()
-    file_path = drop_path / filename
+    try:
+        file_path = safe_child(drop_path, filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found in Loose Leaves")
 
@@ -163,7 +168,10 @@ async def import_book(
 ):
     """Import a file from the Loose Leaves folder into a library."""
     drop_path = _loose_leaves_path()
-    file_path = drop_path / data.filename
+    try:
+        file_path = safe_child(drop_path, data.filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found in Loose Leaves")
 
@@ -224,7 +232,11 @@ async def bulk_import_books(
     for entry in data.files:
         filename = entry.get("filename", "")
         lib_id = entry.get("library_id") or data.default_library_id
-        file_path = drop_path / filename
+        try:
+            file_path = safe_child(drop_path, filename)
+        except ValueError:
+            results.append({"filename": filename, "status": "invalid_filename"})
+            continue
 
         if not file_path.exists() or not file_path.is_file():
             results.append({"filename": filename, "status": "not_found"})
@@ -283,7 +295,12 @@ async def upload_books(
         suffix = Path(upload.filename).suffix.lower()
         if suffix not in BOOK_EXTENSIONS:
             continue
-        dest = drop_path / upload.filename
+        try:
+            dest = safe_child(drop_path, upload.filename)
+        except ValueError:
+            # Silently skip hostile names; legitimate browser uploads
+            # never include path separators.
+            continue
         # Avoid overwriting existing files
         if dest.exists():
             stem = dest.stem
@@ -292,8 +309,10 @@ async def upload_books(
             while dest.exists():
                 dest = drop_path / f"{stem}_{i}{ext}"
                 i += 1
-        content = await upload.read()
-        dest.write_bytes(content)
+        # Stream rather than ``await upload.read()`` so a single large
+        # upload can't pin its full body in process memory.
+        with open(dest, "wb") as f:
+            shutil.copyfileobj(upload.file, f)
         saved.append(
             DropItem(
                 filename=dest.name,
@@ -312,7 +331,10 @@ async def reject_book(
 ):
     """Reject and delete a file from the Loose Leaves folder."""
     drop_path = _loose_leaves_path()
-    file_path = drop_path / data.filename
+    try:
+        file_path = safe_child(drop_path, data.filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found in Loose Leaves")
     file_path.unlink()
