@@ -20,7 +20,7 @@ from app.schemas.book import BookCreate, BookListResponse, BookRead, BookUpdate
 from app.schemas.shelf import ShelfRead
 from app.utils.files import calculate_file_hash, get_file_format, get_file_size, is_book_file
 
-from .auth import get_accessible_library_ids, get_current_user
+from .auth import assert_library_access, get_accessible_library_ids, get_current_user
 
 router = APIRouter(prefix="/books")
 
@@ -586,7 +586,7 @@ async def delete_book(
 async def get_book_cover(
     book_id: int,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Serve the book's cover image."""
     from app.config import get_settings
@@ -598,6 +598,8 @@ async def get_book_cover(
 
     if not edition or not edition.cover_hash or not edition.cover_format:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No cover available")
+
+    await assert_library_access(db, current_user, edition.library_id)
 
     cover_path = Path(settings.COVERS_PATH) / f"{edition.uuid}.{edition.cover_format}"
     if not cover_path.exists():
@@ -743,7 +745,7 @@ async def download_book_file(
     book_id: int,
     file_id: int,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Download a book file."""
     stmt = select(EditionFile).where(
@@ -757,6 +759,13 @@ async def download_book_file(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="File not found",
         )
+
+    edition = await db.get(Edition, edition_file.edition_id)
+    if edition is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
+        )
+    await assert_library_access(db, current_user, edition.library_id)
 
     from app.config import resolve_path
     file_path = Path(resolve_path(edition_file.file_path))
@@ -1183,7 +1192,7 @@ async def get_divina_manifest(
     file_id: int,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Return a DiViNa WebPub Manifest for a comic file (Readium compatible)."""
     stmt = select(EditionFile).where(EditionFile.id == file_id, EditionFile.edition_id == book_id)
@@ -1200,6 +1209,7 @@ async def get_divina_manifest(
     edition = edition_result.unique().scalar_one_or_none()
     if not edition:
         raise HTTPException(status_code=404, detail="Book not found")
+    await assert_library_access(db, current_user, edition.library_id)
 
     from app.services.divina import generate_divina_manifest
     scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
@@ -1231,7 +1241,7 @@ async def get_comic_page_count(
     book_id: int,
     file_id: int,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Return the number of pages in a CBZ/CBR comic file."""
     stmt = select(EditionFile).where(EditionFile.id == file_id, EditionFile.edition_id == book_id)
@@ -1239,6 +1249,11 @@ async def get_comic_page_count(
     edition_file = result.scalar_one_or_none()
     if not edition_file:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    edition = await db.get(Edition, edition_file.edition_id)
+    if edition is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    await assert_library_access(db, current_user, edition.library_id)
 
     from app.config import resolve_path as _rp
     file_path = Path(_rp(edition_file.file_path))
@@ -1264,7 +1279,7 @@ async def get_comic_page(
     file_id: int,
     page_num: int,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Return a single page image from a CBZ comic file (0-indexed)."""
     stmt = select(EditionFile).where(EditionFile.id == file_id, EditionFile.edition_id == book_id)
@@ -1272,6 +1287,11 @@ async def get_comic_page(
     edition_file = result.scalar_one_or_none()
     if not edition_file:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    edition = await db.get(Edition, edition_file.edition_id)
+    if edition is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    await assert_library_access(db, current_user, edition.library_id)
 
     from app.config import resolve_path as _rp
     file_path = Path(_rp(edition_file.file_path))

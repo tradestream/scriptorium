@@ -45,6 +45,36 @@ async def get_accessible_library_ids(db: AsyncSession, user: User) -> set[int] |
     return world_ids | granted_ids
 
 
+async def assert_library_access(
+    db: AsyncSession, user: User, library_id: int
+) -> None:
+    """Raise 404 unless the user can access the given library.
+
+    Returns 404 (not 403) so callers do not leak the existence of objects in
+    libraries the user cannot see.
+    """
+    accessible_ids = await get_accessible_library_ids(db, user)
+    if accessible_ids is not None and library_id not in accessible_ids:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+
+async def assert_edition_access(
+    db: AsyncSession, user: User, edition_id: int
+) -> "Edition":
+    """Load an Edition by id and enforce per-user library access.
+
+    Returns the Edition. Raises 404 if the edition does not exist or the user
+    cannot access its library.
+    """
+    from app.models.edition import Edition
+
+    edition = await db.get(Edition, edition_id)
+    if not edition:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    await assert_library_access(db, user, edition.library_id)
+    return edition
+
+
 async def get_current_user(
     request: Request,
     header_token: Optional[str] = Depends(_oauth2_scheme),

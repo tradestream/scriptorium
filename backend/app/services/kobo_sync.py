@@ -63,7 +63,12 @@ async def generate_sync_token(
     device_id: Optional[int] = None,
     shelf_ids: Optional[list[int]] = None,
 ) -> KoboSyncToken:
-    """Generate a new Kobo sync auth token for a user."""
+    """Generate a new Kobo sync auth token for a user.
+
+    Any ``shelf_ids`` provided are filtered to the requesting user's own
+    shelves before being attached — without this, a user could attach another
+    user's shelves and sync their books to a Kobo device.
+    """
     token_str = secrets.token_hex(32)
 
     sync_token = KoboSyncToken(
@@ -76,12 +81,43 @@ async def generate_sync_token(
     await db.flush()
 
     if shelf_ids:
+        from app.models.shelf import Shelf
+
+        owned_rows = await db.execute(
+            select(Shelf.id).where(
+                Shelf.id.in_(shelf_ids), Shelf.user_id == user_id
+            )
+        )
+        owned_ids = {row[0] for row in owned_rows.all()}
         for sid in shelf_ids:
-            db.add(KoboTokenShelf(token_id=sync_token.id, shelf_id=sid))
+            if sid in owned_ids:
+                db.add(KoboTokenShelf(token_id=sync_token.id, shelf_id=sid))
 
     await db.commit()
     await db.refresh(sync_token)
     return sync_token
+
+
+async def revoke_sync_token_for_user(
+    token_id: int, user_id: int, db: AsyncSession
+) -> bool:
+    """Revoke a sync token, but only if it belongs to ``user_id``.
+
+    Returns True if the token was revoked, False if it does not exist or
+    belongs to another user. Callers should treat False as 404 to avoid
+    leaking token-id existence across accounts.
+    """
+    stmt = select(KoboSyncToken).where(
+        KoboSyncToken.id == token_id,
+        KoboSyncToken.user_id == user_id,
+    )
+    result = await db.execute(stmt)
+    sync_token = result.scalar_one_or_none()
+    if sync_token:
+        sync_token.is_active = False
+        await db.commit()
+        return True
+    return False
 
 
 async def validate_sync_token(
@@ -101,18 +137,6 @@ async def validate_sync_token(
         await db.commit()
 
     return sync_token
-
-
-async def revoke_sync_token(token_id: int, db: AsyncSession) -> bool:
-    """Revoke (deactivate) a sync token."""
-    stmt = select(KoboSyncToken).where(KoboSyncToken.id == token_id)
-    result = await db.execute(stmt)
-    sync_token = result.scalar_one_or_none()
-    if sync_token:
-        sync_token.is_active = False
-        await db.commit()
-        return True
-    return False
 
 
 async def list_user_sync_tokens(
@@ -293,6 +317,16 @@ async def get_sync_payload(
     # Merge: union of token shelves and sync_to_kobo shelves
     token_shelf_ids = list(set(token_shelf_ids + kobo_sync_ids))
 
+    # Per-user library access: a token only sees libraries its user can access.
+    # See api/auth.py:get_accessible_library_ids — None means admin (no filter).
+    from app.api.auth import get_accessible_library_ids
+    from app.models.user import User as _User
+
+    sync_user = await db.get(_User, user_id)
+    if sync_user is None:
+        return [], False
+    accessible_lib_ids = await get_accessible_library_ids(db, sync_user)
+
     # Query editions joined to their work
     stmt = (
         select(Edition)
@@ -306,6 +340,8 @@ async def get_sync_payload(
         )
         .order_by(Edition.updated_at.desc())
     )
+    if accessible_lib_ids is not None:
+        stmt = stmt.where(Edition.library_id.in_(accessible_lib_ids))
 
     # Shelf filter: include editions whose work is on one of the token's shelves.
     # Only apply if the shelves actually have books — otherwise sync everything
@@ -1092,11 +1128,26 @@ async def get_download_path(
     book_uuid: str,
     file_format: str,
     db: AsyncSession,
+    sync_token: Optional[KoboSyncToken] = None,
 ) -> Optional[Path]:
     """Get the filesystem path for a file to serve to a Kobo device.
 
     Checks EditionFile first (new), then falls back to BookFile (legacy).
+
+    When ``sync_token`` is provided, the lookup is scoped to libraries the
+    token's user can access — without it, any caller with any UUID would be
+    able to download any file in the library.
     """
+    accessible_lib_ids: set[int] | None = None
+    if sync_token is not None:
+        from app.api.auth import get_accessible_library_ids
+        from app.models.user import User as _User
+
+        user = await db.get(_User, sync_token.user_id)
+        if user is None:
+            return None
+        accessible_lib_ids = await get_accessible_library_ids(db, user)
+
     # Try EditionFile via Edition.uuid
     stmt = (
         select(EditionFile)
@@ -1106,6 +1157,8 @@ async def get_download_path(
             EditionFile.format == file_format,
         )
     )
+    if accessible_lib_ids is not None:
+        stmt = stmt.where(Edition.library_id.in_(accessible_lib_ids))
     result = await db.execute(stmt)
     # Use scalars().first() instead of scalar_one_or_none() because some
     # editions have multiple files with the same format (e.g. duplicate
@@ -1140,6 +1193,8 @@ async def get_download_path(
             BookFile.format == file_format,
         )
     )
+    if accessible_lib_ids is not None:
+        stmt = stmt.where(Book.library_id.in_(accessible_lib_ids))
     result = await db.execute(stmt)
     book_file = result.scalar_one_or_none()
 

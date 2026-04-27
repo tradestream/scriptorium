@@ -600,11 +600,11 @@ async def export_esoteric_epub(
     comp = comp_result.scalar_one_or_none()
     comp_data = json.loads(comp.results_json) if comp else None
 
-    # Get LLM analyses
+    # Get LLM analyses (keyed by work, not edition)
     from app.models.analysis import BookAnalysis
     llm_result = await db.execute(
         select(BookAnalysis)
-        .where(BookAnalysis.book_id == book_id, BookAnalysis.status == "completed")
+        .where(BookAnalysis.work_id == book.work_id, BookAnalysis.status == "completed")
         .order_by(BookAnalysis.created_at.desc())
     )
     llm_analyses = [
@@ -673,7 +673,7 @@ async def export_esoteric_to_library(
     from app.models.analysis import BookAnalysis
     llm_result = await db.execute(
         select(BookAnalysis)
-        .where(BookAnalysis.book_id == book_id, BookAnalysis.status == "completed")
+        .where(BookAnalysis.work_id == book.work_id, BookAnalysis.status == "completed")
         .order_by(BookAnalysis.created_at.desc())
     )
     llm_analyses = [{"title": a.title, "content": a.content} for a in llm_result.scalars().all() if a.content]

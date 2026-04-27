@@ -14,7 +14,7 @@ from app.models.work import Work
 from app.schemas.book import BookListResponse, BookRead
 from app.services.search import search_service
 
-from .auth import get_current_user
+from .auth import get_accessible_library_ids, get_current_user
 
 router = APIRouter(prefix="/search")
 
@@ -38,8 +38,11 @@ async def unified_search(
     pattern = f"%{q}%"
     result = UnifiedSearchResult()
 
-    # Books (FTS5)
-    books, book_total = await search_service.search(db, q, limit=limit, offset=0)
+    # Books (FTS5) — scoped to libraries the user can access.
+    accessible_ids = await get_accessible_library_ids(db, current_user)
+    books, book_total = await search_service.search(
+        db, q, limit=limit, offset=0, accessible_library_ids=accessible_ids
+    )
     result.books = [
         {
             "id": b.id,
@@ -146,11 +149,17 @@ async def search_books(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Full-text search across books using FTS5."""
+    accessible_ids = await get_accessible_library_ids(db, current_user)
     books, total = await search_service.search(
-        db, q, limit=limit, offset=skip, library_id=library_id
+        db,
+        q,
+        limit=limit,
+        offset=skip,
+        library_id=library_id,
+        accessible_library_ids=accessible_ids,
     )
 
     return BookListResponse(

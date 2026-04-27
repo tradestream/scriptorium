@@ -82,6 +82,25 @@ async def _basic_auth(
     return user
 
 
+# ── Per-user library access ────────────────────────────────────────────────────
+
+async def _accessible_book_clause(db: AsyncSession, user: User):
+    """Return a SQL WHERE clause restricting Book to the user's libraries.
+
+    Returns ``None`` for admins (no filter). For restricted users the returned
+    clause is a SQL expression suitable for ``stmt.where(...)``. If the user has
+    access to nothing, returns a clause that matches no rows.
+    """
+    from .auth import get_accessible_library_ids
+
+    accessible = await get_accessible_library_ids(db, user)
+    if accessible is None:
+        return None
+    if not accessible:
+        return Book.library_id.is_(None) & (Book.library_id.is_not(None))  # always false
+    return Book.library_id.in_(accessible)
+
+
 # ── XML helpers ────────────────────────────────────────────────────────────────
 
 def _feed(feed_id: str, title: str, updated: str, feed_type: str) -> Element:
@@ -253,15 +272,17 @@ async def opds_all_books(
     request: Request,
     page: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(_basic_auth),
+    user: User = Depends(_basic_auth),
 ):
     base = _base_url(request)
-    total = await db.scalar(select(func.count(Book.id))) or 0
-    books = await _books_page(
-        db,
-        select(Book).order_by(Book.title)
-        .offset(page * PAGE_SIZE).limit(PAGE_SIZE),
-    )
+    access_clause = await _accessible_book_clause(db, user)
+    count_stmt = select(func.count(Book.id))
+    list_stmt = select(Book).order_by(Book.title).offset(page * PAGE_SIZE).limit(PAGE_SIZE)
+    if access_clause is not None:
+        count_stmt = count_stmt.where(access_clause)
+        list_stmt = list_stmt.where(access_clause)
+    total = await db.scalar(count_stmt) or 0
+    books = await _books_page(db, list_stmt)
     feed = _feed("urn:scriptorium:all-books", "All Books", _now(), MIME_ACQ)
     _paginate_links(feed, "/opds/books", page, total)
     for book in books:
@@ -273,12 +294,15 @@ async def opds_all_books(
 async def opds_authors(
     request: Request,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(_basic_auth),
+    user: User = Depends(_basic_auth),
 ):
+    access_clause = await _accessible_book_clause(db, user)
+    stmt = select(Author, func.count(Book.id).label("cnt")).join(Author.books)
+    if access_clause is not None:
+        stmt = stmt.where(access_clause)
     stmt = (
-        select(Author, func.count(Book.id).label("cnt"))
-        .join(Author.books)
-        .group_by(Author.id)
+        stmt.group_by(Author.id)
+        .having(func.count(Book.id) > 0)
         .order_by(Author.name)
         .limit(500)
     )
@@ -300,21 +324,24 @@ async def opds_author_books(
     request: Request,
     page: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(_basic_auth),
+    user: User = Depends(_basic_auth),
 ):
     base = _base_url(request)
     author = (await db.execute(select(Author).where(Author.id == author_id))).scalar_one_or_none()
     if not author:
         raise HTTPException(status_code=404, detail="Author not found")
-    total = await db.scalar(
-        select(func.count(Book.id)).where(Book.authors.any(Author.id == author_id))
-    ) or 0
-    books = await _books_page(
-        db,
+    access_clause = await _accessible_book_clause(db, user)
+    count_stmt = select(func.count(Book.id)).where(Book.authors.any(Author.id == author_id))
+    list_stmt = (
         select(Book).where(Book.authors.any(Author.id == author_id))
         .order_by(Book.title)
-        .offset(page * PAGE_SIZE).limit(PAGE_SIZE),
+        .offset(page * PAGE_SIZE).limit(PAGE_SIZE)
     )
+    if access_clause is not None:
+        count_stmt = count_stmt.where(access_clause)
+        list_stmt = list_stmt.where(access_clause)
+    total = await db.scalar(count_stmt) or 0
+    books = await _books_page(db, list_stmt)
     feed = _feed(f"urn:scriptorium:author:{author_id}", f"Books by {author.name}", _now(), MIME_ACQ)
     _paginate_links(feed, f"/opds/authors/{author_id}", page, total)
     for book in books:
@@ -326,12 +353,15 @@ async def opds_author_books(
 async def opds_series(
     request: Request,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(_basic_auth),
+    user: User = Depends(_basic_auth),
 ):
+    access_clause = await _accessible_book_clause(db, user)
+    stmt = select(Series, func.count(Book.id).label("cnt")).join(Series.books)
+    if access_clause is not None:
+        stmt = stmt.where(access_clause)
     stmt = (
-        select(Series, func.count(Book.id).label("cnt"))
-        .join(Series.books)
-        .group_by(Series.id)
+        stmt.group_by(Series.id)
+        .having(func.count(Book.id) > 0)
         .order_by(Series.name)
         .limit(500)
     )
@@ -353,21 +383,24 @@ async def opds_series_books(
     request: Request,
     page: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(_basic_auth),
+    user: User = Depends(_basic_auth),
 ):
     base = _base_url(request)
     series = (await db.execute(select(Series).where(Series.id == series_id))).scalar_one_or_none()
     if not series:
         raise HTTPException(status_code=404, detail="Series not found")
-    total = await db.scalar(
-        select(func.count(Book.id)).where(Book.series.any(Series.id == series_id))
-    ) or 0
-    books = await _books_page(
-        db,
+    access_clause = await _accessible_book_clause(db, user)
+    count_stmt = select(func.count(Book.id)).where(Book.series.any(Series.id == series_id))
+    list_stmt = (
         select(Book).where(Book.series.any(Series.id == series_id))
         .order_by(Book.title)
-        .offset(page * PAGE_SIZE).limit(PAGE_SIZE),
+        .offset(page * PAGE_SIZE).limit(PAGE_SIZE)
     )
+    if access_clause is not None:
+        count_stmt = count_stmt.where(access_clause)
+        list_stmt = list_stmt.where(access_clause)
+    total = await db.scalar(count_stmt) or 0
+    books = await _books_page(db, list_stmt)
     feed = _feed(f"urn:scriptorium:series:{series_id}", series.name, _now(), MIME_ACQ)
     _paginate_links(feed, f"/opds/series/{series_id}", page, total)
     for book in books:
@@ -379,12 +412,15 @@ async def opds_series_books(
 async def opds_tags(
     request: Request,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(_basic_auth),
+    user: User = Depends(_basic_auth),
 ):
+    access_clause = await _accessible_book_clause(db, user)
+    stmt = select(Tag, func.count(Book.id).label("cnt")).join(Tag.books)
+    if access_clause is not None:
+        stmt = stmt.where(access_clause)
     stmt = (
-        select(Tag, func.count(Book.id).label("cnt"))
-        .join(Tag.books)
-        .group_by(Tag.id)
+        stmt.group_by(Tag.id)
+        .having(func.count(Book.id) > 0)
         .order_by(Tag.name)
         .limit(500)
     )
@@ -406,21 +442,24 @@ async def opds_tag_books(
     request: Request,
     page: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(_basic_auth),
+    user: User = Depends(_basic_auth),
 ):
     base = _base_url(request)
     tag = (await db.execute(select(Tag).where(Tag.id == tag_id))).scalar_one_or_none()
     if not tag:
         raise HTTPException(status_code=404, detail="Tag not found")
-    total = await db.scalar(
-        select(func.count(Book.id)).where(Book.tags.any(Tag.id == tag_id))
-    ) or 0
-    books = await _books_page(
-        db,
+    access_clause = await _accessible_book_clause(db, user)
+    count_stmt = select(func.count(Book.id)).where(Book.tags.any(Tag.id == tag_id))
+    list_stmt = (
         select(Book).where(Book.tags.any(Tag.id == tag_id))
         .order_by(Book.title)
-        .offset(page * PAGE_SIZE).limit(PAGE_SIZE),
+        .offset(page * PAGE_SIZE).limit(PAGE_SIZE)
     )
+    if access_clause is not None:
+        count_stmt = count_stmt.where(access_clause)
+        list_stmt = list_stmt.where(access_clause)
+    total = await db.scalar(count_stmt) or 0
+    books = await _books_page(db, list_stmt)
     feed = _feed(f"urn:scriptorium:tag:{tag_id}", tag.name, _now(), MIME_ACQ)
     _paginate_links(feed, f"/opds/tags/{tag_id}", page, total)
     for book in books:
@@ -432,13 +471,25 @@ async def opds_tag_books(
 async def opds_story_arcs(
     request: Request,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(_basic_auth),
+    user: User = Depends(_basic_auth),
 ):
     """OPDS navigation feed listing story arcs."""
     from app.models.comic import StoryArc, StoryArcEntry
-    arcs = (await db.execute(
-        select(StoryArc).order_by(StoryArc.name)
-    )).scalars().all()
+    access_clause = await _accessible_book_clause(db, user)
+    if access_clause is None:
+        arcs = (await db.execute(
+            select(StoryArc).order_by(StoryArc.name)
+        )).scalars().all()
+    else:
+        # Only surface arcs that have at least one book the user can access.
+        stmt = (
+            select(StoryArc).distinct()
+            .join(StoryArcEntry, StoryArcEntry.story_arc_id == StoryArc.id)
+            .join(Book, Book.work_id == StoryArcEntry.work_id)
+            .where(access_clause)
+            .order_by(StoryArc.name)
+        )
+        arcs = (await db.execute(stmt)).scalars().all()
 
     feed = _feed("urn:scriptorium:arcs", "Story Arcs", _now(), MIME_NAV)
     for arc in arcs:
@@ -457,7 +508,7 @@ async def opds_story_arc_books(
     arc_id: int,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(_basic_auth),
+    user: User = Depends(_basic_auth),
 ):
     """OPDS acquisition feed for books in a story arc (reading order)."""
     from app.models.comic import StoryArc, StoryArcEntry
@@ -466,6 +517,7 @@ async def opds_story_arc_books(
         raise HTTPException(status_code=404, detail="Story arc not found")
 
     base = _base_url(request)
+    access_clause = await _accessible_book_clause(db, user)
     stmt = (
         select(Book)
         .join(StoryArcEntry, StoryArcEntry.work_id == Book.work_id)
@@ -473,6 +525,8 @@ async def opds_story_arc_books(
         .options(selectinload(Book.work).options(selectinload(Work.authors)), selectinload(Book.files))
         .order_by(StoryArcEntry.sequence_number.nulls_last(), Book.title)
     )
+    if access_clause is not None:
+        stmt = stmt.where(access_clause)
     books = (await db.execute(stmt)).unique().scalars().all()
 
     feed = _feed(f"urn:scriptorium:arc:{arc_id}", arc.name, _now(), MIME_ACQ)
@@ -487,7 +541,7 @@ async def opds_search(
     q: str = Query(""),
     page: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(_basic_auth),
+    user: User = Depends(_basic_auth),
 ):
     base = _base_url(request)
     feed = _feed(f'urn:scriptorium:search:{q}', f'Search: "{q}"', _now(), MIME_ACQ)
@@ -495,19 +549,31 @@ async def opds_search(
     if not q.strip():
         return _xml_response(feed)
 
+    from .auth import get_accessible_library_ids
+    accessible_ids = await get_accessible_library_ids(db, user)
+    access_clause = await _accessible_book_clause(db, user)
+
     try:
         from app.services.search import search_service
-        books, total = await search_service.search(db, q, limit=PAGE_SIZE, offset=page * PAGE_SIZE)
+        books, total = await search_service.search(
+            db,
+            q,
+            limit=PAGE_SIZE,
+            offset=page * PAGE_SIZE,
+            accessible_library_ids=accessible_ids,
+        )
     except Exception:
         pattern = f"%{q}%"
-        total = await db.scalar(
-            select(func.count(Book.id)).where(Book.title.ilike(pattern))
-        ) or 0
-        books = await _books_page(
-            db,
+        count_stmt = select(func.count(Book.id)).where(Book.title.ilike(pattern))
+        list_stmt = (
             select(Book).where(Book.title.ilike(pattern))
-            .offset(page * PAGE_SIZE).limit(PAGE_SIZE),
+            .offset(page * PAGE_SIZE).limit(PAGE_SIZE)
         )
+        if access_clause is not None:
+            count_stmt = count_stmt.where(access_clause)
+            list_stmt = list_stmt.where(access_clause)
+        total = await db.scalar(count_stmt) or 0
+        books = await _books_page(db, list_stmt)
 
     _paginate_links(feed, "/opds/search", page, total, q=q)
     for book in books:

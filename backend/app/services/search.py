@@ -158,8 +158,15 @@ class SearchService:
         limit: int = 50,
         offset: int = 0,
         library_id: int | None = None,
+        accessible_library_ids: set[int] | None = None,
     ) -> tuple[list[Book], int]:
-        """Search books using FTS5, optionally filtered by library."""
+        """Search books using FTS5, optionally filtered by library.
+
+        ``accessible_library_ids`` is a per-user filter: pass the result of
+        ``get_accessible_library_ids(db, user)``. ``None`` means unrestricted
+        (admin); an empty set means the caller can see nothing and the search
+        returns no rows.
+        """
         from sqlalchemy import select
         from sqlalchemy.orm import joinedload
         from app.models.edition import Edition
@@ -206,6 +213,10 @@ class SearchService:
         )
         if library_id is not None:
             stmt = stmt.where(Edition.library_id == library_id)
+        if accessible_library_ids is not None:
+            if not accessible_library_ids:
+                return [], 0
+            stmt = stmt.where(Edition.library_id.in_(accessible_library_ids))
 
         # Preserve FTS rank order by work_id position
         order_case = case(

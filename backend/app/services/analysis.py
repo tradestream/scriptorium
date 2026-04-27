@@ -340,9 +340,10 @@ async def run_analysis(
     # Extract text BEFORE committing anything (commit expires eager-loaded rels)
     text = await extract_text_from_book(book, db)
 
-    # Create a pending analysis record
+    # Create a pending analysis record. The function arg is named book_id for legacy
+    # reasons but is actually an edition.id; analyses are keyed by work, not edition.
     analysis = BookAnalysis(
-        work_id=book_id,
+        work_id=book.work_id,
         template_id=template_id,
         title=title,
         content="",
@@ -367,10 +368,10 @@ async def run_analysis(
             template_id = template.id
             analysis.template_id = template.id
 
-        # Check for per-book prompt override
+        # Check for per-book prompt override (also work-keyed)
         cfg_result = await db.execute(
             select(BookPromptConfig).where(
-                BookPromptConfig.work_id == book_id,
+                BookPromptConfig.work_id == book.work_id,
                 BookPromptConfig.template_id == template_id,
             )
         )

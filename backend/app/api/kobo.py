@@ -42,7 +42,7 @@ from app.services.kobo_sync import (
     get_download_path,
     get_sync_payload,
     list_user_sync_tokens,
-    revoke_sync_token,
+    revoke_sync_token_for_user,
     update_reading_state,
     validate_sync_token,
 )
@@ -68,6 +68,48 @@ async def _get_sync_token(
             detail="Invalid or revoked sync token",
         )
     return sync_token
+
+
+async def _resolve_book_for_token(
+    book_uuid: str,
+    sync_token: KoboSyncToken,
+    db: AsyncSession,
+):
+    """Resolve a book by UUID (or numeric id) and enforce per-token library access.
+
+    Returns the Book/Edition row or raises 404. Returning 404 (not 403) avoids
+    leaking the existence of books in libraries the token's user can't see.
+    """
+    from sqlalchemy.orm import selectinload
+    from app.api.auth import get_accessible_library_ids
+    from app.models import Book, Work
+    from app.models.user import User as _User
+
+    user = await db.get(_User, sync_token.user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+    accessible_lib_ids = await get_accessible_library_ids(db, user)
+
+    base = select(Book).options(
+        selectinload(Book.work).selectinload(Work.authors),
+        selectinload(Book.work).selectinload(Work.series),
+        selectinload(Book.files),
+    )
+    stmt = base.where(Book.uuid == book_uuid)
+    result = await db.execute(stmt)
+    book = result.scalar_one_or_none()
+    if book is None and book_uuid.isdigit():
+        stmt = base.where(Book.id == int(book_uuid))
+        result = await db.execute(stmt)
+        book = result.scalar_one_or_none()
+
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+
+    if accessible_lib_ids is not None and book.library_id not in accessible_lib_ids:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+
+    return book
 
 
 def _get_base_url(request: Request) -> str:
@@ -209,7 +251,14 @@ async def kobo_library_sync(
         content=items,
         media_type="application/json; charset=utf-8",
     )
-    response.headers["x-kobo-sync"] = "continue" if has_more else ""
+    # CWA cps/kobo.py L430-431: only set x-kobo-sync when there are more
+    # pages ("continue"). When sync is complete (no more pages), OMIT the
+    # header entirely. Setting it to "" (empty string) triggers Nickel's
+    # reconciliation logic which interprets an empty sync response as
+    # "your library is empty" and DELETES all previously-synced entitlements.
+    # Omitting the header means "no changes" — Nickel preserves existing books.
+    if has_more:
+        response.headers["x-kobo-sync"] = "continue"
     response.headers["x-kobo-synctoken"] = sync_token_b64
     response.headers["x-kobo-apitoken"] = "e30="
     # Nickel's LibraryParser::parseHeaders reads these two headers.
@@ -237,29 +286,12 @@ async def kobo_book_metadata(
     """
     sync_token = await _get_sync_token(auth_token, db)
 
-    from sqlalchemy.orm import selectinload
-    from app.models import Book, Work
     from app.services.kobo_sync import (
         _build_edition_entry,
         _get_kobo_compatible_file_edition,
     )
 
-    # Accept UUID or numeric id
-    base = select(Book).options(
-        selectinload(Book.work).selectinload(Work.authors),
-        selectinload(Book.work).selectinload(Work.series),
-        selectinload(Book.files),
-    )
-    stmt = base.where(Book.uuid == book_uuid)
-    result = await db.execute(stmt)
-    book = result.scalar_one_or_none()
-    if book is None and book_uuid.isdigit():
-        stmt = base.where(Book.id == int(book_uuid))
-        result = await db.execute(stmt)
-        book = result.scalar_one_or_none()
-
-    if not book:
-        raise HTTPException(status_code=404, detail="Book not found")
+    book = await _resolve_book_for_token(book_uuid, sync_token, db)
 
     epub_file = _get_kobo_compatible_file_edition(book.files)
     if not epub_file:
@@ -390,7 +422,7 @@ async def kobo_download_book(
     """
     sync_token = await _get_sync_token(auth_token, db)
 
-    file_path = await get_download_path(book_uuid, file_format, db)
+    file_path = await get_download_path(book_uuid, file_format, db, sync_token=sync_token)
     if not file_path:
         raise HTTPException(status_code=404, detail="Book file not found")
 
@@ -857,28 +889,12 @@ async def kobo_library_item(
     """
     sync_token = await _get_sync_token(auth_token, db)
 
-    from sqlalchemy.orm import selectinload
-    from app.models import Book, Work
     from app.services.kobo_sync import (
         _build_edition_entry,
         _get_kobo_compatible_file_edition,
     )
 
-    base = select(Book).options(
-        selectinload(Book.work).selectinload(Work.authors),
-        selectinload(Book.work).selectinload(Work.series),
-        selectinload(Book.files),
-    )
-    stmt = base.where(Book.uuid == book_uuid)
-    result = await db.execute(stmt)
-    book = result.scalar_one_or_none()
-    if book is None and book_uuid.isdigit():
-        stmt = base.where(Book.id == int(book_uuid))
-        result = await db.execute(stmt)
-        book = result.scalar_one_or_none()
-
-    if not book:
-        raise HTTPException(status_code=404, detail="Book not found")
+    book = await _resolve_book_for_token(book_uuid, sync_token, db)
 
     epub_file = _get_kobo_compatible_file_edition(book.files)
     if not epub_file:
@@ -1045,7 +1061,14 @@ async def set_token_shelves(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Replace the shelf filter on an existing token."""
+    """Replace the shelf filter on an existing token.
+
+    Only shelves owned by the requesting user are accepted. Shelf ids the user
+    does not own are silently dropped — they would otherwise let one user
+    mirror another user's shelf onto their own Kobo.
+    """
+    from app.models.shelf import Shelf
+
     # Verify token belongs to user
     result = await db.execute(
         sa_select(KoboSyncToken).where(
@@ -1057,19 +1080,27 @@ async def set_token_shelves(
     if not token:
         raise HTTPException(status_code=404, detail="Token not found")
 
+    # Filter to shelves the requester actually owns.
+    if shelf_ids:
+        owned_rows = await db.execute(
+            sa_select(Shelf.id).where(
+                Shelf.id.in_(shelf_ids), Shelf.user_id == current_user.id
+            )
+        )
+        owned_ids = [row[0] for row in owned_rows.all()]
+    else:
+        owned_ids = []
+
     # Replace all shelf associations
-    await db.execute(
-        sa_select(KoboTokenShelf).where(KoboTokenShelf.token_id == token_id)
-    )
     existing = await db.execute(
         sa_select(KoboTokenShelf).where(KoboTokenShelf.token_id == token_id)
     )
     for row in existing.scalars().all():
         await db.delete(row)
-    for sid in shelf_ids:
+    for sid in owned_ids:
         db.add(KoboTokenShelf(token_id=token_id, shelf_id=sid))
     await db.commit()
-    return {"status": "ok", "shelf_ids": shelf_ids}
+    return {"status": "ok", "shelf_ids": owned_ids}
 
 
 @kobo_management_router.delete("/tokens/{token_id}")
@@ -1079,7 +1110,7 @@ async def delete_kobo_token(
     current_user: User = Depends(get_current_user),
 ):
     """Revoke a Kobo sync token."""
-    success = await revoke_sync_token(token_id, db)
+    success = await revoke_sync_token_for_user(token_id, current_user.id, db)
     if not success:
         raise HTTPException(status_code=404, detail="Token not found")
     return {"status": "revoked"}
