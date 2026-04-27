@@ -1,130 +1,137 @@
-"""EPUB CFI (Canonical Fragment Identifier) utilities.
+"""EPUB CFI parsing and cross-format position translation.
 
-Converts between Kobo content_id/spine_index position format and
-KoReader's XPointer-based progress format, enabling cross-device
-progress synchronization.
+EPUB CFI (Canonical Fragment Identifier) is the spec-standard way to
+address a position inside an EPUB book. epubjs, foliate, Readium, and
+most modern web readers speak it. Kobo Nickel does NOT — it uses
+``KoboSpan`` ids inserted into KEPUB chapters by kepubify.
 
-EPUB CFI spec: https://www.w3.org/publishing/epub3/epub-cfi.html
+This module provides a focused subset CFI parser and the conversions
+the unified-progress emit/restore paths need:
+
+- Web reader → Kobo: ``cfi_to_span_lookup`` (in
+  ``app/services/kobo_spans.py``) consumes the parsed CFI's spine_index
+  and char_offset to pick the right koboSpan id.
+- Kobo → web reader: ``span_to_cfi`` (also in ``kobo_spans.py``) inverts
+  the lookup, building a partial CFI that opens the right chapter.
+
+The parser is intentionally narrow:
+- Handles wrapper ``epubcfi(...)``.
+- Handles range CFIs ``epubcfi(/6/4!/4/2,/1:0,/3:5)`` by taking the
+  start half (the conservative choice for resume-here cursors).
+- Extracts spine step, in-document path, and char offset.
+- Does NOT walk the chapter DOM (would require loading + parsing the
+  XHTML). That refinement can land later if exact paragraph round-trip
+  becomes necessary.
 """
+from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 from typing import Optional
 
 
-def kobo_to_cfi(spine_index: int, content_source_progress: float) -> str:
-    """Convert Kobo spine_index + progress into an approximate EPUB CFI.
+# Heuristic chapter-text length used when translating between a koboSpan
+# index inside a chapter and a CFI char offset (and vice versa). Real
+# chapter lengths vary widely; a fixed 5000 is the same heuristic
+# epubjs's locations.generate uses by default and matches the historical
+# value this module shipped with.
+NOMINAL_CHAPTER_CHARS = 5000
 
-    Kobo stores:
-      - spine_index: 0-based index into the EPUB spine
-      - content_source_progress: 0.0-1.0 progress within that spine item
 
-    Returns: An EPUB CFI string like "epubcfi(/6/4!/4/2,/1:0,/1:100)"
+@dataclass
+class ParsedCFI:
+    """Subset of an EPUB CFI sufficient for our spine + chapter lookups."""
+
+    spine_index: int
+    path: list[int] = field(default_factory=list)
+    char_offset: int = 0
+
+    @property
+    def spine_step(self) -> int:
+        """Even-numbered child step under /6 (the package). Inverse of
+        ``(spine_step - 2) // 2`` in our spine_index decoding."""
+        return (self.spine_index + 1) * 2
+
+    @property
+    def in_chapter_fraction(self) -> float:
+        """Approximate 0–1 position within the chapter from char offset."""
+        if self.char_offset <= 0:
+            return 0.0
+        return min(1.0, self.char_offset / NOMINAL_CHAPTER_CHARS)
+
+
+_CFI_WRAPPER = re.compile(r"^\s*epubcfi\s*\((.+)\)\s*$", re.DOTALL)
+_SPINE_STEP = re.compile(r"^/6/(\d+)")
+
+
+def parse_cfi(cfi: Optional[str]) -> Optional[ParsedCFI]:
+    """Parse an EPUB CFI into ``ParsedCFI`` or return ``None``.
+
+    Tolerant: returns ``None`` for malformed input rather than raising.
+    Range CFIs are reduced to their start position.
     """
-    # EPUB CFI spine step: /6 = package, then even-numbered child steps
-    # spine_index 0 → /6/2, spine_index 1 → /6/4, etc.
-    spine_step = (spine_index + 1) * 2
-    # Approximate character offset from progress
-    # We use a nominal 5000-char-per-chapter estimate
-    approx_chars = int(content_source_progress * 5000)
-
-    return f"epubcfi(/6/{spine_step}!/4/2/1:{approx_chars})"
-
-
-def cfi_to_kobo(cfi: str) -> tuple[int, float]:
-    """Extract approximate spine_index and progress from an EPUB CFI.
-
-    Returns: (spine_index, content_source_progress)
-    """
-    # Parse spine step from CFI
-    m = re.search(r"epubcfi\(/6/(\d+)", cfi)
+    if not cfi:
+        return None
+    m = _CFI_WRAPPER.match(cfi)
     if not m:
-        return 0, 0.0
+        return None
+    body = m.group(1).strip()
+    # Range CFI ``/parent,/start,/end`` → take the start.
+    if "," in body:
+        head, sep, tail = body.partition(",")
+        # The first comma separates parent from (start, end). Add the
+        # start step back onto the parent path.
+        if "," in tail:
+            start_step, _ = tail.split(",", 1)
+        else:
+            start_step = tail
+        body = head + start_step
 
-    spine_step = int(m.group(1))
-    spine_index = max(0, (spine_step // 2) - 1)
+    parts = body.split("!", 1)
+    spine_part = parts[0].strip()
+    rest = parts[1].strip() if len(parts) > 1 else ""
 
-    # Parse character offset if present
-    char_match = re.search(r":(\d+)\)", cfi)
-    if char_match:
-        chars = int(char_match.group(1))
-        progress = min(1.0, chars / 5000)
-    else:
-        progress = 0.0
+    spine_m = _SPINE_STEP.match(spine_part)
+    if not spine_m:
+        return None
+    spine_step = int(spine_m.group(1))
+    if spine_step < 2 or spine_step % 2 != 0:
+        return None
+    spine_index = (spine_step - 2) // 2
 
-    return spine_index, progress
+    path: list[int] = []
+    char_offset = 0
+    if rest:
+        path_part = rest
+        # Trailing ``:N`` is the character offset.
+        if ":" in rest:
+            path_part, _, offset_part = rest.rpartition(":")
+            try:
+                char_offset = int(offset_part)
+            except ValueError:
+                char_offset = 0
+        for step in path_part.split("/"):
+            step = step.strip()
+            if not step:
+                continue
+            try:
+                path.append(int(step))
+            except ValueError:
+                # Skip text-node markers, fragment tokens, etc.
+                continue
+
+    return ParsedCFI(spine_index=spine_index, path=path, char_offset=char_offset)
 
 
-def koreader_to_cfi(xpointer: str, spine_index: int = 0) -> str:
-    """Convert KoReader XPointer position to an approximate EPUB CFI.
+def build_partial_cfi(spine_index: int, in_chapter_fraction: float = 0.0) -> str:
+    """Build a partial CFI that opens at a given spine document.
 
-    KoReader stores progress as XPointer strings like:
-      "/body/DocFragment[3]/body/div/p[7]/text().0"
-
-    The DocFragment index maps roughly to the spine index.
+    epubjs accepts partial CFIs that omit the in-document path; the
+    rendition opens at the chapter's start. The returned shape includes
+    the conventional ``/4/2/1:offset`` body so older readers that
+    require a full path also accept it.
     """
-    # Extract DocFragment index
-    doc_match = re.search(r"DocFragment\[(\d+)\]", xpointer)
-    if doc_match:
-        spine_index = int(doc_match.group(1)) - 1  # 1-based to 0-based
-
-    # Extract paragraph index for rough progress
-    p_match = re.findall(r"/p\[(\d+)\]", xpointer)
-    para_idx = int(p_match[-1]) if p_match else 1
-    # Rough progress: assume ~50 paragraphs per chapter
-    progress = min(1.0, para_idx / 50)
-
     spine_step = (spine_index + 1) * 2
-    approx_chars = int(progress * 5000)
-    return f"epubcfi(/6/{spine_step}!/4/2/1:{approx_chars})"
-
-
-def cfi_to_koreader(cfi: str) -> str:
-    """Convert an EPUB CFI to an approximate KoReader XPointer.
-
-    Returns: An XPointer string like "/body/DocFragment[3]/body/div/p[1]/text().0"
-    """
-    spine_index, progress = cfi_to_kobo(cfi)
-    doc_fragment = spine_index + 1  # 1-based
-    para_idx = max(1, int(progress * 50))
-
-    return f"/body/DocFragment[{doc_fragment}]/body/div/p[{para_idx}]/text().0"
-
-
-def kobo_to_koreader(spine_index: int, content_source_progress: float) -> str:
-    """Direct Kobo → KoReader position conversion."""
-    cfi = kobo_to_cfi(spine_index, content_source_progress)
-    return cfi_to_koreader(cfi)
-
-
-def koreader_to_kobo(xpointer: str) -> tuple[int, float]:
-    """Direct KoReader → Kobo position conversion."""
-    cfi = koreader_to_cfi(xpointer)
-    return cfi_to_kobo(cfi)
-
-
-def normalize_progress(
-    kobo_progress: Optional[float] = None,
-    koreader_xpointer: Optional[str] = None,
-    spine_index: Optional[int] = None,
-) -> dict:
-    """Normalize progress from any device format into a unified format.
-
-    Returns dict with keys: cfi, kobo_progress, koreader_xpointer, percentage
-    """
-    result = {"cfi": None, "kobo_progress": None, "koreader_xpointer": None, "percentage": 0.0}
-
-    if kobo_progress is not None and spine_index is not None:
-        result["cfi"] = kobo_to_cfi(spine_index, kobo_progress)
-        result["kobo_progress"] = kobo_progress
-        result["koreader_xpointer"] = kobo_to_koreader(spine_index, kobo_progress)
-        # Rough global percentage (needs total spine items for accuracy)
-        result["percentage"] = round(kobo_progress * 100, 1)
-
-    elif koreader_xpointer:
-        si, progress = koreader_to_kobo(koreader_xpointer)
-        result["cfi"] = koreader_to_cfi(koreader_xpointer, si)
-        result["kobo_progress"] = progress
-        result["koreader_xpointer"] = koreader_xpointer
-        result["percentage"] = round(progress * 100, 1)
-
-    return result
+    in_chapter_fraction = max(0.0, min(1.0, in_chapter_fraction))
+    char_offset = int(in_chapter_fraction * NOMINAL_CHAPTER_CHARS)
+    return f"epubcfi(/6/{spine_step}!/4/2/1:{char_offset})"

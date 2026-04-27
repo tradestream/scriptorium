@@ -1087,16 +1087,28 @@ async def _resolve_emit_span(
     if ep is None:
         return None, None
 
+    epub = next(
+        (f for f in edition_files if (f.format or "").lower() == "epub"), None
+    )
+
     # Case 1: cursor is already a real koboSpan id from a prior Kobo write.
     if ep.current_format == "kobo_span" and ep.current_value:
         chapter, rest = _split_kobo_value(ep.current_value)
         if chapter and rest and not rest.startswith("spine#"):
             return chapter, rest
 
-    # Case 2: derive from progress against the span map.
-    epub = next(
-        (f for f in edition_files if (f.format or "").lower() == "epub"), None
-    )
+    # Case 2: cursor is a CFI (most recent write came from the web reader).
+    # Translate via the koboSpan map for this edition's KEPUB so the
+    # device opens at the right chapter / nearest paragraph.
+    if ep.current_format == "cfi" and ep.current_value and epub is not None:
+        from app.services.kobo_spans import cfi_to_span_lookup
+
+        resolved = await cfi_to_span_lookup(ep.current_value, epub.id, db)
+        if resolved:
+            chapter_href, span_id, _spine_index = resolved
+            return chapter_href, span_id
+
+    # Case 3: derive from raw progress against the span map.
     if epub is None:
         return None, None
     from app.services.kobo_spans import span_for_progress

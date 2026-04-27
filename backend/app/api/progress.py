@@ -98,7 +98,31 @@ async def get_book_progress(
     if ep is None and rs is None:
         return None
 
-    cfi = ep.current_value if (ep and ep.current_format == "cfi") else None
+    cfi: Optional[str] = None
+    if ep and ep.current_format == "cfi":
+        cfi = ep.current_value
+    elif ep and ep.current_format == "kobo_span" and ep.current_value:
+        # Cross-device cursor restore: the most recent cursor came from a
+        # Kobo device. Translate the koboSpan id back to a partial CFI so
+        # the web reader opens at the same chapter (paragraph-accurate
+        # would require chapter-XHTML walking; chapter-accurate is what
+        # the span map alone supports).
+        from app.services.kobo_spans import span_to_cfi
+        from app.models.edition import EditionFile
+
+        chapter, _, span_id = ep.current_value.partition("#")
+        if chapter and span_id and not span_id.startswith("spine#"):
+            epub_file = (
+                await db.execute(
+                    select(EditionFile).where(
+                        EditionFile.edition_id == edition.id,
+                        EditionFile.format == "epub",
+                    )
+                )
+            ).scalars().first()
+            if epub_file is not None:
+                cfi = await span_to_cfi(chapter, span_id, epub_file.id, db)
+
     pct = (ep.current_pct if ep else 0.0) * 100.0
     total_pages = ep.total_pages if ep else None
     # current_page is a derived display value — frontend uses
