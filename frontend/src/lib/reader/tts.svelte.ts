@@ -1,23 +1,37 @@
 /**
- * Web-Speech-API text-to-speech controller for the EPUB reader.
+ * Text-to-speech controller for the EPUB reader.
  *
- * Splits a chapter's visible text into sentence-sized utterances and
- * pipes them through ``window.speechSynthesis``. Per-sentence chunking
- * matters because Chrome silently truncates long utterances after
- * ~250 characters; smaller chunks also let us advance past skipped
- * sentences and surface accurate "currently speaking" state.
+ * Splits a chapter's visible text into sentence-sized utterances and pipes
+ * them through one of two backends:
+ *
+ *   - ``"web"``: ``window.speechSynthesis`` (free, instant, lower quality).
+ *     Per-sentence chunking matters because Chrome silently truncates long
+ *     utterances after ~250 characters.
+ *   - ``"cloud"``: server-side proxy to Qwen3-TTS via DashScope, returning a
+ *     WAV blob per sentence we play through an ``HTMLAudioElement``.
  *
  * Designed as a Svelte 5 reactive class so the EpubReader can bind UI
  * directly to ``playing`` / ``paused`` / ``selectedVoice`` / ``rate``.
  *
- * Browser quirks covered:
+ * Browser quirks covered (web backend):
  *  - Chrome occasionally drops ``onend`` for the last queued utterance,
  *    leaving the engine wedged. The watchdog re-pumps every 4 s.
  *  - Voices load asynchronously on Chromium; ``getVoices()`` returns []
  *    on first call. We listen on ``voiceschanged`` to repopulate.
  */
+import { getApiBase, getAuthToken } from '$lib/api/client';
 
 const SENTENCE_RE = /[^.!?\n]+[.!?]+(?=\s|$)|[^.!?\n]+$/g;
+
+export type TtsBackend = 'web' | 'cloud';
+
+/** A small set of Qwen3-TTS voices we surface in the picker. */
+export const CLOUD_VOICES = [
+  { id: 'Cherry', label: 'Cherry (warm female)' },
+  { id: 'Serena', label: 'Serena (calm female)' },
+  { id: 'Ethan', label: 'Ethan (deep male)' },
+  { id: 'Chelsie', label: 'Chelsie (bright female)' },
+] as const;
 
 export interface PlayCallbacks {
   /** Called when the queue empties naturally (no skip/stop). */
@@ -31,8 +45,14 @@ export class TtsController {
   /** True when actively speaking (not paused). */
   playing = $state(false);
   paused = $state(false);
+  /** Which backend is currently driving playback. */
+  backend = $state<TtsBackend>('web');
+  /** True if the server has DASHSCOPE_API_KEY set. Probed on first init. */
+  cloudAvailable = $state(false);
   voices = $state<SpeechSynthesisVoice[]>([]);
   selectedVoiceURI = $state<string>('');
+  /** Cloud voice id (one of CLOUD_VOICES). */
+  cloudVoice = $state<string>('Cherry');
   rate = $state(1.0);
   /** Index of the currently-speaking sentence in the active queue. */
   cursor = $state(0);
@@ -44,11 +64,16 @@ export class TtsController {
   #watchdog: ReturnType<typeof setInterval> | null = null;
   #voicesHandlerRef = this.#refreshVoices.bind(this);
   #disposed = false;
+  /** Live audio element for the cloud backend (one at a time). */
+  #cloudAudio: HTMLAudioElement | null = null;
+  /** Aborts an in-flight cloud fetch when stop/skip lands. */
+  #cloudAbort: AbortController | null = null;
 
   constructor() {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
     this.#refreshVoices();
     window.speechSynthesis.addEventListener('voiceschanged', this.#voicesHandlerRef);
+    void this.#probeCloudConfig();
   }
 
   /** True if the host browser exposes Web Speech at all. */
@@ -77,14 +102,22 @@ export class TtsController {
 
   pause(): void {
     if (!this.active || this.paused) return;
-    window.speechSynthesis.pause();
+    if (this.backend === 'web') {
+      window.speechSynthesis.pause();
+    } else {
+      this.#cloudAudio?.pause();
+    }
     this.paused = true;
     this.playing = false;
   }
 
   resume(): void {
     if (!this.active || !this.paused) return;
-    window.speechSynthesis.resume();
+    if (this.backend === 'web') {
+      window.speechSynthesis.resume();
+    } else {
+      void this.#cloudAudio?.play();
+    }
     this.paused = false;
     this.playing = true;
   }
@@ -98,15 +131,30 @@ export class TtsController {
     this.playing = false;
     if (TtsController.supported) window.speechSynthesis.cancel();
     this.#clearWatchdog();
+    this.#cloudAbort?.abort();
+    this.#cloudAbort = null;
+    if (this.#cloudAudio) {
+      this.#cloudAudio.pause();
+      this.#cloudAudio.removeAttribute('src');
+      this.#cloudAudio = null;
+    }
   }
 
   /** Skip the current utterance — the queue advances on the next pump. */
   skip(): void {
     if (!this.active) return;
-    window.speechSynthesis.cancel();
     // ``cancel`` doesn't fire ``end`` on the canceled utterance in some
     // browsers; advance manually so the queue keeps moving.
     this.cursor = Math.min(this.cursor + 1, this.total);
+    if (this.backend === 'web') {
+      window.speechSynthesis.cancel();
+    } else {
+      this.#cloudAbort?.abort();
+      if (this.#cloudAudio) {
+        this.#cloudAudio.pause();
+        this.#cloudAudio = null;
+      }
+    }
     if (this.cursor < this.total) {
       this.#speakNext();
     } else {
@@ -114,6 +162,16 @@ export class TtsController {
       this.stop();
       cb?.();
     }
+  }
+
+  setBackend(backend: TtsBackend): void {
+    if (this.backend === backend) return;
+    this.stop();
+    this.backend = backend;
+  }
+
+  setCloudVoice(voice: string): void {
+    this.cloudVoice = voice;
   }
 
   setVoice(voiceURI: string): void {
@@ -154,6 +212,10 @@ export class TtsController {
 
   #speakNext(): void {
     if (!this.active || this.cursor >= this.total) return;
+    if (this.backend === 'cloud') {
+      void this.#speakNextCloud();
+      return;
+    }
     const sentence = this.#queue[this.cursor];
     const u = new SpeechSynthesisUtterance(sentence);
     u.rate = this.rate;
@@ -189,6 +251,85 @@ export class TtsController {
       }
     };
     window.speechSynthesis.speak(u);
+  }
+
+  async #speakNextCloud(): Promise<void> {
+    if (!this.active || this.cursor >= this.total) return;
+    const sentence = this.#queue[this.cursor];
+    this.#cloudAbort = new AbortController();
+    const token = getAuthToken();
+    let blob: Blob;
+    try {
+      const resp = await fetch(`${getApiBase()}/tts/sentence`, {
+        method: 'POST',
+        signal: this.#cloudAbort.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ text: sentence, voice: this.cloudVoice }),
+      });
+      if (!resp.ok) throw new Error(`tts ${resp.status}`);
+      blob = await resp.blob();
+    } catch (err) {
+      // ``AbortError`` lands here when stop()/skip() bails — silently
+      // drop. Anything else: skip past this sentence and keep going.
+      if ((err as DOMException)?.name === 'AbortError') return;
+      console.warn('[tts/cloud] sentence failed, skipping', err);
+      this.cursor += 1;
+      if (this.cursor < this.total) this.#speakNextCloud();
+      else this.stop();
+      return;
+    }
+    if (!this.active) return;
+
+    const audio = new Audio(URL.createObjectURL(blob));
+    audio.playbackRate = this.rate;
+    this.#cloudAudio = audio;
+    audio.addEventListener('play', () => {
+      this.playing = true;
+      this.paused = false;
+    });
+    audio.addEventListener('ended', () => {
+      URL.revokeObjectURL(audio.src);
+      if (!this.active) return;
+      this.cursor += 1;
+      if (this.cursor >= this.total) {
+        const cb = this.#cb.onChapterEnd;
+        this.stop();
+        cb?.();
+      } else {
+        void this.#speakNextCloud();
+      }
+    });
+    audio.addEventListener('error', () => {
+      URL.revokeObjectURL(audio.src);
+      this.cursor += 1;
+      if (this.cursor < this.total) void this.#speakNextCloud();
+      else this.stop();
+    });
+    try {
+      await audio.play();
+    } catch {
+      // Autoplay block — surface as a paused state so the user can resume.
+      this.paused = true;
+      this.playing = false;
+    }
+  }
+
+  async #probeCloudConfig(): Promise<void> {
+    try {
+      const token = getAuthToken();
+      const resp = await fetch(`${getApiBase()}/tts/config`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!resp.ok) return;
+      const data = await resp.json();
+      this.cloudAvailable = !!data.cloud_available;
+      if (data.default_voice) this.cloudVoice = data.default_voice;
+    } catch {
+      // Endpoint missing or auth failed — frontend just stays on web TTS.
+    }
   }
 
   #pumpWatchdog(): void {

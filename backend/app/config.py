@@ -98,6 +98,13 @@ class Settings(BaseSettings):
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     OPENAI_MODEL: str = "gpt-4o"
 
+    # Cloud TTS — Alibaba DashScope hosting Qwen3-TTS. Optional; the
+    # frontend gracefully falls back to Web Speech when unset.
+    DASHSCOPE_API_KEY: str | None = None
+    DASHSCOPE_BASE_URL: str = "https://dashscope-intl.aliyuncs.com"
+    QWEN_TTS_MODEL: str = "qwen3-tts-flash"
+    QWEN_TTS_VOICE: str = "Cherry"
+
     class Config:
         env_file = ".env"
         case_sensitive = True
