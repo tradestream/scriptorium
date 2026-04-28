@@ -4,7 +4,7 @@ import asyncio
 import logging
 from pathlib import Path
 
-from app.config import get_settings
+from app.config import get_settings, resolve_path
 from app.services.scanner import BOOK_EXTENSIONS
 
 logger = logging.getLogger("scriptorium.ingest")
@@ -225,7 +225,23 @@ class IngestService:
                     except Exception:
                         pass  # markdown generation is non-critical
 
-                # Move file to the library directory, applying naming pattern if enabled
+                # Move file to the library directory, applying naming pattern if enabled.
+                #
+                # ``library.path`` is stored as a container-side path (e.g.
+                # ``/data/library/booklore/books``). When the worker runs on
+                # the host, that prefix doesn't exist — translate via
+                # PATH_REWRITE to get the host-side destination, do the move,
+                # then store the canonical container-side path on the row so
+                # other consumers (kobo, reader, etc.) keep seeing one shape.
+                lib_container = library.path
+                lib_host = resolve_path(lib_container)
+
+                def _to_container(host_path: Path) -> str:
+                    s = str(host_path)
+                    if lib_host != lib_container and s.startswith(lib_host):
+                        return lib_container + s[len(lib_host):]
+                    return s
+
                 if naming_enabled and edition:
                     from app.services.naming import build_relative_path
                     from datetime import datetime as _dt
@@ -247,7 +263,7 @@ class IngestService:
                         publisher=edition.publisher,
                         isbn=edition.isbn,
                     )
-                    dest = Path(library.path) / rel
+                    dest = Path(lib_host) / rel
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     # Avoid clobbering an existing file
                     if dest.exists():
@@ -267,13 +283,25 @@ class IngestService:
                         ef = ef_result.scalar_one_or_none()
                         file_path.rename(dest)
                         if ef:
-                            ef.file_path = str(dest)
+                            ef.file_path = _to_container(dest)
                             ef.filename = dest.name
                             await db.commit()
                 else:
-                    dest = Path(library.path) / file_path.name
+                    dest = Path(lib_host) / file_path.name
+                    Path(lib_host).mkdir(parents=True, exist_ok=True)
                     if file_path.exists() and not dest.exists():
                         file_path.rename(dest)
+                        # Reflect the new location on the row, in container shape.
+                        from app.models.edition import EditionFile
+                        from sqlalchemy import select as _select
+                        ef_result = await db.execute(
+                            _select(EditionFile).where(EditionFile.file_hash == file_hash)
+                        )
+                        ef = ef_result.scalar_one_or_none()
+                        if ef:
+                            ef.file_path = _to_container(dest)
+                            ef.filename = dest.name
+                            await db.commit()
         except Exception as exc:
             logger.error("Error processing %s: %s", file_path.name, exc)
             try:
