@@ -32,9 +32,12 @@
       const arrayBuffer = await blob.arrayBuffer();
 
       const pdfjsLib = await import('pdfjs-dist');
-      // Set worker — use CDN for the worker script
-      pdfjsLib.GlobalWorkerOptions.workerSrc =
-        `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+      // Bundle the worker locally — Vite's ``?url`` query gives us a
+      // fingerprinted module URL served by our own origin, so the reader
+      // works offline / behind firewalls and isn't vulnerable to a CDN
+      // swap. Version is locked to whatever ``pdfjs-dist`` resolves.
+      const workerUrl = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default;
+      pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
       pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
       totalPages = pdfDoc.numPages;

@@ -32,6 +32,16 @@
   // Bumped to remount the reader when we jump to the furthest cursor.
   let readerKey = $state(0);
 
+  // Fixed-layout readers (PDF, CBZ/CBR) use ``page:N`` in the cursor field
+  // instead of an opaque CFI. Parse that into a 1-based page index so we
+  // can hand it to PdfReader (1-based) and ComicReader (0-based after -1).
+  let savedPage = $derived.by((): number => {
+    const loc = progress?.initialCfi;
+    if (!loc) return 0;
+    const m = loc.match(/^page:(\d+)/);
+    return m ? parseInt(m[1], 10) : 0;
+  });
+
   onMount(async () => {
     if (!book || !file) return;
     progress = new ReaderProgress({
@@ -123,21 +133,31 @@
           </div>
         {/if}
       {:else if format === 'pdf'}
-        <PdfReader
-          bookId={book.id}
-          fileId={file.id}
-          onClose={handleClose}
-          onProgress={handleProgress}
-          onLocationChange={handleLocationChange}
-        />
+        {#if progress?.loaded}
+          <PdfReader
+            bookId={book.id}
+            fileId={file.id}
+            initialPage={savedPage || 1}
+            onClose={handleClose}
+            onProgress={handleProgress}
+            onLocationChange={handleLocationChange}
+          />
+        {:else}
+          <div class="flex h-full items-center justify-center bg-black text-white/60 text-sm">Loading…</div>
+        {/if}
       {:else if format === 'cbz' || format === 'cbr'}
-        <ComicReader
-          bookId={book.id}
-          fileId={file.id}
-          onClose={handleClose}
-          onProgress={handleProgress}
-          onLocationChange={handleLocationChange}
-        />
+        {#if progress?.loaded}
+          <ComicReader
+            bookId={book.id}
+            fileId={file.id}
+            initialPage={savedPage > 0 ? savedPage - 1 : 0}
+            onClose={handleClose}
+            onProgress={handleProgress}
+            onLocationChange={handleLocationChange}
+          />
+        {:else}
+          <div class="flex h-full items-center justify-center bg-black text-white/60 text-sm">Loading…</div>
+        {/if}
       {:else}
         <div class="flex h-full flex-col items-center justify-center bg-black text-white gap-4">
           <p class="text-lg">Unsupported format: <span class="uppercase font-bold">{format}</span></p>
