@@ -23,15 +23,30 @@ import { getApiBase, getAuthToken } from '$lib/api/client';
 
 const SENTENCE_RE = /[^.!?\n]+[.!?]+(?=\s|$)|[^.!?\n]+$/g;
 
-export type TtsBackend = 'web' | 'cloud';
+export type TtsBackend = 'web' | 'qwen' | 'elevenlabs';
 
-/** A small set of Qwen3-TTS voices we surface in the picker. */
-export const CLOUD_VOICES = [
+export interface VoiceOption {
+  id: string;
+  label: string;
+}
+
+/** Curated default voices for each cloud backend. */
+export const QWEN_VOICES: VoiceOption[] = [
   { id: 'Cherry', label: 'Cherry (warm female)' },
   { id: 'Serena', label: 'Serena (calm female)' },
   { id: 'Ethan', label: 'Ethan (deep male)' },
   { id: 'Chelsie', label: 'Chelsie (bright female)' },
-] as const;
+];
+
+/** Stock ElevenLabs voices every account has access to. */
+export const ELEVENLABS_VOICES: VoiceOption[] = [
+  { id: '21m00Tcm4TlvDq8ikWAM', label: 'Rachel (female, narrative)' },
+  { id: 'EXAVITQu4vr4xnSDxMaL', label: 'Bella (female, soft)' },
+  { id: 'pNInz6obpZtJ5rwxBLZ4', label: 'Adam (male, narrative)' },
+  { id: 'ErXwobaYiN019PkySvjV', label: 'Antoni (male, well-rounded)' },
+  { id: 'VR6AewLTigWG4xSOukaG', label: 'Arnold (male, crisp)' },
+  { id: 'TxGEqnHWrfWFTfGW9XjX', label: 'Josh (male, deep)' },
+];
 
 export interface PlayCallbacks {
   /** Called when the queue empties naturally (no skip/stop). */
@@ -47,12 +62,13 @@ export class TtsController {
   paused = $state(false);
   /** Which backend is currently driving playback. */
   backend = $state<TtsBackend>('web');
-  /** True if the server has DASHSCOPE_API_KEY set. Probed on first init. */
-  cloudAvailable = $state(false);
+  /** Per-backend availability, populated by ``probeCloudConfig``. */
+  qwenAvailable = $state(false);
+  elevenlabsAvailable = $state(false);
   voices = $state<SpeechSynthesisVoice[]>([]);
   selectedVoiceURI = $state<string>('');
-  /** Cloud voice id (one of CLOUD_VOICES). */
-  cloudVoice = $state<string>('Cherry');
+  qwenVoice = $state<string>('Cherry');
+  elevenlabsVoice = $state<string>('21m00Tcm4TlvDq8ikWAM');
   rate = $state(1.0);
   /** Index of the currently-speaking sentence in the active queue. */
   cursor = $state(0);
@@ -122,6 +138,16 @@ export class TtsController {
     this.playing = true;
   }
 
+  /** Helper used by UI: which voice id is currently active for the active backend. */
+  get currentCloudVoice(): string {
+    return this.backend === 'elevenlabs' ? this.elevenlabsVoice : this.qwenVoice;
+  }
+
+  setCloudVoice(voice: string): void {
+    if (this.backend === 'elevenlabs') this.elevenlabsVoice = voice;
+    else this.qwenVoice = voice;
+  }
+
   stop(): void {
     this.#queue = [];
     this.cursor = 0;
@@ -170,10 +196,6 @@ export class TtsController {
     this.backend = backend;
   }
 
-  setCloudVoice(voice: string): void {
-    this.cloudVoice = voice;
-  }
-
   setVoice(voiceURI: string): void {
     this.selectedVoiceURI = voiceURI;
   }
@@ -212,7 +234,7 @@ export class TtsController {
 
   #speakNext(): void {
     if (!this.active || this.cursor >= this.total) return;
-    if (this.backend === 'cloud') {
+    if (this.backend !== 'web') {
       void this.#speakNextCloud();
       return;
     }
@@ -267,7 +289,11 @@ export class TtsController {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ text: sentence, voice: this.cloudVoice }),
+        body: JSON.stringify({
+          text: sentence,
+          backend: this.backend,
+          voice: this.currentCloudVoice,
+        }),
       });
       if (!resp.ok) throw new Error(`tts ${resp.status}`);
       blob = await resp.blob();
@@ -325,8 +351,10 @@ export class TtsController {
       });
       if (!resp.ok) return;
       const data = await resp.json();
-      this.cloudAvailable = !!data.cloud_available;
-      if (data.default_voice) this.cloudVoice = data.default_voice;
+      this.qwenAvailable = !!data.qwen?.available;
+      this.elevenlabsAvailable = !!data.elevenlabs?.available;
+      if (data.qwen?.default_voice) this.qwenVoice = data.qwen.default_voice;
+      if (data.elevenlabs?.default_voice) this.elevenlabsVoice = data.elevenlabs.default_voice;
     } catch {
       // Endpoint missing or auth failed — frontend just stays on web TTS.
     }

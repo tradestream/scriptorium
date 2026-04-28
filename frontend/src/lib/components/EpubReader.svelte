@@ -3,7 +3,7 @@
   import { Button } from "$lib/components/ui/button";
   import { ChevronLeft, ChevronRight, Settings, X, Minus, Plus, AlignJustify, Columns2, Moon, Sun, List, Volume2, Pause, Play, SkipForward, Square } from "lucide-svelte";
   import { downloadBookFile } from "$lib/api/client";
-  import { TtsController, CLOUD_VOICES } from "$lib/reader/tts.svelte";
+  import { TtsController, QWEN_VOICES, ELEVENLABS_VOICES } from "$lib/reader/tts.svelte";
 
   interface Props {
     bookId: number;
@@ -424,8 +424,8 @@
           </span>
         {/if}
       </div>
-      <!-- Backend toggle (only shown when cloud is configured) -->
-      {#if tts.cloudAvailable}
+      <!-- Backend toggle — only the buttons whose backend is wired up appear. -->
+      {#if tts.qwenAvailable || tts.elevenlabsAvailable}
         <div class="flex items-center gap-1.5">
           <button
             onclick={() => tts.setBackend('web')}
@@ -434,13 +434,24 @@
           >
             Browser
           </button>
-          <button
-            onclick={() => tts.setBackend('cloud')}
-            class="rounded border px-2 py-1 text-[10px] {tts.backend === 'cloud' ? (darkMode ? 'border-white/30 bg-white/10' : 'border-black/30 bg-black/5') : (darkMode ? 'border-white/10' : 'border-black/10')}"
-            title="Cloud TTS (Qwen3-TTS via DashScope, studio quality)"
-          >
-            Cloud
-          </button>
+          {#if tts.qwenAvailable}
+            <button
+              onclick={() => tts.setBackend('qwen')}
+              class="rounded border px-2 py-1 text-[10px] {tts.backend === 'qwen' ? (darkMode ? 'border-white/30 bg-white/10' : 'border-black/30 bg-black/5') : (darkMode ? 'border-white/10' : 'border-black/10')}"
+              title="Qwen3-TTS via DashScope"
+            >
+              Qwen
+            </button>
+          {/if}
+          {#if tts.elevenlabsAvailable}
+            <button
+              onclick={() => tts.setBackend('elevenlabs')}
+              class="rounded border px-2 py-1 text-[10px] {tts.backend === 'elevenlabs' ? (darkMode ? 'border-white/30 bg-white/10' : 'border-black/30 bg-black/5') : (darkMode ? 'border-white/10' : 'border-black/10')}"
+              title="ElevenLabs (studio quality, paid per character)"
+            >
+              ElevenLabs
+            </button>
+          {/if}
         </div>
       {/if}
       <div class="flex items-center gap-2 flex-wrap">
@@ -459,12 +470,13 @@
             <span class="text-[10px] italic {darkMode ? 'text-white/40' : 'text-black/40'}">No voices yet — try refreshing</span>
           {/if}
         {:else}
+          {@const voiceList = tts.backend === 'elevenlabs' ? ELEVENLABS_VOICES : QWEN_VOICES}
           <select
             class="rounded border bg-transparent px-1.5 py-1 text-[11px] {darkMode ? 'border-white/20 text-white' : 'border-black/20'}"
-            value={tts.cloudVoice}
+            value={tts.currentCloudVoice}
             onchange={(e) => tts.setCloudVoice((e.currentTarget as HTMLSelectElement).value)}
           >
-            {#each CLOUD_VOICES as v (v.id)}
+            {#each voiceList as v (v.id)}
               <option value={v.id}>{v.label}</option>
             {/each}
           </select>

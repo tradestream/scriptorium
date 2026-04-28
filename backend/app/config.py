@@ -98,12 +98,19 @@ class Settings(BaseSettings):
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     OPENAI_MODEL: str = "gpt-4o"
 
-    # Cloud TTS — Alibaba DashScope hosting Qwen3-TTS. Optional; the
-    # frontend gracefully falls back to Web Speech when unset.
+    # Cloud TTS — multiple providers, all optional. The frontend probes
+    # ``/api/v1/tts/config`` to learn which are wired up.
     DASHSCOPE_API_KEY: str | None = None
     DASHSCOPE_BASE_URL: str = "https://dashscope-intl.aliyuncs.com"
     QWEN_TTS_MODEL: str = "qwen3-tts-flash"
     QWEN_TTS_VOICE: str = "Cherry"
+
+    # ElevenLabs — studio-quality TTS, paid per character.
+    ELEVENLABS_API_KEY: str | None = None
+    ELEVENLABS_BASE_URL: str = "https://api.elevenlabs.io"
+    ELEVENLABS_MODEL: str = "eleven_multilingual_v2"
+    # Default voice id is Rachel (a stock voice every account has access to).
+    ELEVENLABS_VOICE: str = "21m00Tcm4TlvDq8ikWAM"
 
     class Config:
         env_file = ".env"
