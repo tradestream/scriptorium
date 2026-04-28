@@ -14,6 +14,8 @@ Authentication uses HTTP Basic Auth (username:password).
 
 from __future__ import annotations
 
+import hashlib
+import logging
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -24,8 +26,12 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.models.edition import Edition, EditionFile
 from app.models.progress import KOReaderProgress
 from app.models.user import User
+from app.services.unified_progress import write_progress
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/ko", tags=["koreader"])
 
@@ -135,12 +141,53 @@ async def koreader_update_progress(
         )
         db.add(record)
 
+    # Bridge to unified-progress when we can match the document hash to an
+    # Edition. KOReader's default doc-id strategy is ``MD5(filename)`` —
+    # if a different strategy is in use (content hash, etc.) we just skip
+    # the bridge and the legacy KOReaderProgress row above remains the
+    # source of truth for that device.
+    edition = await _find_edition_by_document(db, body.document)
+    if edition is not None:
+        await write_progress(
+            db,
+            user_id=user.id,
+            edition=edition,
+            cursor_format="koreader",
+            cursor_value=body.progress,
+            cursor_pct=float(body.percentage or 0.0),
+            timestamp=now,
+        )
+
     await db.commit()
 
     return {
         "document": record.document,
         "timestamp": int(now.timestamp()),
     }
+
+
+async def _find_edition_by_document(
+    db: AsyncSession, document: str
+) -> Optional[Edition]:
+    """Locate an Edition whose file matches KOReader's document hash.
+
+    KOReader's Progress Sync plugin defaults to ``MD5(filename)`` for the
+    document key. We compute the same digest for each EditionFile and
+    return the first edition whose filename matches. Returns ``None`` if
+    no match is found, which is fine — the bridge is best-effort.
+    """
+    if not document:
+        return None
+    target = document.strip().lower()
+    files = (await db.execute(select(EditionFile.edition_id, EditionFile.filename))).all()
+    for edition_id, filename in files:
+        if not filename:
+            continue
+        digest = hashlib.md5(filename.encode("utf-8")).hexdigest()
+        if digest == target:
+            return await db.get(Edition, edition_id)
+    logger.debug("KOReader document %r did not match any EditionFile filename", document)
+    return None
 
 
 @router.get("/syncs/progress/{document}")
