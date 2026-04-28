@@ -1438,6 +1438,7 @@ async def _run_cover_fetch(job_id: str, edition_ids: list[int]) -> None:
     from app.models.work import Work
     from app.services.covers import cover_service
     from app.services.metadata_enrichment import enrichment_service
+    from app.utils.url_safety import assert_safe_url, safe_redirect_chain, UnsafeURLError
 
     await update_job(job_id, status="running")
     done = 0
@@ -1475,7 +1476,17 @@ async def _run_cover_fetch(job_id: str, edition_ids: list[int]) -> None:
 
             cover_url = enriched.get("cover_url") if enriched else None
             if cover_url:
-                async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+                try:
+                    assert_safe_url(cover_url)
+                except UnsafeURLError:
+                    not_found += 1
+                    cover_url = None
+            if cover_url:
+                async with httpx.AsyncClient(
+                    timeout=15.0,
+                    follow_redirects=True,
+                    event_hooks={"response": [safe_redirect_chain()]},
+                ) as client:
                     resp = await client.get(cover_url)
                     if resp.status_code == 200 and resp.content and len(resp.content) > 1000:
                         cover_hash, cover_format, cover_color = await cover_service.save_cover(

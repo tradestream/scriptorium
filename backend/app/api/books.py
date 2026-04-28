@@ -727,11 +727,22 @@ async def set_cover_from_url(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
 
     import httpx
+    from app.utils.url_safety import assert_safe_url, safe_redirect_chain, UnsafeURLError
     try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=15) as client:
+        assert_safe_url(data.url)
+    except UnsafeURLError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    try:
+        async with httpx.AsyncClient(
+            follow_redirects=True,
+            timeout=15,
+            event_hooks={"response": [safe_redirect_chain()]},
+        ) as client:
             r = await client.get(data.url)
             r.raise_for_status()
             cover_bytes = r.content
+    except UnsafeURLError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Failed to download image: {exc}")
 
@@ -988,7 +999,13 @@ async def enrich_book_from_url(
     if meta.get("image_url") and not edition.cover_hash:
         try:
             import httpx
-            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            from app.utils.url_safety import assert_safe_url, safe_redirect_chain
+            assert_safe_url(meta["image_url"])
+            async with httpx.AsyncClient(
+                timeout=15.0,
+                follow_redirects=True,
+                event_hooks={"response": [safe_redirect_chain()]},
+            ) as client:
                 resp = await client.get(meta["image_url"])
                 if resp.status_code == 200 and len(resp.content) > 1000:
                     cover_hash, cover_format, cover_color = await cover_service.save_cover(
@@ -1661,7 +1678,13 @@ async def _apply_enrichment(
         try:
             import httpx as _httpx
             from app.services.covers import cover_service
-            async with _httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            from app.utils.url_safety import assert_safe_url, safe_redirect_chain
+            assert_safe_url(enriched["cover_url"])
+            async with _httpx.AsyncClient(
+                timeout=15.0,
+                follow_redirects=True,
+                event_hooks={"response": [safe_redirect_chain()]},
+            ) as client:
                 resp = await client.get(enriched["cover_url"])
                 if resp.status_code == 200 and resp.content:
                     cover_hash, cover_format, cover_color = await cover_service.save_cover(resp.content, edition.uuid)
