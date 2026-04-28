@@ -1,8 +1,9 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { Button } from "$lib/components/ui/button";
-  import { ChevronLeft, ChevronRight, Settings, X, Minus, Plus, AlignJustify, Columns2, Moon, Sun, List } from "lucide-svelte";
+  import { ChevronLeft, ChevronRight, Settings, X, Minus, Plus, AlignJustify, Columns2, Moon, Sun, List, Volume2, Pause, Play, SkipForward, Square } from "lucide-svelte";
   import { downloadBookFile } from "$lib/api/client";
+  import { TtsController } from "$lib/reader/tts.svelte";
 
   interface Props {
     bookId: number;
@@ -25,8 +26,13 @@
   let error = $state('');
   let showSettings = $state(false);
   let showToc = $state(false);
+  let showTts = $state(false);
   let toc = $state<Array<{ label: string; href: string; level: number }>>([]);
   let chapterTitle = $state('');
+
+  // TTS controller — Web Speech API. Stays inert until the user opens
+  // the panel, so books that don't use TTS pay zero cost.
+  const tts = new TtsController();
 
   // Reader settings (BookLore-inspired)
   let fontSize = $state(100);
@@ -137,9 +143,40 @@
   });
 
   onDestroy(() => {
+    tts.dispose();
     rendition?.destroy();
     book?.destroy();
   });
+
+  /** Pull the visible chapter's text from the rendered iframe. */
+  function currentChapterText(): string {
+    try {
+      const view = rendition?.manager?.views?._views?.[0];
+      const doc: Document | undefined = view?.document ?? view?.iframe?.contentDocument;
+      return doc?.body?.textContent ?? '';
+    } catch {
+      return '';
+    }
+  }
+
+  function ttsPlayCurrent() {
+    const text = currentChapterText();
+    if (!text.trim()) return;
+    tts.play(text, {
+      onChapterEnd: () => {
+        // Drive the reader forward; the new ``relocated`` event will
+        // re-trigger this callback if the user keeps TTS active.
+        rendition?.next().then(() => {
+          // Defer the read of the next chapter slightly so epub.js has
+          // time to populate the new view's DOM.
+          setTimeout(() => {
+            const next = currentChapterText();
+            if (next.trim()) ttsPlayCurrent();
+          }, 250);
+        });
+      },
+    });
+  }
 
   function prevPage() { rendition?.prev(); }
   function nextPage() { rendition?.next(); }
@@ -257,9 +294,22 @@
         <span class="text-[11px] tabular-nums {darkMode ? 'text-white/40' : 'text-black/40'}">{pct}%</span>
       {/if}
     </div>
-    <Button variant="ghost" size="icon" class="h-8 w-8 shrink-0 {darkMode ? 'text-white/70 hover:text-white' : ''}" onclick={() => { showSettings = !showSettings; showToc = false; }}>
-      <Settings class="h-4 w-4" />
-    </Button>
+    <div class="flex items-center gap-0.5 shrink-0">
+      {#if TtsController.supported}
+        <Button
+          variant="ghost"
+          size="icon"
+          class="h-8 w-8 {tts.active ? (darkMode ? 'text-emerald-400' : 'text-emerald-600') : darkMode ? 'text-white/70 hover:text-white' : ''}"
+          onclick={() => { showTts = !showTts; showSettings = false; showToc = false; }}
+          title="Text-to-speech"
+        >
+          <Volume2 class="h-4 w-4" />
+        </Button>
+      {/if}
+      <Button variant="ghost" size="icon" class="h-8 w-8 {darkMode ? 'text-white/70 hover:text-white' : ''}" onclick={() => { showSettings = !showSettings; showToc = false; showTts = false; }}>
+        <Settings class="h-4 w-4" />
+      </Button>
+    </div>
   </div>
 
   <!-- TOC panel -->
@@ -321,6 +371,86 @@
         <button onclick={toggleDarkMode} class="rounded border px-2 py-1 text-[10px] {darkMode ? 'border-white/10' : 'border-black/10'}">
           {#if darkMode}<Sun class="h-3 w-3" />{:else}<Moon class="h-3 w-3" />{/if}
         </button>
+      </div>
+    </div>
+  {/if}
+
+  <!-- TTS panel -->
+  {#if showTts}
+    <div class="border-b px-3 py-3 space-y-2 {darkMode ? 'border-white/10 bg-[#222]' : 'border-black/10 bg-white'}">
+      <div class="flex items-center gap-1.5">
+        {#if !tts.active}
+          <button
+            onclick={ttsPlayCurrent}
+            class="flex items-center gap-1 rounded border px-2 py-1 text-[11px] font-medium {darkMode ? 'border-white/20 hover:bg-white/10' : 'border-black/20 hover:bg-black/5'}"
+            title="Read this chapter"
+          >
+            <Play class="h-3 w-3" /> Read
+          </button>
+        {:else if tts.paused}
+          <button
+            onclick={() => tts.resume()}
+            class="flex items-center gap-1 rounded border px-2 py-1 text-[11px] font-medium {darkMode ? 'border-white/20 hover:bg-white/10' : 'border-black/20 hover:bg-black/5'}"
+          >
+            <Play class="h-3 w-3" /> Resume
+          </button>
+        {:else}
+          <button
+            onclick={() => tts.pause()}
+            class="flex items-center gap-1 rounded border px-2 py-1 text-[11px] font-medium {darkMode ? 'border-white/20 hover:bg-white/10' : 'border-black/20 hover:bg-black/5'}"
+          >
+            <Pause class="h-3 w-3" /> Pause
+          </button>
+        {/if}
+        <button
+          onclick={() => tts.skip()}
+          disabled={!tts.active}
+          class="flex items-center gap-1 rounded border px-2 py-1 text-[11px] {darkMode ? 'border-white/20 hover:bg-white/10' : 'border-black/20 hover:bg-black/5'} disabled:opacity-40"
+          title="Skip sentence"
+        >
+          <SkipForward class="h-3 w-3" />
+        </button>
+        <button
+          onclick={() => tts.stop()}
+          disabled={!tts.active}
+          class="flex items-center gap-1 rounded border px-2 py-1 text-[11px] {darkMode ? 'border-white/20 hover:bg-white/10' : 'border-black/20 hover:bg-black/5'} disabled:opacity-40"
+          title="Stop"
+        >
+          <Square class="h-3 w-3" />
+        </button>
+        {#if tts.active}
+          <span class="ml-2 text-[10px] tabular-nums {darkMode ? 'text-white/50' : 'text-black/50'}">
+            sentence {tts.cursor + 1} / {tts.total}
+          </span>
+        {/if}
+      </div>
+      <div class="flex items-center gap-2">
+        {#if tts.voices.length > 0}
+          <select
+            class="rounded border bg-transparent px-1.5 py-1 text-[11px] {darkMode ? 'border-white/20 text-white' : 'border-black/20'}"
+            value={tts.selectedVoiceURI}
+            onchange={(e) => tts.setVoice((e.currentTarget as HTMLSelectElement).value)}
+          >
+            {#each tts.voices as v (v.voiceURI)}
+              <option value={v.voiceURI}>{v.name} ({v.lang})</option>
+            {/each}
+          </select>
+        {:else}
+          <span class="text-[10px] italic {darkMode ? 'text-white/40' : 'text-black/40'}">No voices yet — try refreshing</span>
+        {/if}
+        <label class="flex items-center gap-1.5 text-[10px] {darkMode ? 'text-white/50' : 'text-black/50'}">
+          rate
+          <input
+            type="range"
+            min="0.5"
+            max="2"
+            step="0.1"
+            class="w-16"
+            value={tts.rate}
+            oninput={(e) => tts.setRate(parseFloat((e.currentTarget as HTMLInputElement).value))}
+          />
+          <span class="w-7 tabular-nums text-right">{tts.rate.toFixed(1)}×</span>
+        </label>
       </div>
     </div>
   {/if}
