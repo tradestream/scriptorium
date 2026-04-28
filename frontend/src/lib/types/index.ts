@@ -291,6 +291,11 @@ export interface ReadProgress {
   last_opened: string;
   created_at?: string;
   updated_at?: string;
+  // Format-agnostic location string. EPUB: a CFI. PDF/CBZ/CBR: "page:N".
+  cfi?: string | null;
+  // Furthest cursor reached across all devices (whispersync-style watermark).
+  furthest_percentage?: number | null;
+  furthest_cfi?: string | null;
 }
 
 // ── Browse ────────────────────────────────────────────────────────────────────

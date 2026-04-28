@@ -5,12 +5,12 @@
   import PdfReader from '$lib/components/PdfReader.svelte';
   import ComicReader from '$lib/components/ComicReader.svelte';
   import ReaderNotesPanel from '$lib/components/ReaderNotesPanel.svelte';
-  import { getBookProgress, saveReadProgress } from '$lib/api/client';
+  import { ReaderProgress } from '$lib/reader/progress.svelte';
   import { MessageSquarePlus } from 'lucide-svelte';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
-  let book = data.book;
+  let book = $derived(data.book);
 
   // Pick the first readable file, preferring formats we can render
   const FORMAT_PRIORITY = ['epub', 'cbz', 'pdf', 'cbr'];
@@ -25,148 +25,42 @@
   let format = $derived(file?.format?.toLowerCase() ?? '');
 
   let notesOpen = $state(false);
-  let currentLocation = $state<string | undefined>(undefined);
-  // Saved CFI from the previous reading session — passed to EpubReader so
-  // the cursor is restored at the same paragraph instead of the chapter top.
-  let initialCfi = $state<string>('');
-  let progressLoaded = $state(false);
 
-  // Sync-to-furthest prompt state. When the server reports a furthest_pct
-  // meaningfully ahead of the current cursor (e.g. another device read
-  // further into the book), we surface a one-tap "jump to furthest"
-  // banner. Threshold is intentionally large to avoid noise from rounding.
-  let furthestCfi = $state<string | undefined>(undefined);
-  let furthestPct = $state<number>(0);
-  let currentPct = $state<number>(0);
-  let dismissedFurthestPrompt = $state(false);
-  const FURTHEST_PROMPT_THRESHOLD_PCT = 2;
-
-  // Session reading-time timer. We only count time spent with the tab visible
-  // (visibilitychange suspends the count) so leaving a tab open doesn't
-  // inflate ReadingState.total_time_seconds. The delta accumulates between
-  // progress saves; each save reports & resets it.
-  let lastTimerStart = Date.now();
-  let pendingSeconds = 0;
-  let isVisible = typeof document !== 'undefined' ? !document.hidden : true;
-
-  function _flushTimer() {
-    if (!isVisible) return;
-    const now = Date.now();
-    pendingSeconds += Math.max(0, Math.round((now - lastTimerStart) / 1000));
-    lastTimerStart = now;
-  }
-  function _consumeDelta(): number {
-    _flushTimer();
-    const delta = pendingSeconds;
-    pendingSeconds = 0;
-    lastTimerStart = Date.now();
-    return delta;
-  }
-  function _onVisibility() {
-    if (typeof document === 'undefined') return;
-    if (document.hidden) {
-      _flushTimer();
-      isVisible = false;
-    } else {
-      isVisible = true;
-      lastTimerStart = Date.now();
-    }
-  }
+  // ReaderProgress encapsulates load/save/session-timer/furthest-watermark
+  // logic. Built lazily because we need book + file resolved first.
+  let progress = $state<ReaderProgress | null>(null);
+  // Bumped to remount the reader when we jump to the furthest cursor.
+  let readerKey = $state(0);
 
   onMount(async () => {
-    if (typeof document !== 'undefined') {
-      document.addEventListener('visibilitychange', _onVisibility);
-    }
-    lastTimerStart = Date.now();
-
-    if (!book) {
-      progressLoaded = true;
-      return;
-    }
-    try {
-      const saved = await getBookProgress(book.id);
-      if (saved && (saved as any).cfi) {
-        initialCfi = (saved as any).cfi;
-      }
-      if (saved) {
-        currentPct = (saved as any).percentage ?? 0;
-        furthestPct = (saved as any).furthest_percentage ?? 0;
-        furthestCfi = (saved as any).furthest_cfi ?? undefined;
-      }
-    } catch {
-      // non-critical
-    }
-    progressLoaded = true;
+    if (!book || !file) return;
+    progress = new ReaderProgress({
+      bookId: book.id,
+      fileId: file.id,
+      format: file.format,
+    });
+    await progress.init();
   });
 
-  let showFurthestPrompt = $derived(
-    !dismissedFurthestPrompt
-    && furthestCfi
-    && furthestCfi !== initialCfi
-    && furthestPct - currentPct >= FURTHEST_PROMPT_THRESHOLD_PCT
-  );
-
   onDestroy(() => {
-    if (typeof document !== 'undefined') {
-      document.removeEventListener('visibilitychange', _onVisibility);
-    }
-    // Final flush — any time accumulated since the last save is reported
-    // with a no-position-change PUT so the session total is captured.
-    if (book && file) {
-      const delta = _consumeDelta();
-      if (delta > 0) {
-        const lastPct =
-          typeof currentLocation === 'string' ? undefined : undefined;
-        // Fire-and-forget; we don't await on unmount.
-        void saveReadProgress(book.id, {
-          percentage: lastPct ?? 0,
-          file_id: file.id,
-          format: file.format,
-          cfi: currentLocation,
-          time_spent_delta_seconds: delta,
-        }).catch(() => {});
-      }
-    }
+    // Fire-and-forget — onDestroy can't await, but flush() is safe to drop.
+    void progress?.dispose();
   });
 
   function handleClose() {
     goto(`/book/${book?.id}`);
   }
 
-  async function handleProgress(page: number, total: number, pct: number) {
-    if (!book || !file) return;
-    const delta = _consumeDelta();
-    try {
-      await saveReadProgress(book.id, {
-        current_page: page + 1,
-        total_pages: total,
-        percentage: pct,
-        file_id: file.id,
-        format: file.format,
-        cfi: currentLocation,
-        time_spent_delta_seconds: delta,
-      });
-    } catch {
-      // non-critical
-    }
+  function handleProgress(page: number, total: number, pct: number) {
+    progress?.reportProgress(page, total, pct);
   }
 
   function handleLocationChange(location: string) {
-    currentLocation = location;
+    progress?.setLocation(location);
   }
 
-  // Sync-to-furthest action: replace initialCfi with the furthest cursor
-  // and bump readerKey so EpubReader remounts and displays from there.
-  let readerKey = $state(0);
   function jumpToFurthest() {
-    if (!furthestCfi) return;
-    initialCfi = furthestCfi;
-    currentPct = furthestPct;
-    dismissedFurthestPrompt = true;
-    readerKey += 1;
-  }
-  function dismissFurthestPrompt() {
-    dismissedFurthestPrompt = true;
+    if (progress?.jumpToFurthest()) readerKey += 1;
   }
 </script>
 
@@ -189,12 +83,12 @@
     <!-- Reader area -->
     <div class="relative flex-1 overflow-hidden">
       {#if format === 'epub'}
-        {#if progressLoaded}
+        {#if progress?.loaded}
           {#key readerKey}
             <EpubReader
               bookId={book.id}
               fileId={file.id}
-              initialCfi={initialCfi}
+              initialCfi={progress.initialCfi}
               onClose={handleClose}
               onProgress={handleProgress}
               onLocationChange={handleLocationChange}
@@ -206,11 +100,11 @@
           </div>
         {/if}
 
-        {#if showFurthestPrompt}
+        {#if progress?.showFurthestPrompt}
           <div class="absolute left-1/2 top-4 z-30 -translate-x-1/2">
             <div class="flex items-center gap-3 rounded-full border bg-background/95 px-4 py-2 text-sm shadow-lg backdrop-blur">
               <span class="font-medium">
-                You read further on another device ({furthestPct.toFixed(0)}% vs {currentPct.toFixed(0)}%).
+                You read further on another device ({progress.furthestPct.toFixed(0)}% vs {progress.currentPct.toFixed(0)}%).
               </span>
               <button
                 class="rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:opacity-90"
@@ -220,7 +114,7 @@
               </button>
               <button
                 class="rounded-full px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
-                onclick={dismissFurthestPrompt}
+                onclick={() => progress?.dismissFurthestPrompt()}
                 aria-label="Dismiss"
               >
                 ✕
@@ -274,7 +168,7 @@
       <div class="w-72 shrink-0 overflow-hidden border-l xl:w-80">
         <ReaderNotesPanel
           bookId={book.id}
-          {currentLocation}
+          currentLocation={progress?.currentCfi}
           onClose={() => (notesOpen = false)}
         />
       </div>

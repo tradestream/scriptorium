@@ -95,13 +95,21 @@
         } catch { /* non-critical */ }
       });
 
-      // Restore position
-      if (initialCfi) {
-        await rendition.display(initialCfi);
-      } else if (initialPage > 0 && book.locations.cfiFromLocation) {
-        const cfi = book.locations.cfiFromLocation(initialPage);
-        await rendition.display(cfi);
-      } else {
+      // Restore position. A stored CFI can be invalid for this EPUB
+      // (cross-book leak, format change, malformed save) — epub.js then
+      // throws "No Section Found" and the reader stays blank. Fall back
+      // to the start so the book still renders.
+      try {
+        if (initialCfi) {
+          await rendition.display(initialCfi);
+        } else if (initialPage > 0 && book.locations.cfiFromLocation) {
+          const cfi = book.locations.cfiFromLocation(initialPage);
+          await rendition.display(cfi);
+        } else {
+          await rendition.display();
+        }
+      } catch (cfiErr) {
+        console.warn('initialCfi/page invalid for this EPUB; opening at start:', cfiErr);
         await rendition.display();
       }
 
