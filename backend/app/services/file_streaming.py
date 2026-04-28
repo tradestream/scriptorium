@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import urllib.parse
 from datetime import datetime, timezone
 from email.utils import format_datetime, parsedate_to_datetime
 from pathlib import Path
@@ -24,6 +25,21 @@ from fastapi.responses import FileResponse, StreamingResponse
 
 
 CHUNK_SIZE = 64 * 1024  # 64 KiB — balanced for SMB-mounted NAS reads
+
+
+def _content_disposition(filename: str) -> str:
+    """Build a header-safe Content-Disposition value.
+
+    HTTP headers are ASCII-only. Many ingested filenames contain Unicode
+    (e.g. ``Anna’s Archive``'s curly apostrophe) which crashes Starlette's
+    header encoder with a 500. RFC 5987 fixes this with a paired form:
+    an ASCII-safe ``filename=`` plus a ``filename*=UTF-8''<pct-encoded>``
+    that modern clients prefer. Embedded quotes are stripped from the
+    ASCII form so the quoted-string framing stays well-formed.
+    """
+    ascii_safe = filename.encode("ascii", "replace").decode("ascii").replace('"', "")
+    encoded = urllib.parse.quote(filename, safe="")
+    return f'attachment; filename="{ascii_safe}"; filename*=UTF-8\'\'{encoded}'
 
 
 def _format_http_date(ts: float) -> str:
@@ -145,7 +161,7 @@ def stream_file_response(
         "Cache-Control": cache_control,
     }
     if filename:
-        base_headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+        base_headers["Content-Disposition"] = _content_disposition(filename)
 
     # Conditional request: 304 if the client's cached representation is
     # still current. ETag wins over Last-Modified (RFC 7232 §6).
