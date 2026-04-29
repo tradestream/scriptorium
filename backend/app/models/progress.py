@@ -71,6 +71,12 @@ class KoboSyncedBook(Base):
 
     Calibre-Web pattern — enables O(1) 'already synced?' checks and
     prevents re-sending books on subsequent sync requests.
+
+    ``archived_at`` is set when the device asks for a book to be
+    removed (DELETE ``/v1/library/{uuid}``). Archived rows are kept so
+    we don't blindly re-sync the same book on the next pass; the user
+    must explicitly add the book back through Scriptorium to clear the
+    flag.
     """
 
     __tablename__ = "kobo_synced_books"
@@ -79,6 +85,7 @@ class KoboSyncedBook(Base):
     sync_token_id: Mapped[int] = mapped_column(ForeignKey("kobo_sync_tokens.id"), index=True)
     edition_id: Mapped[int] = mapped_column(ForeignKey("editions.id"), index=True)
     synced_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    archived_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
 class KoboShelfArchive(Base):

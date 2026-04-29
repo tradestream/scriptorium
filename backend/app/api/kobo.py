@@ -449,6 +449,48 @@ async def kobo_put_reading_state(
     }
 
 
+@kobo_device_router.delete("/kobo/{auth_token}/v1/library/{book_uuid}")
+async def kobo_delete_book(
+    auth_token: str,
+    book_uuid: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Device-side archive — the Kobo deleted this book locally.
+
+    Critical: this does **not** delete the file, the edition, the work,
+    or the library row. It only marks the (token, edition) pair as
+    archived in ``kobo_synced_books`` so the next sync pass won't push
+    it back to the device. The user has to re-add via Scriptorium to
+    un-archive.
+
+    Equivalent to CWA's ``DELETE /v1/library/{book_uuid}``.
+    """
+    sync_token = await _get_sync_token(auth_token, db)
+    edition = await _resolve_book_for_token(book_uuid, sync_token, db)
+    if edition is None:
+        # No-op: device asked to remove something we never sent or
+        # don't recognize. 204 keeps the device happy either way.
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    from datetime import datetime as _dt
+    from sqlalchemy import update as _update
+    from app.models.progress import KoboSyncedBook
+
+    # Stamp archived_at on the existing synced row, if any. We don't
+    # create a row when none exists — there's nothing to "un-sync."
+    await db.execute(
+        _update(KoboSyncedBook)
+        .where(
+            KoboSyncedBook.sync_token_id == sync_token.id,
+            KoboSyncedBook.edition_id == edition.id,
+            KoboSyncedBook.archived_at.is_(None),
+        )
+        .values(archived_at=_dt.utcnow())
+    )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @kobo_device_router.get(
     "/kobo/{auth_token}/v1/library/{book_uuid}/download/{file_format}"
 )

@@ -501,28 +501,104 @@ async def get_sync_payload(
                     }
                 )
 
-    # ── Removal detection: books previously synced that are now gone
-    # (deleted or no longer match the token's filter). CWA/grimmory use
-    # snapshot tables; we do a lighter diff: any KoboSyncedBook rows whose
-    # Edition no longer exists become ChangedEntitlement + IsRemoved=true.
-    # Only run on incremental syncs — on first sync there is no prior
-    # snapshot to diff against.
+    # ── Removal detection ───────────────────────────────────────────
+    # Three flavours, all incremental-only (the initial sync hasn't
+    # established a baseline yet):
+    #
+    #   a) ORPHAN — Edition deleted entirely. We have no uuid to send,
+    #      so we silently delete the KoboSyncedBook row.
+    #   b) FILTER-CHANGE — Edition still exists but no longer matches
+    #      the token's library access + shelf filter (user removed the
+    #      book from a synced shelf, revoked library access, etc.).
+    #      Emit ChangedEntitlement + IsRemoved=true so the device drops
+    #      the book on next sync, then stamp archived_at on the row.
+    #   c) ARCHIVED — already handled by the device-side DELETE
+    #      endpoint; nothing to emit here.
+    #
+    # Both (a) and (b) flow through the same diff: previously-synced &
+    # not-archived MINUS currently-allowed.
     if is_incremental:
-        orphan_result = await db.execute(
-            select(KoboSyncedBook)
-            .outerjoin(Edition, Edition.id == KoboSyncedBook.edition_id)
-            .where(
-                KoboSyncedBook.sync_token_id == sync_token.id,
-                Edition.id.is_(None),
-            )
+        # Currently-allowed set: same library access + shelf filter as
+        # the main query, no pagination, no updated_at cursor. Returns
+        # ``Edition.id`` for every edition the token *should* see right
+        # now.
+        allowed_stmt = select(Edition.id).join(
+            Library, Edition.library_id == Library.id
         )
-        orphans = list(orphan_result.scalars().all())
-        for orphan in orphans:
-            # We no longer have the Edition to get a uuid from, and the
-            # device only needs the entitlement id we originally sent.
-            # Store the uuid on KoboSyncedBook? For now, skip removal of
-            # rows with no Edition — the bookkeeping loss is acceptable.
-            await db.delete(orphan)
+        if accessible_lib_ids is not None:
+            allowed_stmt = allowed_stmt.where(
+                Edition.library_id.in_(accessible_lib_ids)
+            )
+        if token_shelf_ids:
+            shelf_has_books = await db.scalar(
+                select(ShelfBook.id)
+                .where(ShelfBook.shelf_id.in_(token_shelf_ids))
+                .limit(1)
+            )
+            if shelf_has_books:
+                allowed_stmt = allowed_stmt.where(
+                    select(ShelfBook.work_id)
+                    .where(
+                        ShelfBook.work_id == Edition.work_id,
+                        ShelfBook.shelf_id.in_(token_shelf_ids),
+                    )
+                    .exists()
+                )
+        currently_allowed_ids = {
+            row[0] for row in (await db.execute(allowed_stmt)).all()
+        }
+
+        # Previously-synced (and not yet archived) rows for this token,
+        # joined to Edition so we have the uuid to send to the device.
+        synced_rows = (
+            await db.execute(
+                select(KoboSyncedBook, Edition)
+                .outerjoin(Edition, Edition.id == KoboSyncedBook.edition_id)
+                .where(
+                    KoboSyncedBook.sync_token_id == sync_token.id,
+                    KoboSyncedBook.archived_at.is_(None),
+                )
+            )
+        ).all()
+
+        from datetime import datetime as _now_dt
+        removal_count = 0
+        for synced_row, ed in synced_rows:
+            if ed is None:
+                # Orphan (case a): row points at a deleted Edition. No
+                # uuid available; just drop the bookkeeping row.
+                await db.delete(synced_row)
+                continue
+            if ed.id in currently_allowed_ids:
+                continue
+            # Case b: filter changed; emit a removal and stamp archived.
+            # Cap removals per-batch so a giant shelf rearrangement
+            # doesn't blow the payload — leftover rows surface on the
+            # next sync round-trip.
+            if removal_count >= SYNC_PAGE_SIZE:
+                break
+            items.append(
+                {
+                    "ChangedEntitlement": {
+                        "BookEntitlement": {
+                            "Accessibility": "Full",
+                            "ActivePeriod": {"From": _kobo_timestamp(_utcnow())},
+                            "Created": _kobo_timestamp(ed.created_at),
+                            "CrossRevisionId": ed.uuid,
+                            "Id": ed.uuid,
+                            "IsHiddenFromArchive": True,
+                            "IsLocked": False,
+                            "IsRemoved": True,
+                            "LastModified": _kobo_timestamp(_utcnow()),
+                            "OriginCategory": "Imported",
+                            "RevisionId": ed.uuid,
+                            "Status": "Active",
+                        }
+                    }
+                }
+            )
+            synced_row.archived_at = _now_dt.utcnow()
+            removal_count += 1
 
     # Record synced editions in lookup table (Calibre-Web pattern).
     #
@@ -1162,7 +1238,24 @@ async def update_reading_state(
         ).scalar_one_or_none() or 0
         delta_seconds = max(0, incoming_seconds - existing)
 
+    # Kobo's own time-left estimate, when present. We pass it through
+    # untouched so the web reader / book detail can display the device's
+    # number rather than re-deriving from a pace model.
+    remaining_minutes: Optional[int] = None
+    if "RemainingTimeMinutes" in statistics:
+        try:
+            remaining_minutes = max(0, int(statistics["RemainingTimeMinutes"]))
+        except (TypeError, ValueError):
+            remaining_minutes = None
+
     device = await _get_or_create_kobo_device(user_id, db)
+
+    # Snapshot the full Kobo state JSON onto DevicePosition.raw_payload
+    # so future debugging / multi-device reconciliation can replay the
+    # original message. ``write_progress`` only persists this when a
+    # ``device_id`` is set, which it always is on the Kobo path.
+    import json as _json
+    raw_payload = _json.dumps(state_data, separators=(",", ":"))
 
     await write_progress(
         db,
@@ -1172,8 +1265,10 @@ async def update_reading_state(
         cursor_value=cursor_value,
         cursor_pct=cursor_pct or 0.0,
         device_id=device.id,
+        raw_payload=raw_payload,
         time_spent_delta_seconds=delta_seconds,
         status_hint=status_hint,
+        remaining_time_minutes=remaining_minutes,
         timestamp=_utcnow(),
     )
 
