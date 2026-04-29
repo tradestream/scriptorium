@@ -67,6 +67,11 @@ async def write_progress(
     rating: Optional[int] = None,
     review: Optional[str] = None,
     timestamp: Optional[datetime] = None,
+    # Kobo-flavoured extras: optional, populated when the upstream
+    # device reports them. The web reader doesn't compute these; they
+    # let later features (time-left UI, multi-device reconciliation)
+    # consume Kobo's own estimate without re-deriving.
+    remaining_time_minutes: Optional[int] = None,
 ) -> None:
     """Apply one progress update to the unified schema.
 
@@ -135,6 +140,7 @@ async def write_progress(
             furthest_updated_at=timestamp,
             total_pages=total_pages,
             time_spent_seconds=max(0, time_spent_delta_seconds),
+            remaining_time_minutes=remaining_time_minutes,
         )
         db.add(ep)
     else:
@@ -160,6 +166,11 @@ async def write_progress(
         # Time-spent accumulates.
         if time_spent_delta_seconds > 0:
             ep.time_spent_seconds = (ep.time_spent_seconds or 0) + time_spent_delta_seconds
+        # Remaining-time estimate: only overwrite when the caller
+        # actually supplied one. None means "no signal this update,"
+        # which shouldn't clobber a prior estimate.
+        if remaining_time_minutes is not None:
+            ep.remaining_time_minutes = remaining_time_minutes
 
     # ── ReadingState (work-level lifecycle) ───────────────────────────
     work_id = edition.work_id

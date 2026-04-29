@@ -155,6 +155,14 @@ class EditionPosition(Base):
     time_spent_seconds: Mapped[int] = mapped_column(
         Integer, default=0, nullable=False
     )
+    # Device-reported "minutes left in this book" estimate. Populated
+    # by Kobo (Statistics.RemainingTimeMinutes) and any other reader
+    # that ships its own pace tracking; the web reader's user-pace
+    # fallback (future) reads this when present and computes its own
+    # otherwise. Optional because not every device reports it.
+    remaining_time_minutes: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
