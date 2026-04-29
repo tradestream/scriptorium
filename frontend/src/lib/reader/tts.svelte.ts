@@ -23,7 +23,7 @@ import { getApiBase, getAuthToken } from '$lib/api/client';
 
 const SENTENCE_RE = /[^.!?\n]+[.!?]+(?=\s|$)|[^.!?\n]+$/g;
 
-export type TtsBackend = 'web' | 'qwen' | 'elevenlabs';
+export type TtsBackend = 'web' | 'qwen' | 'elevenlabs' | 'local';
 
 export interface VoiceOption {
   id: string;
@@ -65,10 +65,12 @@ export class TtsController {
   /** Per-backend availability, populated by ``probeCloudConfig``. */
   qwenAvailable = $state(false);
   elevenlabsAvailable = $state(false);
+  localAvailable = $state(false);
   voices = $state<SpeechSynthesisVoice[]>([]);
   selectedVoiceURI = $state<string>('');
   qwenVoice = $state<string>('Cherry');
   elevenlabsVoice = $state<string>('21m00Tcm4TlvDq8ikWAM');
+  localVoice = $state<string>('Cherry');
   rate = $state(1.0);
   /** Index of the currently-speaking sentence in the active queue. */
   cursor = $state(0);
@@ -140,11 +142,14 @@ export class TtsController {
 
   /** Helper used by UI: which voice id is currently active for the active backend. */
   get currentCloudVoice(): string {
-    return this.backend === 'elevenlabs' ? this.elevenlabsVoice : this.qwenVoice;
+    if (this.backend === 'elevenlabs') return this.elevenlabsVoice;
+    if (this.backend === 'local') return this.localVoice;
+    return this.qwenVoice;
   }
 
   setCloudVoice(voice: string): void {
     if (this.backend === 'elevenlabs') this.elevenlabsVoice = voice;
+    else if (this.backend === 'local') this.localVoice = voice;
     else this.qwenVoice = voice;
   }
 
@@ -353,8 +358,10 @@ export class TtsController {
       const data = await resp.json();
       this.qwenAvailable = !!data.qwen?.available;
       this.elevenlabsAvailable = !!data.elevenlabs?.available;
+      this.localAvailable = !!data.local?.available;
       if (data.qwen?.default_voice) this.qwenVoice = data.qwen.default_voice;
       if (data.elevenlabs?.default_voice) this.elevenlabsVoice = data.elevenlabs.default_voice;
+      if (data.local?.default_voice) this.localVoice = data.local.default_voice;
     } catch {
       // Endpoint missing or auth failed — frontend just stays on web TTS.
     }

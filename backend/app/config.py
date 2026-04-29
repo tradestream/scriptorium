@@ -112,6 +112,15 @@ class Settings(BaseSettings):
     # Default voice id is Rachel (a stock voice every account has access to).
     ELEVENLABS_VOICE: str = "21m00Tcm4TlvDq8ikWAM"
 
+    # Local TTS — points at an OpenAI-compatible server (typically
+    # ``mlx_audio.server`` running on a LAN-reachable Apple Silicon Mac
+    # serving Qwen3-TTS). Same model as DashScope-hosted Qwen, free per
+    # request after setup. Optional; unset means the frontend hides the
+    # "Local" toggle.
+    LOCAL_TTS_URL: str | None = None
+    LOCAL_TTS_MODEL: str = "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit"
+    LOCAL_TTS_VOICE: str = "Cherry"
+
     class Config:
         env_file = ".env"
         case_sensitive = True

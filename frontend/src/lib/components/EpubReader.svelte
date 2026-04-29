@@ -425,8 +425,8 @@
         {/if}
       </div>
       <!-- Backend toggle — only the buttons whose backend is wired up appear. -->
-      {#if tts.qwenAvailable || tts.elevenlabsAvailable}
-        <div class="flex items-center gap-1.5">
+      {#if tts.qwenAvailable || tts.elevenlabsAvailable || tts.localAvailable}
+        <div class="flex items-center gap-1.5 flex-wrap">
           <button
             onclick={() => tts.setBackend('web')}
             class="rounded border px-2 py-1 text-[10px] {tts.backend === 'web' ? (darkMode ? 'border-white/30 bg-white/10' : 'border-black/30 bg-black/5') : (darkMode ? 'border-white/10' : 'border-black/10')}"
@@ -434,6 +434,15 @@
           >
             Browser
           </button>
+          {#if tts.localAvailable}
+            <button
+              onclick={() => tts.setBackend('local')}
+              class="rounded border px-2 py-1 text-[10px] {tts.backend === 'local' ? (darkMode ? 'border-white/30 bg-white/10' : 'border-black/30 bg-black/5') : (darkMode ? 'border-white/10' : 'border-black/10')}"
+              title="Qwen3-TTS running locally on Apple Silicon (free, ~500ms)"
+            >
+              Local
+            </button>
+          {/if}
           {#if tts.qwenAvailable}
             <button
               onclick={() => tts.setBackend('qwen')}

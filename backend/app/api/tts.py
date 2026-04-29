@@ -4,10 +4,13 @@ Authenticated, server-side proxy to one of several TTS providers. Decouples
 the frontend from upstream keys and URLs — the browser only ever talks to
 ``/api/v1/tts/...`` on its own origin, and credentials never cross the wire.
 
-Supported backends (each enabled when its key is configured):
+Supported backends (each enabled when its key/URL is configured):
 
   * ``qwen``       — Alibaba DashScope hosting Qwen3-TTS.
   * ``elevenlabs`` — ElevenLabs hosted TTS, paid per character.
+  * ``local``      — OpenAI-compatible server on the LAN (typically
+                     ``mlx_audio.server`` running Qwen3-TTS on an
+                     Apple Silicon Mac).
 
 For the v1 cut both expose a single ``/sentence`` endpoint that returns a
 full audio body per request. Sentence-level chunking is what the EPUB
@@ -30,7 +33,7 @@ from app.models import User
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/tts", tags=["tts"])
 
-Backend = Literal["qwen", "elevenlabs"]
+Backend = Literal["qwen", "elevenlabs", "local"]
 
 
 class TtsRequest(BaseModel):
@@ -61,6 +64,11 @@ async def get_tts_config(_user: User = Depends(get_current_user)):
             "default_voice": s.ELEVENLABS_VOICE,
             "default_model": s.ELEVENLABS_MODEL,
         },
+        "local": {
+            "available": bool(s.LOCAL_TTS_URL),
+            "default_voice": s.LOCAL_TTS_VOICE,
+            "default_model": s.LOCAL_TTS_MODEL,
+        },
     }
 
 
@@ -80,6 +88,8 @@ async def synthesize_sentence(
         return await _synth_qwen(body)
     if body.backend == "elevenlabs":
         return await _synth_elevenlabs(body)
+    if body.backend == "local":
+        return await _synth_local(body)
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=f"Unknown TTS backend: {body.backend!r}",
@@ -215,4 +225,50 @@ async def _synth_elevenlabs(body: TtsRequest) -> Response:
     return Response(
         content=r.content,
         media_type=r.headers.get("content-type", "audio/mpeg"),
+    )
+
+
+# ── Local Apple-Silicon Qwen3-TTS via mlx-audio ──────────────────────
+
+async def _synth_local(body: TtsRequest) -> Response:
+    settings = get_settings()
+    if not settings.LOCAL_TTS_URL:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Local TTS is not configured (LOCAL_TTS_URL missing)",
+        )
+
+    payload = {
+        "model": body.model or settings.LOCAL_TTS_MODEL,
+        "input": body.text,
+        "voice": body.voice or settings.LOCAL_TTS_VOICE,
+    }
+    url = f"{settings.LOCAL_TTS_URL.rstrip('/')}/v1/audio/speech"
+
+    # Local inference can be slow on first call (model load) — give it
+    # a generous timeout. Subsequent calls land in the seconds range.
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            r = await client.post(
+                url,
+                headers={"Content-Type": "application/json"},
+                json=payload,
+            )
+    except httpx.HTTPError as exc:
+        logger.warning("Local TTS call failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Local TTS unreachable at {url}",
+        ) from exc
+
+    if r.status_code != 200:
+        logger.warning("Local TTS returned %s: %s", r.status_code, r.text[:300])
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Local TTS error ({r.status_code})",
+        )
+
+    return Response(
+        content=r.content,
+        media_type=r.headers.get("content-type", "audio/wav"),
     )
