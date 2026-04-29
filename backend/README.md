@@ -14,6 +14,7 @@ Self-hosted book and comics library server with FastAPI.
 - Device sync support (Kobo, KOReader, Calibre)
 - File format conversion via Calibre CLI
 - Cover extraction and thumbnail generation
+- Text-to-speech in the EPUB reader (Web Speech, local mlx-audio, Qwen via DashScope, ElevenLabs) — see [docs/tts-setup.md](../docs/tts-setup.md)
 
 ## Project Structure
 
