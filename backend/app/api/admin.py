@@ -1845,3 +1845,67 @@ async def download_backup(_admin: User = Depends(_require_admin)):
         media_type="application/gzip",
         headers={"Content-Disposition": f'attachment; filename="scriptorium_backup_{stamp}.tar.gz"'},
     )
+
+
+@router.post("/page-inventory/backfill")
+async def backfill_page_inventory(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Walk every CBZ ``edition_files`` row and populate the page
+    inventory cache for any that don't have one yet. Idempotent:
+    files already inventoried are skipped.
+
+    Use after deploying the inventory feature so existing books get
+    the same single-SELECT read path that new ingests get for free.
+    """
+    if not current_user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+
+    from sqlalchemy import select as _select
+    from app.config import resolve_path as _rp
+    from app.models.edition import EditionFile
+    from app.models.page_inventory import EditionFilePage
+    from app.services.page_inventory import populate_pages
+
+    # Find CBZ files that have *no* inventory rows.
+    cbz_files = (
+        await db.execute(
+            _select(EditionFile).where(EditionFile.format == "cbz")
+        )
+    ).scalars().all()
+    already = {
+        row[0]
+        for row in (
+            await db.execute(
+                _select(EditionFilePage.edition_file_id).distinct()
+            )
+        ).all()
+    }
+
+    populated = 0
+    skipped = 0
+    failed = 0
+    for ef in cbz_files:
+        if ef.id in already:
+            skipped += 1
+            continue
+        host_path = Path(_rp(ef.file_path))
+        if not host_path.exists():
+            failed += 1
+            continue
+        try:
+            written = await populate_pages(host_path, ef.id, db, fmt="cbz")
+            if written > 0:
+                populated += 1
+            else:
+                failed += 1
+        except Exception:
+            failed += 1
+    await db.commit()
+    return {
+        "populated": populated,
+        "skipped_already_done": skipped,
+        "failed": failed,
+        "total_cbz": len(cbz_files),
+    }

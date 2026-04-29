@@ -166,6 +166,17 @@ async def _import_book(
         except Exception:
             pass  # ComicInfo extraction is non-critical
 
+    # ── Page inventory cache (CBZ) ────────────────────────────────────────────
+    # Walk the archive once now so the comic reader serves
+    # ``GET /pages`` and ``/pages/{n}`` from an indexed table instead
+    # of cracking the ZIP per request.
+    if fmt == "cbz":
+        try:
+            from app.services.page_inventory import populate_pages
+            await populate_pages(file_path, edition_file.id, db, fmt=fmt)
+        except Exception:
+            pass  # inventory is a perf cache; failures fall back to live walk
+
     await db.commit()
 
     # ── Index in FTS5 (non-critical) ──────────────────────────────────────────

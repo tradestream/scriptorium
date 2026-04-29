@@ -24,6 +24,7 @@ from app.models.background_job import BackgroundJob
 from app.models.kobo_span import KoboSpanMap
 from app.models.reading import ReadingState, EditionPosition, DevicePosition
 from app.models.reading_list import ReadingList, ReadingListEntry
+from app.models.page_inventory import EditionFilePage
 # Comic-specific tables. Imported even when not used directly so the
 # ``imprints`` table registers with SQLAlchemy metadata — Work has a
 # ForeignKey("imprints.id") and resolution fails silently otherwise.
@@ -88,4 +89,5 @@ __all__ = [
     "StoryArcEntry",
     "ReadingList",
     "ReadingListEntry",
+    "EditionFilePage",
 ]

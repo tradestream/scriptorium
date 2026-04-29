@@ -1317,14 +1317,14 @@ async def get_comic_page_count(
 
     fmt = (edition_file.format or "").lower()
     if fmt == "cbz":
-        import zipfile
-        with zipfile.ZipFile(file_path) as z:
-            images = sorted(
-                n for n in z.namelist()
-                if n.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".gif"))
-                and not n.startswith("__MACOSX")
-            )
-        return {"count": len(images), "format": fmt}
+        # Cached inventory first; falls back to a one-shot archive walk
+        # for older books that haven't been backfilled yet.
+        from app.services.page_inventory import ensure_pages_count
+
+        count = await ensure_pages_count(file_path, edition_file.id, db, fmt=fmt)
+        if count is None:
+            raise HTTPException(status_code=400, detail="Unable to read archive")
+        return {"count": count, "format": fmt}
     raise HTTPException(status_code=400, detail=f"Unsupported comic format: {fmt}")
 
 
@@ -1372,15 +1372,48 @@ async def get_comic_page(
     PAGE_MAX_BYTES = 50 * 1024 * 1024
     BOMB_RATIO_LIMIT = 1000
 
-    with zipfile.ZipFile(file_path) as z:
-        images = sorted(
-            n for n in z.namelist()
-            if n.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".gif"))
-            and not n.startswith("__MACOSX")
+    # Look up the page filename + media type from the inventory cache
+    # first; fall back to a live namelist walk for files that haven't
+    # been backfilled yet. Either way ``page_num`` is 0-based.
+    from app.models.page_inventory import EditionFilePage
+
+    cached = (
+        await db.execute(
+            select(EditionFilePage).where(
+                EditionFilePage.edition_file_id == edition_file.id,
+                EditionFilePage.page_number == page_num + 1,
+            )
         )
-        if page_num < 0 or page_num >= len(images):
+    ).scalar_one_or_none()
+
+    with zipfile.ZipFile(file_path) as z:
+        if cached is not None:
+            name = cached.filename
+            media_type = cached.media_type
+        else:
+            images = sorted(
+                n for n in z.namelist()
+                if n.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".gif"))
+                and not n.startswith("__MACOSX")
+            )
+            if page_num < 0 or page_num >= len(images):
+                raise HTTPException(status_code=404, detail="Page not found")
+            name = images[page_num]
+            lower = name.lower()
+            media_type = (
+                "image/png" if lower.endswith(".png")
+                else "image/webp" if lower.endswith(".webp")
+                else "image/gif" if lower.endswith(".gif")
+                else "image/jpeg"
+            )
+
+        try:
+            info = z.getinfo(name)
+        except KeyError:
+            # Inventory drift (file repacked but row stale). Fall back
+            # below; for now treat as not found so the user gets a
+            # clean 404 rather than a 500.
             raise HTTPException(status_code=404, detail="Page not found")
-        info = z.getinfo(images[page_num])
         if info.file_size > PAGE_MAX_BYTES:
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -1403,12 +1436,6 @@ async def get_comic_page(
                     )
                 buf.write(chunk)
         buf.seek(0)
-        name = images[page_num].lower()
-        media_type = (
-            "image/png" if name.endswith(".png")
-            else "image/webp" if name.endswith(".webp")
-            else "image/jpeg"
-        )
     return StreamingResponse(buf, media_type=media_type)
 
 
