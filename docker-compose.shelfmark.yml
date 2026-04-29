@@ -1,0 +1,55 @@
+# Shelfmark sidecar — multi-source book/audiobook discovery + download.
+#
+# Layered onto an existing Scriptorium compose file via `-f`:
+#
+#   docker compose \
+#       -f docker-compose.yml \
+#       -f docker-compose.shelfmark.yml \
+#       up
+#
+# The integration is purely operational — no Scriptorium code depends on
+# Shelfmark and vice versa. Shelfmark drops finished downloads into the
+# directory mounted at ``/books``, which is the same host path
+# Scriptorium has mounted at ``/data/ingest``. Scriptorium's existing
+# ``watchfiles``-based ingest service picks the file up automatically
+# and routes it to the configured ``INGEST_DEFAULT_LIBRARY``.
+#
+# Adjust the host paths below for your deployment. Everything else is
+# Shelfmark's own concern — see https://github.com/calibrain/shelfmark
+# for its env vars (auth, sources, audiobook handling, etc.).
+
+services:
+  shelfmark:
+    image: ghcr.io/calibrain/shelfmark-lite:latest
+    container_name: shelfmark
+    ports:
+      # Shelfmark's own UI. Browse / search / download from here.
+      - "8084:8084"
+    environment:
+      PUID: 1000
+      PGID: 1000
+      # Optional: bypass Cloudflare for some sources. Run flaresolverr
+      # alongside if you need it; see Shelfmark docs.
+      # EXT_BYPASSER_URL: http://flaresolverr:8191
+    volumes:
+      # ── KEY MOUNT ────────────────────────────────────────────────
+      # The host path below MUST match Scriptorium's ingest mount in
+      # your other compose file:
+      #   docker-compose.yml      → /Volumes/docker/scriptorium/data/ingest
+      #   docker-compose.nas.yml  → /volume1/docker/scriptorium/data/ingest
+      # Edit this to whichever your deployment uses.
+      - /volume1/docker/scriptorium/data/ingest:/books
+
+      # Shelfmark's own config (separate from Scriptorium).
+      - /volume1/docker/shelfmark/config:/config
+
+      # Optional: shared with your torrent / usenet client so Shelfmark
+      # can pick up downloads. Path inside both containers must match.
+      # - /volume1/downloads:/volume1/downloads
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8084/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

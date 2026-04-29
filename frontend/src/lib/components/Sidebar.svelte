@@ -1,5 +1,6 @@
 <script lang="ts">
   import { page } from "$app/state";
+  import { env } from "$env/dynamic/public";
   import { cn } from "$lib/utils/cn";
   import { Separator } from "$lib/components/ui/separator";
   import {
@@ -26,6 +27,7 @@
     BookPlus,
     Headphones,
     Newspaper,
+    Compass,
   } from "lucide-svelte";
   import type { Library as LibraryType, Shelf, Collection } from "$lib/types/index";
   import { DragDropProvider } from "@dnd-kit-svelte/svelte";
@@ -143,6 +145,28 @@
         {/if}
       </a>
     {/each}
+
+    <!-- Shelfmark — external discovery / download tool. Renders only
+         when PUBLIC_SHELFMARK_URL is configured at build time. Opens
+         in a new tab so it doesn't replace the reader / library view. -->
+    {#if env.PUBLIC_SHELFMARK_URL}
+      <a
+        href={env.PUBLIC_SHELFMARK_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={collapsed ? 'Discover (Shelfmark)' : undefined}
+        class={cn(
+          "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm transition-colors",
+          "text-sidebar-foreground/55 hover:bg-sidebar-foreground/6 hover:text-sidebar-foreground",
+          collapsed && "justify-center px-0 h-9 w-9 mx-auto"
+        )}
+      >
+        <Compass class="h-3.5 w-3.5 shrink-0" />
+        {#if !collapsed}
+          <span class="truncate">Discover</span>
+        {/if}
+      </a>
+    {/if}
 
     {#if sortedLibraries.length > 0}
       <div class="pt-4">

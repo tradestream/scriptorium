@@ -15,6 +15,7 @@ Self-hosted book and comics library server with FastAPI.
 - File format conversion via Calibre CLI
 - Cover extraction and thumbnail generation
 - Text-to-speech in the EPUB reader (Web Speech, local mlx-audio, Qwen via DashScope, ElevenLabs) — see [docs/tts-setup.md](../docs/tts-setup.md)
+- Optional [Shelfmark](https://github.com/calibrain/shelfmark) sidecar for multi-source book discovery / download (drops into ingest) — see [docs/shelfmark-integration.md](../docs/shelfmark-integration.md)
 
 ## Project Structure
 
