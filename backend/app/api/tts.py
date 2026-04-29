@@ -32,11 +32,43 @@ from app.api.auth import get_current_user
 from app.config import get_settings
 from app.models import User
 from app.services.auth import verify_token
+from app.utils.url_safety import BodyTooLargeError, fetch_capped
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/tts", tags=["tts"])
 
 Backend = Literal["qwen", "elevenlabs", "local"]
+
+# Per-sentence audio body cap. A 4000-character sentence at 16-bit / 24 kHz
+# WAV runs ~7-9 MB; a noisy or buggy upstream returning much more should
+# be refused before we relay it to the browser.
+MAX_AUDIO_BODY_BYTES = 20 * 1024 * 1024
+
+
+def _validate_audio_response(
+    headers: dict, body: bytes, source: str
+) -> None:
+    """Reject a TTS upstream that returned anything that doesn't smell
+    like an audio body. Strict on content-type because relaying
+    text/html (an upstream error page) to a browser ``<audio>`` element
+    leaks information without playing anything useful.
+    """
+    ct = (headers.get("content-type") or "").lower()
+    if not (ct.startswith("audio/") or ct == "application/octet-stream"):
+        logger.warning(
+            "%s returned non-audio content-type %r; refusing to relay",
+            source,
+            ct,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"TTS upstream returned non-audio content ({ct})",
+        )
+    if not body:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"{source} returned empty body",
+        )
 
 
 def _tts_rate_key(request: Request) -> str:
@@ -194,18 +226,30 @@ async def _synth_qwen(body: TtsRequest) -> Response:
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            audio_resp = await client.get(audio_url)
-        audio_resp.raise_for_status()
+            status_code, headers, audio_body = await fetch_capped(
+                client, audio_url, max_bytes=MAX_AUDIO_BODY_BYTES
+            )
+    except BodyTooLargeError as exc:
+        logger.warning("DashScope audio body exceeded cap: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="TTS upstream returned an oversized audio body",
+        ) from exc
     except httpx.HTTPError as exc:
         logger.warning("DashScope audio download failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="TTS audio download failed",
         ) from exc
-
+    if status_code != 200:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"TTS audio download error ({status_code})",
+        )
+    _validate_audio_response(headers, audio_body, "DashScope")
     return Response(
-        content=audio_resp.content,
-        media_type=audio_resp.headers.get("content-type", "audio/wav"),
+        content=audio_body,
+        media_type=headers.get("content-type", "audio/wav"),
     )
 
 
@@ -231,8 +275,11 @@ async def _synth_elevenlabs(body: TtsRequest) -> Response:
     )
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            r = await client.post(
+            status_code, headers, body = await fetch_capped(
+                client,
                 url,
+                method="POST",
+                max_bytes=MAX_AUDIO_BODY_BYTES,
                 headers={
                     "xi-api-key": settings.ELEVENLABS_API_KEY,
                     "Content-Type": "application/json",
@@ -240,6 +287,12 @@ async def _synth_elevenlabs(body: TtsRequest) -> Response:
                 },
                 json=payload,
             )
+    except BodyTooLargeError as exc:
+        logger.warning("ElevenLabs body exceeded cap: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="TTS upstream returned an oversized audio body",
+        ) from exc
     except httpx.HTTPError as exc:
         logger.warning("ElevenLabs TTS call failed: %s", exc)
         raise HTTPException(
@@ -247,18 +300,16 @@ async def _synth_elevenlabs(body: TtsRequest) -> Response:
             detail="TTS upstream unreachable",
         ) from exc
 
-    if r.status_code != 200:
-        logger.warning(
-            "ElevenLabs returned %s: %s", r.status_code, r.text[:300]
-        )
+    if status_code != 200:
+        logger.warning("ElevenLabs returned %s", status_code)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"TTS upstream error ({r.status_code})",
+            detail=f"TTS upstream error ({status_code})",
         )
-
+    _validate_audio_response(headers, body, "ElevenLabs")
     return Response(
-        content=r.content,
-        media_type=r.headers.get("content-type", "audio/mpeg"),
+        content=body,
+        media_type=headers.get("content-type", "audio/mpeg"),
     )
 
 
@@ -295,23 +346,31 @@ async def _synth_local(body: TtsRequest) -> Response:
         full_url = f"{url}/v1/audio/speech"
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
-                r = await client.post(
+                status_code, headers, body = await fetch_capped(
+                    client,
                     full_url,
+                    method="POST",
+                    max_bytes=MAX_AUDIO_BODY_BYTES,
                     headers={"Content-Type": "application/json"},
                     json=payload,
                 )
+        except BodyTooLargeError as exc:
+            logger.warning("Local TTS at %s exceeded body cap: %s", url, exc)
+            last_detail = f"{url} oversized body"
+            continue
         except httpx.HTTPError as exc:
             logger.info("Local TTS at %s unreachable, falling through: %s", url, exc)
             last_detail = f"{url} unreachable: {exc.__class__.__name__}"
             continue
 
-        if r.status_code == 200:
+        if status_code == 200:
+            _validate_audio_response(headers, body, f"Local TTS ({url})")
             return Response(
-                content=r.content,
-                media_type=r.headers.get("content-type", "audio/wav"),
+                content=body,
+                media_type=headers.get("content-type", "audio/wav"),
             )
-        logger.info("Local TTS at %s returned %s, trying next", url, r.status_code)
-        last_detail = f"{url} → {r.status_code}"
+        logger.info("Local TTS at %s returned %s, trying next", url, status_code)
+        last_detail = f"{url} → {status_code}"
 
     raise HTTPException(
         status_code=status.HTTP_502_BAD_GATEWAY,

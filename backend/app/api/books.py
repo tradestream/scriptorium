@@ -1268,9 +1268,8 @@ async def get_divina_manifest(
     await assert_library_access(db, current_user, edition.library_id)
 
     from app.services.divina import generate_divina_manifest
-    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
-    host = request.headers.get("x-forwarded-host", request.url.netloc)
-    base_url = f"{scheme}://{host}"
+    from app.utils.request_url import public_base_url
+    base_url = public_base_url(request)
 
     work = edition.work
     manifest = generate_divina_manifest(
@@ -1362,6 +1361,17 @@ async def get_comic_page(
     import zipfile
     from fastapi.responses import StreamingResponse
 
+    # Hardening against malicious comic archives:
+    #   - Cap any single page at 50 MiB uncompressed (a 4K full-color
+    #     comic page rarely exceeds 5 MiB; 50 MiB is generous headroom).
+    #   - Refuse entries whose claimed compression ratio is more than
+    #     1000:1, the classic "tiny ZIP entry, gigabyte payload" zip-bomb
+    #     shape. Real images compress to between 0.5x and ~5x at most.
+    #   - Read in bounded chunks so a server lying about ``file_size``
+    #     can't sneak past the cap during the stream.
+    PAGE_MAX_BYTES = 50 * 1024 * 1024
+    BOMB_RATIO_LIMIT = 1000
+
     with zipfile.ZipFile(file_path) as z:
         images = sorted(
             n for n in z.namelist()
@@ -1370,14 +1380,36 @@ async def get_comic_page(
         )
         if page_num < 0 or page_num >= len(images):
             raise HTTPException(status_code=404, detail="Page not found")
-        image_data = z.read(images[page_num])
+        info = z.getinfo(images[page_num])
+        if info.file_size > PAGE_MAX_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"comic page exceeds {PAGE_MAX_BYTES} bytes",
+            )
+        if info.compress_size > 0 and info.file_size // info.compress_size > BOMB_RATIO_LIMIT:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="comic page has suspicious compression ratio",
+            )
+        buf = io.BytesIO()
+        total = 0
+        with z.open(info) as src:
+            while chunk := src.read(64 * 1024):
+                total += len(chunk)
+                if total > PAGE_MAX_BYTES:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail="comic page exceeded cap during decompression",
+                    )
+                buf.write(chunk)
+        buf.seek(0)
         name = images[page_num].lower()
         media_type = (
             "image/png" if name.endswith(".png")
             else "image/webp" if name.endswith(".webp")
             else "image/jpeg"
         )
-    return StreamingResponse(io.BytesIO(image_data), media_type=media_type)
+    return StreamingResponse(buf, media_type=media_type)
 
 
 @router.post("/{book_id}/files/{file_id}/convert", response_model=BookRead)
