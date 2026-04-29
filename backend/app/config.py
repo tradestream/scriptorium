@@ -62,6 +62,13 @@ class Settings(BaseSettings):
     # e.g. "/data/library/booklore=/Volumes/docker/scriptorium/library"
     PATH_REWRITE: str | None = None
 
+    # Pin the kepubify binary explicitly. When set, the KEPUB conversion
+    # service uses this path and doesn't rely on the runtime PATH; useful
+    # in deployments where the binary lives at a known location and the
+    # default PATH is minimal (some Docker images).
+    #   KEPUBIFY_PATH=/usr/local/bin/kepubify
+    KEPUBIFY_PATH: str | None = None
+
     # Public-facing base URL for client-facing links (OPDS, Kobo sync,
     # DiViNa manifests). When set, this is the canonical answer and
     # ``X-Forwarded-*`` headers are ignored — pin it in production

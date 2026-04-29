@@ -1909,3 +1909,39 @@ async def backfill_page_inventory(
         "failed": failed,
         "total_cbz": len(cbz_files),
     }
+
+
+@router.get("/kepubify/health")
+async def kepubify_health(current_user: User = Depends(get_current_user)):
+    """Surface KEPUB conversion readiness so the admin UI can stop
+    pretending plain EPUB downloads are real KEPUBs.
+
+    Reports whether the binary was located, where it was found, and
+    its self-reported version. ``configured_path`` distinguishes "I
+    pinned a path in env" from "I'm relying on PATH lookup."
+    """
+    if not current_user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+
+    from app.config import get_settings as _gs
+    from app.services.kepub import _find_kepubify, get_kepubify_version, reset_cached_path
+
+    s = _gs()
+    # Recheck — the first call after a fresh install of kepubify
+    # without a process restart should reflect reality, not the cached
+    # "not found" decision.
+    reset_cached_path()
+    path = _find_kepubify()
+    version = await get_kepubify_version(path) if path else None
+
+    return {
+        "available": path is not None,
+        "path": path,
+        "configured_path": s.KEPUBIFY_PATH,
+        "version": version,
+        # When ``available`` is False, downloads still succeed —
+        # ``convert_to_kepub`` falls back to a renamed copy. That's
+        # functional but loses the Kobo span wrapping that drives
+        # accurate reading-position sync.
+        "fallback_in_use": path is None,
+    }

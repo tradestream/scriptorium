@@ -26,17 +26,58 @@ _kepubify_checked = False
 
 
 def _find_kepubify() -> Optional[str]:
-    """Find the kepubify binary on PATH."""
+    """Find the kepubify binary.
+
+    Resolution order:
+      1. ``KEPUBIFY_PATH`` env (so deployments can pin a known-good
+         binary inside the Docker image and not rely on PATH ordering).
+      2. ``shutil.which("kepubify")`` against the runtime PATH.
+    """
     global _kepubify_path, _kepubify_checked
     if _kepubify_checked:
         return _kepubify_path
     _kepubify_checked = True
+    settings = get_settings()
+    pinned = (settings.KEPUBIFY_PATH or "").strip()
+    if pinned:
+        if os.path.isfile(pinned) and os.access(pinned, os.X_OK):
+            _kepubify_path = pinned
+            logger.info("Using configured kepubify at %s", pinned)
+            return _kepubify_path
+        logger.warning(
+            "KEPUBIFY_PATH=%s is not an executable file; falling back to PATH",
+            pinned,
+        )
     _kepubify_path = shutil.which("kepubify")
     if _kepubify_path:
         logger.info("Found kepubify at %s", _kepubify_path)
     else:
         logger.info("kepubify not found — KEPUB conversion will use simple rename")
     return _kepubify_path
+
+
+def reset_cached_path() -> None:
+    """Clear the lazy cache; used by tests + the health endpoint after
+    config changes so a re-check picks up a freshly-installed binary."""
+    global _kepubify_path, _kepubify_checked
+    _kepubify_path = None
+    _kepubify_checked = False
+
+
+async def get_kepubify_version(path: str) -> Optional[str]:
+    """Return the kepubify --version string, or None if it doesn't run."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            path, "--version",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        out, _ = await proc.communicate()
+        if proc.returncode != 0:
+            return None
+        return out.decode("utf-8", errors="ignore").strip() or None
+    except Exception:
+        return None
 
 
 def _safe_kepub_name(source: Path) -> str:
