@@ -43,7 +43,12 @@
   });
 
   function reportProgress() {
-    const pct = totalPages > 0 ? (currentPage / (totalPages - 1)) * 100 : 0;
+    // Single-page comics divide by zero in the naive ``currentPage / (total - 1)``;
+    // the resulting ``NaN`` becomes ``null`` in ``JSON.stringify`` and the
+    // backend silently drops the save. A one-page comic on its only page
+    // is by definition 100% read.
+    const pct =
+      totalPages <= 1 ? (totalPages === 1 ? 100 : 0) : (currentPage / (totalPages - 1)) * 100;
     onProgress?.(currentPage, totalPages, pct);
     onLocationChange?.(`page:${currentPage + 1}`);
   }

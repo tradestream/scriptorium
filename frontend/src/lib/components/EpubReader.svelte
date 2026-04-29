@@ -436,16 +436,21 @@
           ></div>
         </div>
       {/if}
-      <!-- Backend toggle — only the buttons whose backend is wired up appear. -->
-      {#if tts.qwenAvailable || tts.elevenlabsAvailable || tts.localAvailable}
+      <!-- Backend toggle — only the buttons whose backend is wired up
+           and whose host capability is present appear. ``Browser`` is
+           hidden on hosts without Web Speech (older Safari, embedded
+           WebViews) so cloud-only is a clean experience. -->
+      {#if TtsController.webSupported || tts.qwenAvailable || tts.elevenlabsAvailable || tts.localAvailable}
         <div class="flex items-center gap-1.5 flex-wrap">
-          <button
-            onclick={() => tts.setBackend('web')}
-            class="rounded border px-2 py-1 text-[10px] {tts.backend === 'web' ? (darkMode ? 'border-white/30 bg-white/10' : 'border-black/30 bg-black/5') : (darkMode ? 'border-white/10' : 'border-black/10')}"
-            title="Browser-native TTS (free, instant, lower quality)"
-          >
-            Browser
-          </button>
+          {#if TtsController.webSupported}
+            <button
+              onclick={() => tts.setBackend('web')}
+              class="rounded border px-2 py-1 text-[10px] {tts.backend === 'web' ? (darkMode ? 'border-white/30 bg-white/10' : 'border-black/30 bg-black/5') : (darkMode ? 'border-white/10' : 'border-black/10')}"
+              title="Browser-native TTS (free, instant, lower quality)"
+            >
+              Browser
+            </button>
+          {/if}
           {#if tts.localAvailable}
             <button
               onclick={() => tts.setBackend('local')}

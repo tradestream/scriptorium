@@ -94,15 +94,44 @@ export class TtsController {
   #cloudAbort: AbortController | null = null;
 
   constructor() {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
-    this.#refreshVoices();
-    window.speechSynthesis.addEventListener('voiceschanged', this.#voicesHandlerRef);
+    if (typeof window === 'undefined') return;
+    // Cloud playback only needs ``Audio`` — probe regardless of Web
+    // Speech availability so a browser without ``speechSynthesis``
+    // (older Safari, embedded WebViews) still surfaces Cloud / Local
+    // / ElevenLabs backends.
     void this.#probeCloudConfig();
+    if ('speechSynthesis' in window) {
+      this.#refreshVoices();
+      window.speechSynthesis.addEventListener('voiceschanged', this.#voicesHandlerRef);
+      // Default to web only when it actually works; otherwise the first
+      // available cloud backend (if any) becomes the default in
+      // ``probeCloudConfig`` when we learn what's wired up.
+    } else if (this.backend === 'web') {
+      // Defer: probeCloudConfig will pick the first available cloud
+      // backend once it returns. If none are configured the panel
+      // shows the "no backends available" affordance.
+    }
   }
 
-  /** True if the host browser exposes Web Speech at all. */
-  static get supported(): boolean {
+  /** True if the host browser exposes Web Speech specifically. */
+  static get webSupported(): boolean {
     return typeof window !== 'undefined' && 'speechSynthesis' in window;
+  }
+
+  /** True if the host browser exposes ``HTMLAudioElement`` (cloud TTS). */
+  static get audioSupported(): boolean {
+    return typeof window !== 'undefined' && typeof Audio !== 'undefined';
+  }
+
+  /**
+   * Back-compat alias of ``webSupported``. Existing callers used this to
+   * gate the "is the TTS panel useful" question — the answer is now
+   * "Web Speech OR any cloud backend", but a button visibility based
+   * solely on Web Speech is still a reasonable default if the caller
+   * hasn't been updated.
+   */
+  static get supported(): boolean {
+    return TtsController.webSupported || TtsController.audioSupported;
   }
 
   /**
@@ -388,6 +417,14 @@ export class TtsController {
       this.qwenAvailable = !!data.qwen?.available;
       this.elevenlabsAvailable = !!data.elevenlabs?.available;
       this.localAvailable = !!data.local?.available;
+      // If Web Speech is unavailable, fall through to the first cloud
+      // backend that's wired up so the user lands on something usable
+      // when they hit Read.
+      if (!TtsController.webSupported && this.backend === 'web') {
+        if (this.localAvailable) this.backend = 'local';
+        else if (this.qwenAvailable) this.backend = 'qwen';
+        else if (this.elevenlabsAvailable) this.backend = 'elevenlabs';
+      }
       if (data.qwen?.default_voice) this.qwenVoice = data.qwen.default_voice;
       if (data.elevenlabs?.default_voice) this.elevenlabsVoice = data.elevenlabs.default_voice;
       if (data.local?.default_voice) this.localVoice = data.local.default_voice;
