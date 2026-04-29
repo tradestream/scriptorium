@@ -303,10 +303,27 @@ async def kobo_book_metadata(
         raise HTTPException(status_code=404, detail="No compatible file")
 
     base_url = _get_base_url(request)
+    # Pull live progress so the metadata response carries the same
+    # ReadingState/Bookmark the device would see via the sync feed.
+    from app.models.reading import EditionPosition as _EP, ReadingState as _RS
+    ep = (
+        await db.execute(
+            select(_EP).where(_EP.user_id == sync_token.user_id, _EP.edition_id == book.id)
+        )
+    ).scalar_one_or_none()
+    rs = None
+    if book.work_id is not None:
+        rs = (
+            await db.execute(
+                select(_RS).where(_RS.user_id == sync_token.user_id, _RS.work_id == book.work_id)
+            )
+        ).scalar_one_or_none()
+
     entry = _build_edition_entry(
         edition=book,
         edition_file=epub_file,
-        state=None,
+        ep=ep,
+        rs=rs,
         auth_token=sync_token.token,
         base_url=base_url,
         is_new=False,
@@ -755,6 +772,58 @@ async def kobo_add_items_to_tag(
     return Response(status_code=201)
 
 
+async def _remove_item_from_tag(
+    archive,
+    item_id: str,
+    user_id: int,
+    db: AsyncSession,
+) -> None:
+    """Drop a single book from a Kobo-mirrored tag (shelf + collection).
+
+    Shared by both the per-item DELETE route and the bulk-delete POST.
+    Silently no-ops if the edition can't be resolved (the device may
+    pass a stale UUID after a metadata refresh; better to swallow than
+    refuse the whole batch).
+    """
+    from app.models.shelf import ShelfBook
+    from app.models.collection import Collection, CollectionBook
+    from app.services.kobo_sync import _find_edition_by_any_id
+
+    edition = await _find_edition_by_any_id(item_id, db)
+    if edition is None:
+        return
+    if archive.shelf_id:
+        sb = (
+            await db.execute(
+                select(ShelfBook).where(
+                    ShelfBook.shelf_id == archive.shelf_id,
+                    ShelfBook.work_id == edition.work_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if sb:
+            await db.delete(sb)
+
+    col = (
+        await db.execute(
+            select(Collection).where(
+                Collection.user_id == user_id, Collection.name == archive.name
+            )
+        )
+    ).scalar_one_or_none()
+    if col:
+        cb = (
+            await db.execute(
+                select(CollectionBook).where(
+                    CollectionBook.collection_id == col.id,
+                    CollectionBook.work_id == edition.work_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if cb:
+            await db.delete(cb)
+
+
 @kobo_device_router.delete("/kobo/{auth_token}/v1/library/tags/{tag_id}/items/{item_id}")
 async def kobo_remove_item_from_tag(
     auth_token: str,
@@ -766,40 +835,72 @@ async def kobo_remove_item_from_tag(
     sync_token = await _get_sync_token(auth_token, db)
 
     from app.models.progress import KoboShelfArchive
-    from app.models.shelf import ShelfBook
-    from app.models.collection import Collection, CollectionBook
 
-    result = await db.execute(
-        select(KoboShelfArchive).where(
-            KoboShelfArchive.user_id == sync_token.user_id,
-            KoboShelfArchive.kobo_tag_id == tag_id,
+    archive = (
+        await db.execute(
+            select(KoboShelfArchive).where(
+                KoboShelfArchive.user_id == sync_token.user_id,
+                KoboShelfArchive.kobo_tag_id == tag_id,
+            )
         )
-    )
-    archive = result.scalar_one_or_none()
+    ).scalar_one_or_none()
     if not archive:
         return Response(status_code=404)
 
-    from app.services.kobo_sync import _find_edition_by_any_id
-    edition = await _find_edition_by_any_id(item_id, db)
-    if edition:
-        # Remove from shelf
-        if archive.shelf_id:
-            sb = (await db.execute(
-                select(ShelfBook).where(ShelfBook.shelf_id == archive.shelf_id, ShelfBook.work_id == edition.work_id)
-            )).scalar_one_or_none()
-            if sb:
-                await db.delete(sb)
+    await _remove_item_from_tag(archive, item_id, sync_token.user_id, db)
+    await db.commit()
+    return Response(status_code=204)
 
-        # Remove from collection
-        col = (await db.execute(
-            select(Collection).where(Collection.user_id == sync_token.user_id, Collection.name == archive.name)
-        )).scalar_one_or_none()
-        if col:
-            cb = (await db.execute(
-                select(CollectionBook).where(CollectionBook.collection_id == col.id, CollectionBook.work_id == edition.work_id)
-            )).scalar_one_or_none()
-            if cb:
-                await db.delete(cb)
+
+@kobo_device_router.post("/kobo/{auth_token}/v1/library/tags/{tag_id}/items/delete")
+async def kobo_bulk_remove_items_from_tag(
+    auth_token: str,
+    tag_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Bulk-remove multiple books from a tag in one device round-trip.
+
+    Body shape (CWA / Kobo wire format):
+      {"Items": [{"RevisionId": "uuid-1"}, {"RevisionId": "uuid-2"}, ...]}
+
+    Each item is processed via the same per-item logic as the DELETE
+    route. Missing / unresolvable UUIDs are skipped silently rather
+    than failing the whole batch — the device's view of which books
+    belong to a tag can drift, and a hard error would leave the user's
+    "remove from collection" UX broken.
+    """
+    sync_token = await _get_sync_token(auth_token, db)
+
+    from app.models.progress import KoboShelfArchive
+
+    archive = (
+        await db.execute(
+            select(KoboShelfArchive).where(
+                KoboShelfArchive.user_id == sync_token.user_id,
+                KoboShelfArchive.kobo_tag_id == tag_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if not archive:
+        return Response(status_code=404)
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    items = body.get("Items") or body.get("items") or []
+    if not isinstance(items, list):
+        items = []
+
+    for entry in items:
+        if not isinstance(entry, dict):
+            continue
+        # Kobo uses ``RevisionId`` for the book uuid; some firmware
+        # variants also send ``Id``.
+        item_id = entry.get("RevisionId") or entry.get("Id")
+        if item_id:
+            await _remove_item_from_tag(archive, str(item_id), sync_token.user_id, db)
 
     await db.commit()
     return Response(status_code=204)
@@ -999,10 +1100,25 @@ async def kobo_library_item(
         raise HTTPException(status_code=404, detail="No compatible file")
 
     base_url = _get_base_url(request)
+    from app.models.reading import EditionPosition as _EP, ReadingState as _RS
+    ep = (
+        await db.execute(
+            select(_EP).where(_EP.user_id == sync_token.user_id, _EP.edition_id == book.id)
+        )
+    ).scalar_one_or_none()
+    rs = None
+    if book.work_id is not None:
+        rs = (
+            await db.execute(
+                select(_RS).where(_RS.user_id == sync_token.user_id, _RS.work_id == book.work_id)
+            )
+        ).scalar_one_or_none()
+
     entry = _build_edition_entry(
         edition=book,
         edition_file=epub_file,
-        state=None,
+        ep=ep,
+        rs=rs,
         auth_token=sync_token.token,
         base_url=base_url,
         is_new=False,

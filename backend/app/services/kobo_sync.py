@@ -277,7 +277,11 @@ def build_initialization_response(auth_token: str, base_url: str) -> dict:
     )
     resources["image_url_template"] = f"{base_url}/covers/{{ImageId}}/image.jpg"
     resources["tags"] = f"{kobo_base}/v1/library/tags"
-    resources["tag_items"] = f"{kobo_base}/v1/library/tags/{{TagId}}/Items"
+    # FastAPI paths are case-sensitive; advertise lowercase so the
+    # device follows what the routes actually expose. The previous
+    # template used uppercase ``/Items`` and would 404 on older
+    # firmware that follows the advertised URL literally.
+    resources["tag_items"] = f"{kobo_base}/v1/library/tags/{{TagId}}/items"
     resources["delete_tag"] = f"{kobo_base}/v1/library/tags/{{TagId}}"
     resources["delete_tag_items"] = f"{kobo_base}/v1/library/tags/{{TagId}}/items/delete"
 
@@ -361,10 +365,27 @@ async def get_sync_payload(
     is_incremental = bool(sync_token.books_last_modified)
 
     if is_incremental:
-        # Incremental: only books changed since last sync
-        stmt = stmt.where(Edition.updated_at > sync_token.books_last_modified)
+        # Incremental: only books changed since last sync, AND not
+        # archived by the device. Without the archive filter an
+        # ``Edition.updated_at`` bump (cover refresh, metadata enrich)
+        # silently re-emits a book the user already deleted from the
+        # device, which is exactly what the device-side delete is
+        # supposed to prevent.
+        stmt = stmt.where(Edition.updated_at > sync_token.books_last_modified).where(
+            ~select(KoboSyncedBook.id)
+            .where(
+                KoboSyncedBook.sync_token_id == sync_token.id,
+                KoboSyncedBook.edition_id == Edition.id,
+                KoboSyncedBook.archived_at.is_not(None),
+            )
+            .exists()
+        )
     else:
-        # Initial sync: exclude books already sent (KoboSyncedBooks lookup)
+        # Initial sync: exclude books already sent (KoboSyncedBooks
+        # lookup). Archived rows count as "already sent" for this
+        # purpose — the inner subquery doesn't restrict on
+        # ``archived_at``, so any synced row (active or archived)
+        # blocks re-emission.
         stmt = stmt.where(
             ~select(KoboSyncedBook.id)
             .where(
@@ -452,10 +473,13 @@ async def get_sync_payload(
     # the current entitlement batch, otherwise the device sees duplicates.
     if is_incremental and sync_token.reading_state_last_modified is not None:
         batch_edition_ids = set(edition_ids)
-        # Synced editions for this token
+        # Synced editions for this token, archive-filtered: the device
+        # has explicitly removed archived books locally, and a fresh
+        # ChangedReadingState would silently bring them back.
         synced_ids_result = await db.execute(
             select(KoboSyncedBook.edition_id).where(
-                KoboSyncedBook.sync_token_id == sync_token.id
+                KoboSyncedBook.sync_token_id == sync_token.id,
+                KoboSyncedBook.archived_at.is_(None),
             )
         )
         synced_ids = {row[0] for row in synced_ids_result}
@@ -1029,7 +1053,14 @@ def _build_reading_state(
         "Statistics": {
             "LastModified": _kobo_timestamp(last_modified),
             "SpentReadingMinutes": (seconds or 0) // 60,
-            "RemainingTimeMinutes": 0,
+            # Round-trip the device's own time-left estimate when we
+            # have one stored. ``0`` is the "no estimate" default Kobo
+            # tolerates when nothing meaningful is available.
+            "RemainingTimeMinutes": (
+                ep.remaining_time_minutes
+                if ep is not None and ep.remaining_time_minutes is not None
+                else 0
+            ),
         },
         "CurrentBookmark": {
             "LastModified": _kobo_timestamp(last_modified),
