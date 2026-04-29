@@ -92,17 +92,40 @@
   <div class="flex h-full overflow-hidden">
     <!-- Reader area -->
     <div class="relative flex-1 overflow-hidden">
-      {#if format === 'epub'}
+      {#if format === 'epub' || format === 'pdf' || format === 'cbz' || format === 'cbr'}
         {#if progress?.loaded}
+          <!-- Wrap every format in {#key readerKey} so ``Jump to furthest``
+               remounts the active reader with the new initial position
+               regardless of EPUB / PDF / comic. -->
           {#key readerKey}
-            <EpubReader
-              bookId={book.id}
-              fileId={file.id}
-              initialCfi={progress.initialCfi}
-              onClose={handleClose}
-              onProgress={handleProgress}
-              onLocationChange={handleLocationChange}
-            />
+            {#if format === 'epub'}
+              <EpubReader
+                bookId={book.id}
+                fileId={file.id}
+                initialCfi={progress.initialCfi}
+                onClose={handleClose}
+                onProgress={handleProgress}
+                onLocationChange={handleLocationChange}
+              />
+            {:else if format === 'pdf'}
+              <PdfReader
+                bookId={book.id}
+                fileId={file.id}
+                initialPage={savedPage || 1}
+                onClose={handleClose}
+                onProgress={handleProgress}
+                onLocationChange={handleLocationChange}
+              />
+            {:else}
+              <ComicReader
+                bookId={book.id}
+                fileId={file.id}
+                initialPage={savedPage > 0 ? savedPage - 1 : 0}
+                onClose={handleClose}
+                onProgress={handleProgress}
+                onLocationChange={handleLocationChange}
+              />
+            {/if}
           {/key}
         {:else}
           <div class="flex h-full items-center justify-center bg-black text-white/60 text-sm">
@@ -110,6 +133,9 @@
           </div>
         {/if}
 
+        <!-- Furthest-jump prompt is format-agnostic — the saved location
+             is restored via initialCfi (epub) or initialPage (fixed-layout)
+             on the next mount triggered by ``readerKey``. -->
         {#if progress?.showFurthestPrompt}
           <div class="absolute left-1/2 top-4 z-30 -translate-x-1/2">
             <div class="flex items-center gap-3 rounded-full border bg-background/95 px-4 py-2 text-sm shadow-lg backdrop-blur">
@@ -131,32 +157,6 @@
               </button>
             </div>
           </div>
-        {/if}
-      {:else if format === 'pdf'}
-        {#if progress?.loaded}
-          <PdfReader
-            bookId={book.id}
-            fileId={file.id}
-            initialPage={savedPage || 1}
-            onClose={handleClose}
-            onProgress={handleProgress}
-            onLocationChange={handleLocationChange}
-          />
-        {:else}
-          <div class="flex h-full items-center justify-center bg-black text-white/60 text-sm">Loading…</div>
-        {/if}
-      {:else if format === 'cbz' || format === 'cbr'}
-        {#if progress?.loaded}
-          <ComicReader
-            bookId={book.id}
-            fileId={file.id}
-            initialPage={savedPage > 0 ? savedPage - 1 : 0}
-            onClose={handleClose}
-            onProgress={handleProgress}
-            onLocationChange={handleLocationChange}
-          />
-        {:else}
-          <div class="flex h-full items-center justify-center bg-black text-white/60 text-sm">Loading…</div>
         {/if}
       {:else}
         <div class="flex h-full flex-col items-center justify-center bg-black text-white gap-4">
