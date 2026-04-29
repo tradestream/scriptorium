@@ -62,6 +62,19 @@ class Settings(BaseSettings):
     # e.g. "/data/library/booklore=/Volumes/docker/scriptorium/library"
     PATH_REWRITE: str | None = None
 
+    # Public-facing base URL for client-facing links (OPDS, Kobo sync,
+    # DiViNa manifests). When set, this is the canonical answer and
+    # ``X-Forwarded-*`` headers are ignored — pin it in production
+    # behind any reverse proxy.
+    #   PUBLIC_BASE_URL=https://scriptorium.example.com
+    PUBLIC_BASE_URL: str | None = None
+    # Opt-in for honouring X-Forwarded-Proto / X-Forwarded-Host. Off by
+    # default because forwarded headers can be host-header-poisoned by
+    # any client when no real proxy is in front of the app. Enable only
+    # behind a trusted reverse proxy that scrubs client-supplied
+    # headers.
+    TRUST_FORWARDED_HEADERS: bool = False
+
     # Loose Leaves — staged review queue (distinct from auto-ingest)
     LOOSE_LEAVES_PATH: str = "data/loose-leaves"
 

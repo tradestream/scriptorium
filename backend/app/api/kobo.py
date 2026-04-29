@@ -115,16 +115,21 @@ async def _resolve_book_for_token(
 def _get_base_url(request: Request) -> str:
     """Extract the base URL from the incoming request for building absolute URLs.
 
-    Checks X-Forwarded-Proto/Host headers from reverse proxy. Falls back to
-    request scheme/host. Forces HTTPS if the host looks like a public domain
-    (not localhost/IP) since Kobo devices require HTTPS for downloads.
+    Resolution lives in ``app.utils.request_url.public_base_url`` (prefers
+    ``PUBLIC_BASE_URL``; honours ``X-Forwarded-*`` only when
+    ``TRUST_FORWARDED_HEADERS`` is on; otherwise the request's own
+    scheme + host). After that, force HTTPS for non-local hosts since
+    Kobo devices reject plain HTTP downloads.
     """
-    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
-    host = request.headers.get("x-forwarded-host", request.url.netloc)
-    # Force HTTPS for non-local hosts (reverse proxy may not forward proto header)
-    if scheme == "http" and host and not any(h in host for h in ("localhost", "127.0.0.1", "192.168.", "10.", "172.")):
-        scheme = "https"
-    return f"{scheme}://{host}"
+    from app.utils.request_url import public_base_url
+
+    base = public_base_url(request)
+    scheme, _, host = base.partition("://")
+    if scheme == "http" and host and not any(
+        h in host for h in ("localhost", "127.0.0.1", "192.168.", "10.", "172.")
+    ):
+        return f"https://{host}"
+    return base
 
 
 # ---------------------------------------------------------------------------

@@ -213,9 +213,8 @@ def _paginate_links(feed: Element, path: str, page: int, total: int, **extra) ->
 
 
 def _base_url(request: Request) -> str:
-    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
-    host = request.headers.get("x-forwarded-host", request.url.netloc)
-    return f"{scheme}://{host}"
+    from app.utils.request_url import public_base_url
+    return public_base_url(request)
 
 
 async def _books_page(db: AsyncSession, stmt) -> list[Book]:
