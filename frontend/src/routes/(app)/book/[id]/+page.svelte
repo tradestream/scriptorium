@@ -5,17 +5,17 @@
   import { Card, CardContent, CardHeader, CardTitle } from "$lib/components/ui/card";
   import { Progress } from "$lib/components/ui/progress";
   import { Separator } from "$lib/components/ui/separator";
-  import { BookOpen, Download, Pencil, X, Sparkles, ChevronDown, ChevronLeft, ChevronRight, Send, BookMarked, Check, Layers, Plus, Highlighter, MessageSquare, Bookmark, Trash2, CalendarCheck, Lightbulb, Package, Headphones, ScanSearch, MapPin, Quote, Globe, FileText, Replace } from "lucide-svelte";
+  import { BookOpen, Download, Pencil, X, Sparkles, ChevronDown, ChevronLeft, ChevronRight, Send, BookMarked, Check, Layers, Plus, Highlighter, MessageSquare, Bookmark, Trash2, CalendarCheck, Lightbulb, Package, Headphones, ScanSearch, MapPin, Quote, Globe, FileText, Replace, ListOrdered } from "lucide-svelte";
   import BookAnalysis from "$lib/components/BookAnalysis.svelte";
   import Marginalia from "$lib/components/Marginalia.svelte";
   import EsotericAnalysis from "$lib/components/EsotericAnalysis.svelte";
   import LiteraryAnalysis from "$lib/components/LiteraryAnalysis.svelte";
   import BookMetaEditor from "$lib/components/BookMetaEditor.svelte";
-  import { bookCoverUrl, enrichBook, getEnrichmentProviders, convertBookFile, bookFileUrl, sendBookToDevice, setBookStatus, getShelves, getBookShelves, addBookToShelf, removeBookFromShelf, getCollections, addBookToCollection, removeBookFromCollection, getAnnotations, createAnnotation, deleteAnnotation, getReadSessions, createReadSession, deleteReadSession, setCoverFromUrl, setLockedFields, setEsotericEnabled, exportAnnotations, getBookRecommendations, updateBook, extractBookIdentifiers, citationUrl, computeReadingLevel, getBook, getSeriesNeighbors, generateMarkdown, replaceEditionFile } from "$lib/api/client";
+  import { bookCoverUrl, enrichBook, getEnrichmentProviders, convertBookFile, bookFileUrl, sendBookToDevice, setBookStatus, getShelves, getBookShelves, addBookToShelf, removeBookFromShelf, getCollections, addBookToCollection, removeBookFromCollection, getAnnotations, createAnnotation, deleteAnnotation, getReadSessions, createReadSession, deleteReadSession, setCoverFromUrl, setLockedFields, setEsotericEnabled, exportAnnotations, getBookRecommendations, updateBook, extractBookIdentifiers, citationUrl, computeReadingLevel, getBook, getSeriesNeighbors, generateMarkdown, replaceEditionFile, getReadingLists, addReadingListEntry } from "$lib/api/client";
   import type { SeriesNav } from "$lib/api/client";
   import type { EnrichmentProvider, BookRecommendation, EnrichStreamEvent } from "$lib/api/client";
   import { enrichBookStream } from "$lib/api/client";
-  import type { Book, Shelf, Collection, Annotation, ReadSession, User } from "$lib/types/index";
+  import type { Book, Shelf, Collection, Annotation, ReadSession, User, ReadingList } from "$lib/types/index";
   import type { PageData } from './$types';
   import { sanitizeHtml } from "$lib/utils/sanitizeHtml";
 
@@ -371,6 +371,29 @@
     showCollectionMenu = false;
   }
 
+  // ── Reading lists ──────────────────────────────────────────────────────────
+  let showReadingListMenu = $state(false);
+  let readingLists = $state<ReadingList[]>([]);
+  let readingListsLoaded = $state(false);
+  let lastAddedListId = $state<number | null>(null);
+
+  async function loadReadingListsData() {
+    if (readingListsLoaded || !book) return;
+    readingListsLoaded = true;
+    try { readingLists = await getReadingLists(); } catch { /* ignore */ }
+  }
+
+  async function addToReadingList(listId: number) {
+    if (!book) return;
+    try {
+      await addReadingListEntry(listId, { book_id: book.id });
+      lastAddedListId = listId;
+      // Refresh entry counts so the menu reflects the addition.
+      readingLists = await getReadingLists();
+    } catch { /* ignore */ }
+    showReadingListMenu = false;
+  }
+
   // ── Annotations ──────────────────────────────────────────────
   let annotations = $state<Annotation[]>([]);
   let annotationsLoaded = $state(false);
@@ -662,6 +685,36 @@
                         {col.name}
                       </button>
                     {/each}
+                  {/if}
+                </div>
+              {/if}
+            </div>
+
+            <!-- Add to reading list -->
+            <div class="relative">
+              <Button variant="outline" size="icon" title="Add to reading list"
+                onclick={() => { showReadingListMenu = !showReadingListMenu; loadReadingListsData(); }}>
+                <ListOrdered class="h-4 w-4" />
+              </Button>
+              {#if showReadingListMenu}
+                <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                <div class="fixed inset-0 z-40" onclick={() => showReadingListMenu = false}></div>
+                <div class="absolute right-0 top-full z-50 mt-1 w-56 rounded-md border bg-popover p-1 shadow-md">
+                  {#if readingLists.length === 0}
+                    <p class="px-3 py-2 text-xs text-muted-foreground">No reading lists. <a href="/reading-lists" class="underline">Create one</a>.</p>
+                  {:else}
+                    {#each readingLists as list (list.id)}
+                      <button class="flex w-full items-center gap-2 rounded-sm px-3 py-1.5 text-left text-sm hover:bg-accent"
+                        onclick={() => addToReadingList(list.id)}>
+                        <ListOrdered class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <span class="flex-1 truncate">{list.name}</span>
+                        <span class="text-[10px] tabular-nums text-muted-foreground/60">{list.entry_count}</span>
+                      </button>
+                    {/each}
+                    <div class="my-1 border-t"></div>
+                    <a href="/reading-lists" class="flex items-center gap-2 rounded-sm px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground">
+                      Manage reading lists →
+                    </a>
                   {/if}
                 </div>
               {/if}
