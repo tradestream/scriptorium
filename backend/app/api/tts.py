@@ -231,8 +231,19 @@ async def _synth_elevenlabs(body: TtsRequest) -> Response:
 # ── Local Apple-Silicon Qwen3-TTS via mlx-audio ──────────────────────
 
 async def _synth_local(body: TtsRequest) -> Response:
+    """Try each configured local server in order; first success wins.
+
+    Connect timeout is short (2 s) so a sleeping laptop falls through to
+    the always-on Mac quickly. Read timeout stays generous because the
+    cold-start model load can take 10-30 s.
+    """
     settings = get_settings()
-    if not settings.LOCAL_TTS_URL:
+    urls = [
+        u.strip().rstrip("/")
+        for u in (settings.LOCAL_TTS_URL or "").split(",")
+        if u.strip()
+    ]
+    if not urls:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Local TTS is not configured (LOCAL_TTS_URL missing)",
@@ -243,32 +254,32 @@ async def _synth_local(body: TtsRequest) -> Response:
         "input": body.text,
         "voice": body.voice or settings.LOCAL_TTS_VOICE,
     }
-    url = f"{settings.LOCAL_TTS_URL.rstrip('/')}/v1/audio/speech"
+    timeout = httpx.Timeout(connect=2.0, read=120.0, write=10.0, pool=10.0)
 
-    # Local inference can be slow on first call (model load) — give it
-    # a generous timeout. Subsequent calls land in the seconds range.
-    try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            r = await client.post(
-                url,
-                headers={"Content-Type": "application/json"},
-                json=payload,
+    last_detail = "no candidates tried"
+    for url in urls:
+        full_url = f"{url}/v1/audio/speech"
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                r = await client.post(
+                    full_url,
+                    headers={"Content-Type": "application/json"},
+                    json=payload,
+                )
+        except httpx.HTTPError as exc:
+            logger.info("Local TTS at %s unreachable, falling through: %s", url, exc)
+            last_detail = f"{url} unreachable: {exc.__class__.__name__}"
+            continue
+
+        if r.status_code == 200:
+            return Response(
+                content=r.content,
+                media_type=r.headers.get("content-type", "audio/wav"),
             )
-    except httpx.HTTPError as exc:
-        logger.warning("Local TTS call failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Local TTS unreachable at {url}",
-        ) from exc
+        logger.info("Local TTS at %s returned %s, trying next", url, r.status_code)
+        last_detail = f"{url} → {r.status_code}"
 
-    if r.status_code != 200:
-        logger.warning("Local TTS returned %s: %s", r.status_code, r.text[:300])
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Local TTS error ({r.status_code})",
-        )
-
-    return Response(
-        content=r.content,
-        media_type=r.headers.get("content-type", "audio/wav"),
+    raise HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail=f"All local TTS servers failed: {last_detail}",
     )
