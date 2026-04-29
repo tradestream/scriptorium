@@ -4,6 +4,7 @@
   import { ChevronLeft, ChevronRight, Settings, X, Minus, Plus, AlignJustify, Columns2, Moon, Sun, List, Volume2, Pause, Play, SkipForward, Square } from "lucide-svelte";
   import { downloadBookFile } from "$lib/api/client";
   import { TtsController, QWEN_VOICES, ELEVENLABS_VOICES } from "$lib/reader/tts.svelte";
+  import { Transcription } from "$lib/components/ai-elements/transcription";
 
   interface Props {
     bookId: number;
@@ -420,10 +421,21 @@
         </button>
         {#if tts.active}
           <span class="ml-2 text-[10px] tabular-nums {darkMode ? 'text-white/50' : 'text-black/50'}">
-            sentence {tts.cursor + 1} / {tts.total}
+            {tts.cursor + 1} / {tts.total}
           </span>
         {/if}
       </div>
+
+      <!-- Sentence progress bar — fits the chunked-utterance model better
+           than a media-style scrub bar would. -->
+      {#if tts.active && tts.total > 0}
+        <div class="h-1 w-full overflow-hidden rounded-full {darkMode ? 'bg-white/10' : 'bg-black/10'}">
+          <div
+            class="h-full bg-primary transition-all duration-300"
+            style="width: {((tts.cursor + 1) / tts.total) * 100}%"
+          ></div>
+        </div>
+      {/if}
       <!-- Backend toggle — only the buttons whose backend is wired up appear. -->
       {#if tts.qwenAvailable || tts.elevenlabsAvailable || tts.localAvailable}
         <div class="flex items-center gap-1.5 flex-wrap">
@@ -504,6 +516,18 @@
           <span class="w-7 tabular-nums text-right">{tts.rate.toFixed(1)}×</span>
         </label>
       </div>
+
+      <!-- Transcription — every sentence in the active queue. Click any
+           one to jump TTS playback there. Only meaningful while playing. -->
+      {#if tts.active && tts.sentences.length > 0}
+        <div class="max-h-40 overflow-y-auto rounded border p-2 {darkMode ? 'border-white/10 bg-black/30' : 'border-black/10 bg-white/40'}">
+          <Transcription
+            sentences={tts.sentences}
+            cursor={tts.cursor}
+            onSeek={(i) => tts.seekTo(i)}
+          />
+        </div>
+      {/if}
     </div>
   {/if}
 

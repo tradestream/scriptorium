@@ -75,6 +75,12 @@ export class TtsController {
   /** Index of the currently-speaking sentence in the active queue. */
   cursor = $state(0);
   total = $state(0);
+  /**
+   * Sentences in the active queue, exposed so the Transcription panel
+   * can render the chapter and highlight the current one. Empty until
+   * ``play()`` is called.
+   */
+  sentences = $state<string[]>([]);
 
   // Internal -----------------------------------------------------------------
   #queue: string[] = [];
@@ -109,6 +115,7 @@ export class TtsController {
     if (!TtsController.supported || !text.trim()) return;
     this.stop();
     this.#queue = this.#splitSentences(text);
+    this.sentences = [...this.#queue];
     this.#cb = cb;
     this.total = this.#queue.length;
     this.cursor = 0;
@@ -155,6 +162,7 @@ export class TtsController {
 
   stop(): void {
     this.#queue = [];
+    this.sentences = [];
     this.cursor = 0;
     this.total = 0;
     this.active = false;
@@ -169,6 +177,27 @@ export class TtsController {
       this.#cloudAudio.removeAttribute('src');
       this.#cloudAudio = null;
     }
+  }
+
+  /**
+   * Jump playback to the sentence at ``index``. No-op if no queue is
+   * active or the index is out of range. Cancels any in-flight cloud
+   * fetch / Web Speech utterance and starts the new one.
+   */
+  seekTo(index: number): void {
+    if (!this.active) return;
+    if (index < 0 || index >= this.total) return;
+    this.cursor = index;
+    if (this.backend === 'web') {
+      window.speechSynthesis.cancel();
+    } else {
+      this.#cloudAbort?.abort();
+      if (this.#cloudAudio) {
+        this.#cloudAudio.pause();
+        this.#cloudAudio = null;
+      }
+    }
+    this.#speakNext();
   }
 
   /** Skip the current utterance — the queue advances on the next pump. */
