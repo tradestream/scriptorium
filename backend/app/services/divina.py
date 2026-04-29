@@ -28,18 +28,23 @@ def generate_divina_manifest(
     base_url: str,
     reading_direction: str = "ltr",
     page_count: Optional[int] = None,
+    pages: Optional[list[str]] = None,
 ) -> Optional[dict]:
     """Generate a DiViNa WebPub Manifest for a comic file.
 
     Returns a dict matching the Readium WebPub Manifest schema, or None on failure.
-    """
-    resolved = resolve_path(file_path)
-    path = Path(resolved)
-    if not path.exists():
-        return None
 
-    # List image pages in the archive
-    pages = _list_pages(path)
+    When ``pages`` is supplied (typically from the
+    ``edition_file_pages`` inventory cache), the archive isn't opened
+    at all — saving a ZIP read per manifest request. Falls back to a
+    live archive walk only when the cache is empty.
+    """
+    if pages is None:
+        resolved = resolve_path(file_path)
+        path = Path(resolved)
+        if not path.exists():
+            return None
+        pages = _list_pages(path)
     if not pages:
         return None
 

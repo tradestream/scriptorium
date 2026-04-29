@@ -1269,7 +1269,18 @@ async def get_divina_manifest(
 
     from app.services.divina import generate_divina_manifest
     from app.utils.request_url import public_base_url
+    from app.models.page_inventory import EditionFilePage
     base_url = public_base_url(request)
+
+    # Pull cached page filenames from the inventory; falls through to a
+    # live archive walk inside generate_divina_manifest when empty.
+    cached_pages = (
+        await db.execute(
+            select(EditionFilePage.filename)
+            .where(EditionFilePage.edition_file_id == edition_file.id)
+            .order_by(EditionFilePage.page_number)
+        )
+    ).scalars().all()
 
     work = edition.work
     manifest = generate_divina_manifest(
@@ -1281,6 +1292,7 @@ async def get_divina_manifest(
         base_url=base_url,
         reading_direction=work.reading_direction or "ltr" if work else "ltr",
         page_count=work.page_count_comic if work else None,
+        pages=list(cached_pages) if cached_pages else None,
     )
     if not manifest:
         raise HTTPException(status_code=404, detail="Could not generate manifest")
