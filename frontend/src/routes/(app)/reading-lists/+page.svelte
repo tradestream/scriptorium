@@ -6,9 +6,29 @@
 <script lang="ts">
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
-  import { ListOrdered, Plus, Trash2, X, BookOpen } from "lucide-svelte";
+  import { ListOrdered, Plus, Trash2, X, BookOpen, Upload } from "lucide-svelte";
   import * as api from "$lib/api/client";
   import type { ReadingList } from "$lib/types/index";
+
+  let fileInput = $state<HTMLInputElement | null>(null);
+  let importing = $state(false);
+  let importMsg = $state('');
+
+  async function onCblPicked(ev: Event) {
+    const f = (ev.currentTarget as HTMLInputElement).files?.[0];
+    if (!f) return;
+    importing = true; importMsg = '';
+    try {
+      const created = await api.importReadingListCbl(f);
+      importMsg = `Imported "${created.name}" with ${created.entry_count} matched ${created.entry_count === 1 ? 'entry' : 'entries'}.`;
+      await load();
+    } catch (err: any) {
+      importMsg = err?.message ?? 'Import failed';
+    } finally {
+      importing = false;
+      if (fileInput) fileInput.value = '';
+    }
+  }
 
   let lists = $state<ReadingList[]>([]);
   let loading = $state(true);
@@ -60,10 +80,29 @@
   <div class="mb-6 flex items-center gap-3">
     <ListOrdered class="h-6 w-6 text-muted-foreground/50" />
     <h1 class="text-2xl font-bold tracking-tight flex-1">Reading Lists</h1>
+    <input
+      bind:this={fileInput}
+      type="file"
+      accept=".cbl,application/xml,text/xml"
+      class="hidden"
+      onchange={onCblPicked}
+    />
+    <Button
+      onclick={() => fileInput?.click()}
+      size="sm"
+      variant="outline"
+      disabled={importing}
+      title="Import a CBL file (Comic Book List, used by Kavita / Komga)"
+    >
+      <Upload class="h-3.5 w-3.5 mr-1" /> {importing ? 'Importing…' : 'Import CBL'}
+    </Button>
     <Button onclick={openCreate} size="sm">
       <Plus class="h-3.5 w-3.5 mr-1" /> New
     </Button>
   </div>
+  {#if importMsg}
+    <p class="mb-4 text-xs text-muted-foreground">{importMsg}</p>
+  {/if}
 
   <p class="mb-6 max-w-prose text-sm text-muted-foreground">
     Ordered sequences of books to read in turn. Unlike shelves and collections,

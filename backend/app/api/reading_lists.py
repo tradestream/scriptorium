@@ -27,8 +27,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, File, status
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -467,3 +467,233 @@ async def _adjacent(
         notes=neighbour.notes,
         book=BookRead.model_validate(edition),
     )
+
+
+# ── CBL (Comic Book List) interop ────────────────────────────────────
+#
+# CBL is the de-facto interchange format for ordered comic reading
+# lists. Both Kavita and Komga import/export it. Shape:
+#
+#   <ReadingList>
+#     <Name>Court of Owls</Name>
+#     <Books>
+#       <Book Series="Batman" Number="1" Volume="2011" Year="2011"/>
+#       ...
+#     </Books>
+#   </ReadingList>
+#
+# Round-tripping Scriptorium → Kavita → Scriptorium is lossy by nature
+# (we lose anything not expressible in those four attributes), but
+# matching at *import* time uses the work_series join: series.name +
+# work_series.position selects a Work, and we pick its canonical (or
+# first) Edition for the entry.
+
+
+@router.get("/{list_id}/export.cbl", response_class=Response)
+async def export_cbl(
+    list_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    """Export a reading list as CBL XML for Kavita / Komga import."""
+    from xml.sax.saxutils import escape
+    from app.models.book import Series
+    from app.models.work import Work, work_series as work_series_table
+
+    rl = await _get_or_404(list_id, current_user.id, db)
+
+    entries = (
+        await db.execute(
+            select(ReadingListEntry)
+            .where(ReadingListEntry.reading_list_id == list_id)
+            .order_by(ReadingListEntry.position)
+        )
+    ).scalars().all()
+    if not entries:
+        return Response(
+            content=(
+                f'<?xml version="1.0" encoding="utf-8"?>\n'
+                f"<ReadingList>\n  <Name>{escape(rl.name)}</Name>\n"
+                f"  <NumIssues>0</NumIssues>\n  <Books></Books>\n</ReadingList>\n"
+            ),
+            media_type="application/xml",
+            headers={
+                "Content-Disposition": f'attachment; filename="{rl.name}.cbl"',
+            },
+        )
+
+    edition_ids = [e.edition_id for e in entries]
+
+    # Pull each edition's work + first series + position in that series
+    # in one round trip. ``LEFT JOIN`` so editions with no series still
+    # come back (their <Book> entries will have empty Series).
+    rows = (
+        await db.execute(
+            select(
+                Edition.id,
+                Work.title,
+                Edition.published_date,
+                Series.name,
+                work_series_table.c.position,
+                work_series_table.c.volume,
+            )
+            .select_from(Edition)
+            .join(Work, Edition.work_id == Work.id)
+            .outerjoin(work_series_table, work_series_table.c.work_id == Work.id)
+            .outerjoin(Series, Series.id == work_series_table.c.series_id)
+            .where(Edition.id.in_(edition_ids))
+        )
+    ).all()
+    by_edition: dict[int, tuple[str, Optional[str], Optional[str], Optional[float], Optional[str]]] = {}
+    for ed_id, title, published, sname, position, volume in rows:
+        # Take the first series association we encounter; CBL only carries one.
+        if ed_id not in by_edition or by_edition[ed_id][1] is None:
+            year = None
+            if published:
+                try:
+                    year = (
+                        published.year if hasattr(published, "year")
+                        else int(str(published)[:4])
+                    )
+                except Exception:
+                    year = None
+            by_edition[ed_id] = (title or "", sname, str(year) if year else None, position, volume)
+
+    xml_parts = [
+        '<?xml version="1.0" encoding="utf-8"?>',
+        "<ReadingList>",
+        f"  <Name>{escape(rl.name)}</Name>",
+        f"  <NumIssues>{len(entries)}</NumIssues>",
+        "  <Books>",
+    ]
+    for e in entries:
+        info = by_edition.get(e.edition_id)
+        if info is None:
+            continue
+        title, sname, year, position, volume = info
+        # Series falls back to the title when the work has no series
+        # association — Kavita-style importers expect a Series attribute.
+        series_attr = sname or title
+        number_attr = ""
+        if position is not None:
+            # CBL Number is normally an integer; emit ints when whole.
+            number_attr = (
+                str(int(position)) if float(position).is_integer() else f"{position:g}"
+            )
+        attrs = [f'Series="{escape(series_attr)}"']
+        if number_attr:
+            attrs.append(f'Number="{escape(number_attr)}"')
+        if volume:
+            attrs.append(f'Volume="{escape(volume)}"')
+        if year:
+            attrs.append(f'Year="{escape(year)}"')
+        xml_parts.append(f'    <Book {" ".join(attrs)} />')
+    xml_parts += ["  </Books>", "</ReadingList>", ""]
+
+    return Response(
+        content="\n".join(xml_parts),
+        media_type="application/xml",
+        headers={
+            "Content-Disposition": f'attachment; filename="{rl.name}.cbl"',
+        },
+    )
+
+
+@router.post(
+    "/import-cbl", response_model=ReadingListDetail, status_code=status.HTTP_201_CREATED
+)
+async def import_cbl(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ReadingListDetail:
+    """Import a CBL file as a new reading list.
+
+    Each ``<Book Series="..." Number="...">`` is matched against
+    ``series.name`` + ``work_series.position``. Matched entries land
+    in the new list in the order they appear in the XML; unmatched
+    entries are silently skipped (the response's ``entry_count``
+    tells you how many landed; subtract from ``NumIssues`` for the
+    miss count).
+    """
+    import xml.etree.ElementTree as ET
+    from app.models.book import Series
+    from app.models.work import Work, work_series as work_series_table
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename")
+    raw = await file.read()
+    if len(raw) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="CBL file exceeds 5 MiB cap")
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid XML: {exc}") from exc
+
+    name_el = root.find("Name")
+    name = (name_el.text or "").strip() if name_el is not None else ""
+    if not name:
+        # Fall back to the filename stem.
+        name = file.filename.rsplit(".", 1)[0]
+
+    rl = ReadingList(user_id=current_user.id, name=name, source="cbl_import")
+    db.add(rl)
+    await db.flush()
+
+    # Matching: each <Book> -> (series_name, number) -> Work -> Edition.
+    # Pull every series the user could possibly match against in one
+    # query, indexed by lowercase name for case-insensitive matching.
+    all_series = (
+        await db.execute(select(Series))
+    ).scalars().all()
+    series_by_name = {s.name.lower(): s for s in all_series}
+
+    pos = POSITION_STEP
+    matched = 0
+    for book_el in root.findall(".//Book"):
+        sname = (book_el.get("Series") or "").strip()
+        number_str = (book_el.get("Number") or "").strip()
+        if not sname or not number_str:
+            continue
+        try:
+            number = float(number_str)
+        except ValueError:
+            continue
+        series = series_by_name.get(sname.lower())
+        if series is None:
+            continue
+
+        # Resolve to an Edition: pick any Edition of any Work whose
+        # work_series row links this series at this position.
+        edition_id = await db.scalar(
+            select(Edition.id)
+            .select_from(Edition)
+            .join(Work, Edition.work_id == Work.id)
+            .join(work_series_table, work_series_table.c.work_id == Work.id)
+            .where(
+                and_(
+                    work_series_table.c.series_id == series.id,
+                    work_series_table.c.position == number,
+                )
+            )
+            .limit(1)
+        )
+        if edition_id is None:
+            continue
+        db.add(
+            ReadingListEntry(
+                reading_list_id=rl.id,
+                edition_id=edition_id,
+                position=pos,
+            )
+        )
+        pos += POSITION_STEP
+        matched += 1
+
+    await db.commit()
+    await db.refresh(rl)
+
+    detail = ReadingListDetail.model_validate(rl)
+    detail.entries = await _detail_entries(rl.id, db)
+    detail.entry_count = matched
+    return detail

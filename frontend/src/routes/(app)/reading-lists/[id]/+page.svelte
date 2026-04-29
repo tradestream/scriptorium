@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
-  import { ListOrdered, Pencil, Save, X, BookOpen } from 'lucide-svelte';
+  import { ListOrdered, Pencil, Save, X, BookOpen, Download } from 'lucide-svelte';
   import { DragDropProvider } from '@dnd-kit-svelte/svelte';
   import { move } from '@dnd-kit/helpers';
   import * as api from '$lib/api/client';
@@ -111,6 +111,15 @@
         {/if}
       </div>
       {#if !editingMeta}
+        <a
+          href={api.readingListExportCblUrl(detail.id)}
+          target="_blank"
+          rel="noopener"
+          class="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted transition-colors"
+          title="Export as CBL (Kavita / Komga compatible)"
+        >
+          <Download class="h-3.5 w-3.5" /> CBL
+        </a>
         <Button size="sm" variant="outline" onclick={deleteList}>Delete</Button>
       {/if}
     </div>

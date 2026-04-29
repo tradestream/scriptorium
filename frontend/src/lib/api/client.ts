@@ -2068,3 +2068,21 @@ export async function previousInReadingList(
 ): Promise<ReadingListEntry | null> {
   return fetchAPI(`/reading-lists/${listId}/previous?before=${beforeBookId}`);
 }
+
+export function readingListExportCblUrl(listId: number): string {
+  const token = getAuthToken();
+  const base = `${getApiBase()}/reading-lists/${listId}/export.cbl`;
+  return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+}
+
+export async function importReadingListCbl(file: File): Promise<ReadingListDetail> {
+  const form = new FormData();
+  form.append('file', file, file.name);
+  const url = `${getApiBase()}/reading-lists/import-cbl`;
+  const token = getAuthToken();
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(url, { method: 'POST', headers, body: form });
+  if (!res.ok) throw new Error(`Import failed (${res.status}): ${await res.text()}`);
+  return res.json();
+}
