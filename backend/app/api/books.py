@@ -727,7 +727,13 @@ async def set_cover_from_url(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
 
     import httpx
-    from app.utils.url_safety import assert_safe_url, safe_redirect_chain, UnsafeURLError
+    from app.utils.url_safety import (
+        assert_safe_url,
+        safe_redirect_chain,
+        fetch_capped,
+        BodyTooLargeError,
+        UnsafeURLError,
+    )
     try:
         assert_safe_url(data.url)
     except UnsafeURLError as exc:
@@ -738,11 +744,16 @@ async def set_cover_from_url(
             timeout=15,
             event_hooks={"response": [safe_redirect_chain()]},
         ) as client:
-            r = await client.get(data.url)
-            r.raise_for_status()
-            cover_bytes = r.content
+            status_code, _, cover_bytes = await fetch_capped(client, data.url)
+            if status_code >= 400:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Image upstream returned {status_code}",
+                )
     except UnsafeURLError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except BodyTooLargeError as exc:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Failed to download image: {exc}")
 
@@ -999,17 +1010,17 @@ async def enrich_book_from_url(
     if meta.get("image_url") and not edition.cover_hash:
         try:
             import httpx
-            from app.utils.url_safety import assert_safe_url, safe_redirect_chain
+            from app.utils.url_safety import assert_safe_url, safe_redirect_chain, fetch_capped
             assert_safe_url(meta["image_url"])
             async with httpx.AsyncClient(
                 timeout=15.0,
                 follow_redirects=True,
                 event_hooks={"response": [safe_redirect_chain()]},
             ) as client:
-                resp = await client.get(meta["image_url"])
-                if resp.status_code == 200 and len(resp.content) > 1000:
+                status_code, _, body = await fetch_capped(client, meta["image_url"])
+                if status_code == 200 and len(body) > 1000:
                     cover_hash, cover_format, cover_color = await cover_service.save_cover(
-                        resp.content, edition.uuid
+                        body, edition.uuid
                     )
                     if cover_hash:
                         edition.cover_hash = cover_hash
@@ -1678,16 +1689,16 @@ async def _apply_enrichment(
         try:
             import httpx as _httpx
             from app.services.covers import cover_service
-            from app.utils.url_safety import assert_safe_url, safe_redirect_chain
+            from app.utils.url_safety import assert_safe_url, safe_redirect_chain, fetch_capped
             assert_safe_url(enriched["cover_url"])
             async with _httpx.AsyncClient(
                 timeout=15.0,
                 follow_redirects=True,
                 event_hooks={"response": [safe_redirect_chain()]},
             ) as client:
-                resp = await client.get(enriched["cover_url"])
-                if resp.status_code == 200 and resp.content:
-                    cover_hash, cover_format, cover_color = await cover_service.save_cover(resp.content, edition.uuid)
+                status_code, _, body = await fetch_capped(client, enriched["cover_url"])
+                if status_code == 200 and body:
+                    cover_hash, cover_format, cover_color = await cover_service.save_cover(body, edition.uuid)
                     if cover_hash:
                         edition.cover_hash = cover_hash
                         edition.cover_format = cover_format

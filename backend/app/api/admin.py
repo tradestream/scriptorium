@@ -1438,7 +1438,13 @@ async def _run_cover_fetch(job_id: str, edition_ids: list[int]) -> None:
     from app.models.work import Work
     from app.services.covers import cover_service
     from app.services.metadata_enrichment import enrichment_service
-    from app.utils.url_safety import assert_safe_url, safe_redirect_chain, UnsafeURLError
+    from app.utils.url_safety import (
+        assert_safe_url,
+        safe_redirect_chain,
+        fetch_capped,
+        UnsafeURLError,
+        BodyTooLargeError,
+    )
 
     await update_job(job_id, status="running")
     done = 0
@@ -1487,10 +1493,14 @@ async def _run_cover_fetch(job_id: str, edition_ids: list[int]) -> None:
                     follow_redirects=True,
                     event_hooks={"response": [safe_redirect_chain()]},
                 ) as client:
-                    resp = await client.get(cover_url)
-                    if resp.status_code == 200 and resp.content and len(resp.content) > 1000:
+                    try:
+                        status_code, _, body = await fetch_capped(client, cover_url)
+                    except BodyTooLargeError:
+                        not_found += 1
+                        continue
+                    if status_code == 200 and body and len(body) > 1000:
                         cover_hash, cover_format, cover_color = await cover_service.save_cover(
-                            resp.content, book_uuid
+                            body, book_uuid
                         )
                         if cover_hash:
                             async with _session_factory() as db:

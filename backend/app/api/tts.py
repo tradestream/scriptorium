@@ -23,17 +23,44 @@ import logging
 from typing import Literal, Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.api.auth import get_current_user
 from app.config import get_settings
 from app.models import User
+from app.services.auth import verify_token
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/tts", tags=["tts"])
 
 Backend = Literal["qwen", "elevenlabs", "local"]
+
+
+def _tts_rate_key(request: Request) -> str:
+    """Rate-limit key keyed by user id when the bearer token is present,
+    falling back to remote address. Per-user is the right shape because
+    cloud TTS is billed per character and a single user can spend many
+    sentences in quick succession; IP-only would let a shared-NAT
+    household trade the budget but also let one household crowd out the
+    rest. The token verify is cheap (HMAC, no DB).
+    """
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        token = auth[7:].strip()
+        payload = verify_token(token)
+        if payload and payload.get("sub"):
+            return f"user:{payload['sub']}"
+    return get_remote_address(request)
+
+
+# Dedicated limiter for the TTS proxy. Separate from the global limiter
+# so we can use a per-user key without rewiring the rest of the API. The
+# global SlowAPIMiddleware catches the RateLimitExceeded exception this
+# limiter raises, so no extra wiring is needed.
+_tts_limiter = Limiter(key_func=_tts_rate_key, default_limits=[])
 
 
 class TtsRequest(BaseModel):
@@ -73,7 +100,9 @@ async def get_tts_config(_user: User = Depends(get_current_user)):
 
 
 @router.post("/sentence")
+@_tts_limiter.limit("30/minute")
 async def synthesize_sentence(
+    request: Request,
     body: TtsRequest,
     _user: User = Depends(get_current_user),
 ) -> Response:
@@ -83,6 +112,11 @@ async def synthesize_sentence(
     upstream — the Web Speech path already does this, so the cloud
     backends match the same contract. The response media-type depends
     on the backend (Qwen returns WAV, ElevenLabs returns MP3).
+
+    Rate-limited tightly (30/min per user) because cloud backends are
+    billed per-character. 30 sentences/min is faster than anyone reads
+    aloud, but tight enough that automation can't drain a paid quota
+    in seconds.
     """
     if body.backend == "qwen":
         return await _synth_qwen(body)

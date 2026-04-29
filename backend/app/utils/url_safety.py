@@ -95,12 +95,81 @@ def safe_redirect_chain(allowed_schemes: Iterable[str] = ("http", "https")):
 
     Use as ``async with httpx.AsyncClient(event_hooks={'response':
     [safe_redirect_chain()]}) as client``. Every 3xx response triggers
-    a fresh ``assert_safe_url`` call against the next-hop ``Location``
-    header before httpx follows it.
+    a fresh ``assert_safe_url`` call against the next-hop URL before
+    httpx follows it.
+
+    Resolves relative ``Location`` values (e.g. ``/image.jpg``) against
+    the response's request URL before validation — otherwise legitimate
+    same-origin redirects get rejected for "no scheme/host".
     """
+    from urllib.parse import urljoin
+
     async def hook(response):
         if 300 <= response.status_code < 400:
             location = response.headers.get("location")
             if location:
-                assert_safe_url(location)
+                next_url = urljoin(str(response.request.url), location)
+                assert_safe_url(next_url)
     return hook
+
+
+# Default body cap for outbound metadata fetches: large enough for any
+# reasonable cover image, small enough to refuse a hostile origin
+# streaming gigabytes into our process memory.
+DEFAULT_MAX_BODY_BYTES = 20 * 1024 * 1024  # 20 MiB
+
+
+class BodyTooLargeError(Exception):
+    """Raised when an outbound fetch's response body exceeds the cap.
+
+    Intentionally not a ``ValueError`` subclass — the streaming reader
+    has a ``try / except ValueError`` around its integer parse, and we
+    don't want our own raise getting swallowed by it.
+    """
+
+
+async def fetch_capped(
+    client,
+    url: str,
+    *,
+    max_bytes: int = DEFAULT_MAX_BODY_BYTES,
+    method: str = "GET",
+    **kwargs,
+) -> tuple[int, dict, bytes]:
+    """Issue an outbound request and return (status, headers, body) with
+    the body capped at ``max_bytes``.
+
+    Two enforcement layers:
+
+      1. ``Content-Length``: if the server advertises a length larger than
+         the cap, refuse before reading the body.
+      2. Streaming: read in chunks, accumulate bytes, raise once the cap
+         is exceeded so a server lying about (or omitting)
+         ``Content-Length`` can't pin gigabytes in memory.
+
+    Caller is responsible for the ``httpx.AsyncClient`` (so they own the
+    timeout / event-hooks / pool config). Returns headers as a plain
+    dict so callers don't depend on httpx-specific types.
+    """
+    async with client.stream(method, url, **kwargs) as response:
+        advertised = response.headers.get("content-length")
+        if advertised:
+            try:
+                if int(advertised) > max_bytes:
+                    raise BodyTooLargeError(
+                        f"Content-Length {advertised} exceeds cap {max_bytes}"
+                    )
+            except ValueError:
+                # Non-numeric Content-Length is a server bug; fall through
+                # to the streaming check rather than refuse outright.
+                pass
+        chunks: list[bytes] = []
+        total = 0
+        async for chunk in response.aiter_bytes():
+            total += len(chunk)
+            if total > max_bytes:
+                raise BodyTooLargeError(
+                    f"response body exceeded cap {max_bytes} bytes"
+                )
+            chunks.append(chunk)
+        return response.status_code, dict(response.headers), b"".join(chunks)
