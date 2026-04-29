@@ -47,6 +47,29 @@ class StatusUpdate(BaseModel):
     rating: Optional[int] = None  # 1-5, None to clear
 
 
+def _classify_cursor(
+    cfi: Optional[str], percentage: Optional[float]
+) -> tuple[str, str]:
+    """Disambiguate the wire ``cfi`` field by format.
+
+    The frontend ``ReaderProgress`` reuses the ``cfi`` field for every
+    reader. EPUB sends a real CFI; PDF and CBZ/CBR send ``page:N``. The
+    unified progress schema has a separate ``page`` format that the rest
+    of the stack (Kobo span ↔ CFI conversions, etc.) checks against, so
+    storing a page string under ``current_format=cfi`` would let the
+    wrong code path try to parse ``"page:14"`` as an epubjs CFI.
+
+    Returns ``(format, value)`` matching ``app.models.reading.FORMAT_*``.
+    """
+    from app.models.reading import FORMAT_CFI, FORMAT_PAGE, FORMAT_PERCENT
+
+    if cfi:
+        if cfi.startswith("page:"):
+            return FORMAT_PAGE, cfi.split(":", 1)[1] or "1"
+        return FORMAT_CFI, cfi
+    return FORMAT_PERCENT, str(percentage or 0)
+
+
 async def _get_or_create_web_device(db: AsyncSession, user_id: int) -> Device:
     """Get or create a virtual 'web' device for tracking in-browser progress."""
     stmt = select(Device).where(Device.user_id == user_id, Device.device_type == "web")
@@ -96,9 +119,15 @@ async def get_book_progress(
     if ep is None and rs is None:
         return None
 
+    # The wire ``cfi`` field is format-overloaded: epubjs CFIs, Kobo
+    # spans translated to CFIs, and ``page:N`` strings for fixed-layout
+    # all flow through it. ``ReaderProgress.savedPage`` parses ``page:N``
+    # back into a 1-based number for PdfReader/ComicReader.
     cfi: Optional[str] = None
     if ep and ep.current_format == "cfi":
         cfi = ep.current_value
+    elif ep and ep.current_format == "page" and ep.current_value:
+        cfi = f"page:{ep.current_value}"
     elif ep and ep.current_format == "kobo_span" and ep.current_value:
         # Cross-device cursor restore: the most recent cursor came from a
         # Kobo device. Translate the koboSpan id back to a partial CFI so
@@ -136,6 +165,8 @@ async def get_book_progress(
     furthest_cfi: Optional[str] = None
     if ep and ep.furthest_format == "cfi" and ep.furthest_value:
         furthest_cfi = ep.furthest_value
+    elif ep and ep.furthest_format == "page" and ep.furthest_value:
+        furthest_cfi = f"page:{ep.furthest_value}"
     elif ep and ep.furthest_format == "kobo_span" and ep.furthest_value:
         from app.services.kobo_spans import span_to_cfi
         from app.models.edition import EditionFile
@@ -233,12 +264,7 @@ async def update_book_progress(
     now = datetime.utcnow()
 
     cursor_pct = (data.percentage or 0) / 100.0
-    if data.cfi:
-        cursor_format = "cfi"
-        cursor_value: str = data.cfi
-    else:
-        cursor_format = "percent"
-        cursor_value = str(data.percentage or 0)
+    cursor_format, cursor_value = _classify_cursor(data.cfi, data.percentage)
 
     await write_progress(
         db,
