@@ -28,6 +28,7 @@
     Headphones,
     Newspaper,
     Compass,
+    ListOrdered,
   } from "lucide-svelte";
   import type { Library as LibraryType, Shelf, Collection } from "$lib/types/index";
   import { DragDropProvider } from "@dnd-kit-svelte/svelte";
@@ -61,6 +62,7 @@
     { label: "Articles",       href: "/articles",          icon: Newspaper },
     { label: "Shelves",        href: "/shelves",           icon: BookMarked },
     { label: "Collections",    href: "/collections",       icon: Layers },
+    { label: "Reading Lists",  href: "/reading-lists",     icon: ListOrdered },
     { label: "Duplicates",     href: "/duplicates",        icon: Copy },
     { label: "Metadata",       href: "/metadata",          icon: Database },
     { label: "Stats",          href: "/stats",             icon: BarChart2 },

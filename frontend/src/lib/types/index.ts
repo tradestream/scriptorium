@@ -377,6 +377,32 @@ export interface SmartFilter {
   min_rating?: number | null;
 }
 
+export interface ReadingList {
+  id: number;
+  user_id: number;
+  name: string;
+  description?: string | null;
+  cover_work_id?: number | null;
+  source?: string | null;
+  comicvine_id?: string | null;
+  is_pinned: boolean;
+  sync_to_kobo: boolean;
+  created_at: string;
+  updated_at: string;
+  entry_count: number;
+}
+
+export interface ReadingListEntry {
+  id: number;
+  position: number;
+  notes?: string | null;
+  book: Book;
+}
+
+export interface ReadingListDetail extends ReadingList {
+  entries: ReadingListEntry[];
+}
+
 export interface Collection {
   id: number;
   user_id: number;

@@ -3,8 +3,8 @@ from fastapi import APIRouter
 from app.api import (
     admin, analysis, annotations, api_keys, articles, audiobookshelf, auth, books, cross_analysis,
     loose_leaves, browse, collections, devices, duplicates, editions, export, goals, ingest, kobo,
-    libraries, locations, marginalia, metadata, notebooks, opds, progress, read_sessions, search,
-    shelves, stats, story_arcs, sync, tts, users, works,
+    libraries, locations, marginalia, metadata, notebooks, opds, progress, read_sessions,
+    reading_lists, search, shelves, stats, story_arcs, sync, tts, users, works,
 )
 
 router = APIRouter(prefix="/api/v1")
@@ -20,6 +20,7 @@ router.include_router(shelves.router, tags=["shelves"])
 router.include_router(collections.router, tags=["collections"])
 router.include_router(annotations.router, tags=["annotations"])
 router.include_router(read_sessions.router, tags=["read-sessions"])
+router.include_router(reading_lists.router, tags=["reading-lists"])
 router.include_router(duplicates.router, tags=["duplicates"])
 router.include_router(api_keys.router, tags=["api-keys"])
 router.include_router(search.router, tags=["search"])

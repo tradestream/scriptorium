@@ -1836,7 +1836,7 @@ export function adminBackupUrl(): string {
 
 // ── API Keys ──────────────────────────────────────────────────────────────────
 
-import type { ApiKey, ApiKeyCreated, Collection, CollectionDetail, Annotation, ReadSession } from '$lib/types/index';
+import type { ApiKey, ApiKeyCreated, Collection, CollectionDetail, Annotation, ReadSession, ReadingList, ReadingListDetail, ReadingListEntry } from '$lib/types/index';
 
 export async function getApiKeys(): Promise<ApiKey[]> {
   return fetchAPI('/api-keys');
@@ -1989,4 +1989,82 @@ export async function updateReadSession(id: number, data: {
 
 export async function deleteReadSession(id: number): Promise<void> {
   return fetchAPI(`/read-sessions/${id}`, { method: 'DELETE' });
+}
+
+// ── Reading lists ─────────────────────────────────────────────────────────────
+
+export async function getReadingLists(): Promise<ReadingList[]> {
+  return fetchAPI('/reading-lists');
+}
+
+export async function getReadingList(id: number): Promise<ReadingListDetail> {
+  return fetchAPI(`/reading-lists/${id}`);
+}
+
+export async function createReadingList(data: {
+  name: string;
+  description?: string | null;
+  cover_work_id?: number | null;
+  is_pinned?: boolean;
+  sync_to_kobo?: boolean;
+}): Promise<ReadingList> {
+  return fetchAPI('/reading-lists', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function updateReadingList(
+  id: number,
+  data: {
+    name?: string;
+    description?: string | null;
+    cover_work_id?: number | null;
+    is_pinned?: boolean;
+    sync_to_kobo?: boolean;
+  },
+): Promise<ReadingList> {
+  return fetchAPI(`/reading-lists/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+export async function deleteReadingList(id: number): Promise<void> {
+  return fetchAPI(`/reading-lists/${id}`, { method: 'DELETE' });
+}
+
+export async function addReadingListEntry(
+  listId: number,
+  data: { book_id: number; position?: number; notes?: string | null },
+): Promise<ReadingListEntry> {
+  return fetchAPI(`/reading-lists/${listId}/entries`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function reorderReadingList(
+  listId: number,
+  entryIds: number[],
+): Promise<ReadingListEntry[]> {
+  return fetchAPI(`/reading-lists/${listId}/entries`, {
+    method: 'PUT',
+    body: JSON.stringify({ entry_ids: entryIds }),
+  });
+}
+
+export async function removeReadingListEntry(
+  listId: number,
+  entryId: number,
+): Promise<void> {
+  return fetchAPI(`/reading-lists/${listId}/entries/${entryId}`, { method: 'DELETE' });
+}
+
+export async function nextInReadingList(
+  listId: number,
+  afterBookId: number,
+): Promise<ReadingListEntry | null> {
+  return fetchAPI(`/reading-lists/${listId}/next?after=${afterBookId}`);
+}
+
+export async function previousInReadingList(
+  listId: number,
+  beforeBookId: number,
+): Promise<ReadingListEntry | null> {
+  return fetchAPI(`/reading-lists/${listId}/previous?before=${beforeBookId}`);
 }
