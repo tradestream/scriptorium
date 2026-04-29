@@ -43,15 +43,25 @@ class IngestService:
         """Inner loop: use watchfiles to detect new/modified files."""
         try:
             from watchfiles import awatch, Change
+            from app.services.exclude_patterns import build_matcher, is_excluded
 
+            # Ingest isn't tied to a library, so we apply only the
+            # built-in defaults plus any ``.scriptoriumignore`` at the
+            # ingest root. Recompute on each batch so a fresh
+            # ``.scriptoriumignore`` is picked up without restarting.
             async for changes in awatch(str(self.ingest_path), recursive=True):
                 if not self.is_running:
                     break
+                matcher = build_matcher(self.ingest_path, library_exclude_json=None)
                 for change_type, path_str in changes:
                     if change_type in (Change.added, Change.modified):
                         path = Path(path_str)
-                        if path.is_file() and path.suffix.lower() in BOOK_EXTENSIONS:
-                            await self._ingest_file(path)
+                        if not (path.is_file() and path.suffix.lower() in BOOK_EXTENSIONS):
+                            continue
+                        if is_excluded(path, self.ingest_path, matcher):
+                            logger.debug("ingest: skipping %s (matched exclude)", path.name)
+                            continue
+                        await self._ingest_file(path)
         except asyncio.CancelledError:
             pass
         except Exception as exc:
@@ -315,15 +325,27 @@ class IngestService:
             except Exception as log_exc:
                 logger.error("Ingest: failed to log error for %s: %s", file_path.name, log_exc)
 
+    async def _excluded_in_ingest(self, file_path: Path) -> bool:
+        """Defaults + ``.scriptoriumignore`` at the ingest root."""
+        from app.services.exclude_patterns import build_matcher, is_excluded
+        matcher = build_matcher(self.ingest_path, library_exclude_json=None)
+        return is_excluded(file_path, self.ingest_path, matcher)
+
     async def trigger_scan(self):
         """Process all existing files in the ingest directory immediately.
 
         Scans root and subdirectories (subfolder name = target library).
         """
         logger.info("Ingest: scanning %s for existing files", self.ingest_path)
+        from app.services.exclude_patterns import build_matcher, is_excluded
+        matcher = build_matcher(self.ingest_path, library_exclude_json=None)
         for file_path in self.ingest_path.rglob("*"):
-            if file_path.is_file() and file_path.suffix.lower() in BOOK_EXTENSIONS:
-                await self._ingest_file(file_path)
+            if not (file_path.is_file() and file_path.suffix.lower() in BOOK_EXTENSIONS):
+                continue
+            if is_excluded(file_path, self.ingest_path, matcher):
+                logger.debug("ingest: skipping %s (matched exclude)", file_path.name)
+                continue
+            await self._ingest_file(file_path)
 
     async def get_ingest_status(self):
         """Return current ingest service status."""

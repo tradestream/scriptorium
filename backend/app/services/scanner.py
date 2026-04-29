@@ -22,17 +22,27 @@ class ScanResult:
     def __init__(self):
         self.added = 0
         self.skipped = 0
+        self.excluded = 0  # files filtered by exclude_patterns
         self.errors: list[str] = []
 
 
 async def scan_library(library: Library, db: AsyncSession) -> ScanResult:
     """Walk a library's directory and import any books not yet in the database."""
+    from app.config import resolve_path as _rp
+    from app.services.exclude_patterns import build_matcher, is_excluded
+
     result = ScanResult()
-    library_path = Path(library.path)
+    # The library's stored ``path`` is the container shape (e.g.
+    # ``/data/library/...``); ``resolve_path`` translates to a host
+    # path when running outside Docker. Both the walk root and the
+    # ``.scriptoriumignore`` lookup use the host form.
+    library_path = Path(_rp(library.path))
 
     if not library_path.exists():
         result.errors.append(f"Library path does not exist: {library.path}")
         return result
+
+    matcher = build_matcher(library_path, library.exclude_patterns)
 
     # Collect all existing file hashes/paths to skip duplicates quickly.
     # Check both EditionFile (new) and BookFile (legacy) tables.
@@ -47,6 +57,9 @@ async def scan_library(library: Library, db: AsyncSession) -> ScanResult:
 
     for file_path in _walk_books(library_path):
         try:
+            if is_excluded(file_path, library_path, matcher):
+                result.excluded += 1
+                continue
             file_hash = _hash_file(file_path)
             file_str = str(file_path)
 

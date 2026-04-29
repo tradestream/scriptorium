@@ -101,11 +101,17 @@ async def create_library(
             detail="Library with this path already exists",
         )
 
+    import json as _json
     library = Library(
         name=library_data.name,
         description=library_data.description,
         path=library_data.path,
         is_active=True,
+        exclude_patterns=(
+            _json.dumps(library_data.exclude_patterns)
+            if library_data.exclude_patterns is not None
+            else None
+        ),
     )
 
     db.add(library)
@@ -181,6 +187,16 @@ async def update_library(
     # Pydantic model_fields_set lets us distinguish "not sent" from "sent as null"
     if "naming_pattern" in library_data.model_fields_set:
         library.naming_pattern = library_data.naming_pattern
+
+    if "exclude_patterns" in library_data.model_fields_set:
+        # ``None`` clears the column (back to defaults-only); ``[]`` is
+        # stored as ``"[]"`` so it round-trips as an explicit empty list.
+        import json as _json
+        library.exclude_patterns = (
+            _json.dumps(library_data.exclude_patterns)
+            if library_data.exclude_patterns is not None
+            else None
+        )
 
     await db.commit()
     await db.refresh(library)

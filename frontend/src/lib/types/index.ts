@@ -53,6 +53,7 @@ export interface Library {
   updated_at: string;
   book_count?: number;
   naming_pattern?: string | null;
+  exclude_patterns?: string[] | null;
 }
 
 // ── Works & Editions ──────────────────────────────────────────────────────────

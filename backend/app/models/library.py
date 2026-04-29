@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, String, func
+from sqlalchemy import DateTime, ForeignKey, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models import Base
@@ -41,5 +41,12 @@ class Library(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
 
     naming_pattern: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
+    # Per-library glob exclusions for the scanner. Stored as a JSON
+    # array of glob strings (e.g. ``["**/backup/**", "*.tmp"]``). Merged
+    # with built-in defaults and any ``.scriptoriumignore`` file at the
+    # library root at scan time. ``None`` / ``""`` means "use only the
+    # built-in defaults"; explicit ``[]`` also uses just the defaults.
+    exclude_patterns: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     editions: Mapped[list["Edition"]] = relationship("Edition", back_populates="library", cascade="all, delete-orphan")

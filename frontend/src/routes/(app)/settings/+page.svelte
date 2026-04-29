@@ -292,6 +292,37 @@
     }
   }
 
+  // Per-library exclude-patterns panel — mirrors the naming-pattern
+  // shape so the settings page stays consistent. Patterns are stored
+  // as a JSON array on the model; the UI surfaces them as one pattern
+  // per line for easy editing.
+  let excludesExpanded = $state<Record<number, boolean>>({});
+  let libExcludesInput = $state<Record<number, string>>({});
+  let libExcludesSaving = $state<Record<number, boolean>>({});
+
+  function toggleExcludesPanel(lib: import('$lib/types/index').Library) {
+    excludesExpanded[lib.id] = !excludesExpanded[lib.id];
+  }
+
+  async function saveLibraryExcludes(lib: import('$lib/types/index').Library) {
+    libExcludesSaving[lib.id] = true;
+    try {
+      const raw = libExcludesInput[lib.id] ?? '';
+      const patterns = raw
+        .split('\n')
+        .map((s) => s.trim())
+        .filter((s) => s && !s.startsWith('#'));
+      // ``null`` clears back to defaults-only; an empty array also
+      // clears any custom additions.
+      await api.updateLibrary(lib.id, {
+        exclude_patterns: patterns.length > 0 ? patterns : null,
+      });
+      await loadLibraries();
+    } finally {
+      libExcludesSaving[lib.id] = false;
+    }
+  }
+
   // ── API Keys ────────────────────────────────────────────────────────────────
   let apiKeys = $state<ApiKey[]>([]);
   let newKeyName = $state('');
@@ -884,6 +915,9 @@
                 <Button variant="ghost" size="sm" onclick={() => toggleNamingPanel(lib)} class="px-2 text-xs">
                   <FileCode class="mr-1 h-3.5 w-3.5" />Pattern
                 </Button>
+                <Button variant="ghost" size="sm" onclick={() => toggleExcludesPanel(lib)} class="px-2 text-xs">
+                  <EyeOff class="mr-1 h-3.5 w-3.5" />Excludes
+                </Button>
                 <Button variant="ghost" size="icon" onclick={() => toggleHideLibrary(lib)} title={lib.is_hidden ? 'Show on Home/Progress' : 'Hide from Home/Progress'}>
                   {#if lib.is_hidden}
                     <EyeOff class="h-4 w-4 text-muted-foreground" />
@@ -914,6 +948,34 @@
                   />
                   <Button size="sm" disabled={libNamingSaving[lib.id]} onclick={() => saveLibraryNaming(lib)}>
                     {libNamingSaving[lib.id] ? 'Saving…' : 'Save'}
+                  </Button>
+                </div>
+              </div>
+            {/if}
+
+            {#if excludesExpanded[lib.id]}
+              <div class="border-t bg-muted/30 px-3 py-3 space-y-2">
+                <p class="text-xs font-medium text-muted-foreground">Exclude patterns</p>
+                <p class="text-xs text-muted-foreground">
+                  One glob per line. Combined with built-in defaults
+                  (<code class="text-[10px]">__MACOSX</code>,
+                  <code class="text-[10px]">@eaDir</code>,
+                  <code class="text-[10px]">*.tmp</code>,
+                  <code class="text-[10px]">backup/</code>, etc.) and any
+                  <code class="text-[10px]">.scriptoriumignore</code> file at the library root.
+                  <code class="text-[10px]">**/foo</code> matches at any depth;
+                  <code class="text-[10px]">*</code> doesn't cross directory separators.
+                </p>
+                <textarea
+                  rows="6"
+                  value={libExcludesInput[lib.id] ?? (lib.exclude_patterns ?? []).join('\n')}
+                  oninput={(e) => { libExcludesInput[lib.id] = (e.target as HTMLTextAreaElement).value; }}
+                  placeholder={"# Add per-library patterns here\n**/private/**\n*.bak"}
+                  class="w-full rounded-md border bg-background px-2 py-1.5 font-mono text-xs outline-none focus:ring-1 focus:ring-ring"
+                ></textarea>
+                <div class="flex justify-end">
+                  <Button size="sm" disabled={libExcludesSaving[lib.id]} onclick={() => saveLibraryExcludes(lib)}>
+                    {libExcludesSaving[lib.id] ? 'Saving…' : 'Save'}
                   </Button>
                 </div>
               </div>
