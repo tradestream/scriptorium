@@ -25,7 +25,7 @@ class SmartFilter(BaseModel):
 class CollectionCreate(BaseModel):
     name: str
     description: Optional[str] = None
-    cover_book_id: Optional[int] = None
+    cover_work_id: Optional[int] = None
     is_smart: bool = False
     is_pinned: bool = False
     sync_to_kobo: bool = False
@@ -35,7 +35,7 @@ class CollectionCreate(BaseModel):
 class CollectionUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
-    cover_book_id: Optional[int] = None
+    cover_work_id: Optional[int] = None
     is_smart: Optional[bool] = None
     is_pinned: Optional[bool] = None
     sync_to_kobo: Optional[bool] = None
@@ -47,7 +47,7 @@ class CollectionRead(BaseModel):
     user_id: int
     name: str
     description: Optional[str] = None
-    cover_book_id: Optional[int] = None
+    cover_work_id: Optional[int] = None
     is_smart: bool = False
     is_pinned: bool = False
     sync_to_kobo: bool = False

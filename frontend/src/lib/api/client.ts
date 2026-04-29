@@ -1856,7 +1856,7 @@ export async function getCollections(): Promise<Collection[]> {
   return fetchAPI('/collections');
 }
 
-export async function createCollection(data: { name: string; description?: string | null; cover_book_id?: number | null; is_smart?: boolean; smart_filter?: import('$lib/types/index').SmartFilter | null }): Promise<Collection> {
+export async function createCollection(data: { name: string; description?: string | null; cover_work_id?: number | null; is_smart?: boolean; smart_filter?: import('$lib/types/index').SmartFilter | null }): Promise<Collection> {
   return fetchAPI('/collections', { method: 'POST', body: JSON.stringify(data) });
 }
 
@@ -1864,7 +1864,7 @@ export async function getCollection(id: number): Promise<CollectionDetail> {
   return fetchAPI(`/collections/${id}`);
 }
 
-export async function updateCollection(id: number, data: { name?: string; description?: string | null; cover_book_id?: number | null; is_smart?: boolean; smart_filter?: import('$lib/types/index').SmartFilter | null }): Promise<Collection> {
+export async function updateCollection(id: number, data: { name?: string; description?: string | null; cover_work_id?: number | null; is_smart?: boolean; smart_filter?: import('$lib/types/index').SmartFilter | null }): Promise<Collection> {
   return fetchAPI(`/collections/${id}`, { method: 'PUT', body: JSON.stringify(data) });
 }
 

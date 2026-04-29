@@ -382,7 +382,6 @@ export interface Collection {
   user_id: number;
   name: string;
   description?: string | null;
-  cover_book_id?: number | null;
   cover_work_id?: number | null;
   is_smart: boolean;
   is_pinned: boolean;

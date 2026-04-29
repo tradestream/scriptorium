@@ -140,7 +140,7 @@ async def create_collection(
         is_pinned=data.is_pinned,
         sync_to_kobo=data.sync_to_kobo,
         smart_filter=data.smart_filter.model_dump_json() if data.smart_filter else None,
-        cover_book_id=data.cover_book_id,
+        cover_work_id=data.cover_work_id,
     )
     db.add(collection)
     await db.commit()
@@ -211,8 +211,8 @@ async def update_collection(
         collection.name = data.name.strip()
     if data.description is not None:
         collection.description = data.description
-    if data.cover_book_id is not None:
-        collection.cover_book_id = data.cover_book_id
+    if data.cover_work_id is not None:
+        collection.cover_work_id = data.cover_work_id
     if data.is_smart is not None:
         collection.is_smart = data.is_smart
     if data.is_pinned is not None:
