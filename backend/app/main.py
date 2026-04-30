@@ -123,6 +123,80 @@ async def lifespan(app: FastAPI):
                 pass
     asyncio.create_task(_deferred_scan())
 
+    # One-shot KEPUB backfill — convert every existing EPUB the first
+    # time this build runs against an existing library. After it
+    # completes successfully (or partially — see _run_bulk_kepub), the
+    # ``system_settings.kepub_backfill_done`` flag flips so we don't
+    # re-queue every restart. Gated on KEPUB_AUTO_CONVERT so households
+    # that don't want pre-conversion can opt out.
+    async def _deferred_kepub_backfill():
+        import tempfile, os
+        from app.config import get_settings as _gs
+        if not _gs().KEPUB_AUTO_CONVERT:
+            return
+        lock = Path(tempfile.gettempdir()) / "scriptorium_kepub_backfill.lock"
+        try:
+            fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+        except FileExistsError:
+            return  # another worker handling it
+        try:
+            # Wait until after the ingest scan has had a chance to
+            # settle; backfill is opportunistic, not urgent.
+            await asyncio.sleep(10)
+
+            from app.database import get_session_factory
+            from app.models.system import SystemSettings
+            from app.models.edition import Edition, EditionFile
+            from app.services.background_jobs import create_job, get_active_job
+            from app.api.admin import _run_bulk_kepub
+            from sqlalchemy import select, func
+
+            factory = get_session_factory()
+            async with factory() as db:
+                ss = await db.scalar(select(SystemSettings).where(SystemSettings.id == 1))
+                if ss is not None and ss.kepub_backfill_done:
+                    return
+                stmt = (
+                    select(EditionFile.id)
+                    .join(Edition, EditionFile.edition_id == Edition.id)
+                    .where(EditionFile.format == "epub")
+                    .where(EditionFile.kepub_path.is_(None))
+                    .where(Edition.is_fixed_layout.is_(False))
+                )
+                ef_ids = [row[0] for row in (await db.execute(stmt)).all()]
+
+            if not ef_ids:
+                # Nothing to do — flip the flag so we don't re-query
+                # this on every restart of an all-converted library.
+                async with factory() as db:
+                    ss = await db.scalar(select(SystemSettings).where(SystemSettings.id == 1))
+                    if ss is None:
+                        ss = SystemSettings(id=1, kepub_backfill_done=True)
+                        db.add(ss)
+                    else:
+                        ss.kepub_backfill_done = True
+                    await db.commit()
+                return
+
+            # Don't double-queue if an admin already kicked one.
+            if await get_active_job("bulk_kepub") is not None:
+                return
+
+            job_id, _ = await create_job("bulk_kepub", len(ef_ids))
+            logger.info(
+                "Auto-kicking KEPUB backfill: %d EPUB(s) need conversion (job %s)",
+                len(ef_ids), job_id,
+            )
+            asyncio.create_task(_run_bulk_kepub(job_id, ef_ids))
+        finally:
+            try:
+                lock.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    asyncio.create_task(_deferred_kepub_backfill())
+
     yield
 
     # Shutdown

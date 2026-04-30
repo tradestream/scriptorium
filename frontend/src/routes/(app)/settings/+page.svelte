@@ -4,7 +4,9 @@
   import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "$lib/components/ui/card";
   import { Badge } from "$lib/components/ui/badge";
   import { Separator } from "$lib/components/ui/separator";
-  import { Plus, RefreshCw, Trash2, Play, CheckCircle, AlertCircle, Copy, Clock, Download, Server, Key, Eye, EyeOff, Users, UserPlus, UserMinus, Lock, Unlock, Headphones, Link2, FileCode, Sparkles, X, ImageUp, FileText } from "lucide-svelte";
+  import { Plus, RefreshCw, Trash2, Play, CheckCircle, AlertCircle, Copy, Clock, Download, Server, Key, Eye, EyeOff, Users, UserPlus, UserMinus, Lock, Unlock, Headphones, Link2, FileCode, Sparkles, X, ImageUp, FileText, User as UserIcon, BookOpen, Tag as TagIcon, FileBox, Plug, Cog } from "lucide-svelte";
+  import { page } from "$app/state";
+  import { goto } from "$app/navigation";
   import * as api from "$lib/api/client";
   import type { AdminConfig } from "$lib/api/client";
   import type { Library, LibraryAccess, User as UserType, IngestLog, ApiKey, ApiKeyCreated } from "$lib/types/index";
@@ -12,6 +14,38 @@
 
   let { data }: { data: PageData } = $props();
   let user = $derived(data.user);
+
+  // ── Section nav ────────────────────────────────────────────────────────────
+  // 26 settings cards used to live on one scroll-of-doom page. Sectioning
+  // them gives users a fighting chance at finding things; URL-sync via
+  // ``?section=…`` so deep-links + browser back work.
+  type SectionId = 'account' | 'library' | 'metadata' | 'files' | 'integrations' | 'system';
+  const SECTIONS: { id: SectionId; label: string; icon: any; adminOnly?: boolean }[] = [
+    { id: 'account',      label: 'Account',           icon: UserIcon },
+    { id: 'library',      label: 'Library',           icon: BookOpen },
+    { id: 'metadata',     label: 'Metadata',          icon: TagIcon, adminOnly: true },
+    { id: 'files',        label: 'Files & Conversion', icon: FileBox, adminOnly: true },
+    { id: 'integrations', label: 'Integrations',      icon: Plug },
+    { id: 'system',       label: 'System',            icon: Cog, adminOnly: true },
+  ];
+
+  function _sectionFromUrl(): SectionId {
+    const s = page.url.searchParams.get('section') as SectionId | null;
+    const match = SECTIONS.find((sec) => sec.id === s);
+    // Reject admin-only sections for non-admins so a deep-link doesn't
+    // land them on a blank page (every card inside would be gated out).
+    if (!match || (match.adminOnly && !data.user?.is_admin)) return 'account';
+    return match.id;
+  }
+  let activeSection = $state<SectionId>(_sectionFromUrl());
+
+  function selectSection(id: SectionId) {
+    if (activeSection === id) return;
+    activeSection = id;
+    const url = new URL(window.location.href);
+    url.searchParams.set('section', id);
+    goto(url, { replaceState: true, keepFocus: true, noScroll: true });
+  }
 
   // Profile editing
   let profileDisplayName = $state(data.user?.display_name ?? '');
@@ -514,6 +548,62 @@
     }
   }
 
+  // ── Bulk KEPUB Conversion ──────────────────────────────────────────────────
+  let kepubJob = $state<import('$lib/api/client').BulkKepubJob | null>(null);
+  let kepubStarting = $state(false);
+  let kepubMsg = $state('');
+  let kepubMsgOk = $state(true);
+  let kepubHealth = $state<{ available: boolean; path: string | null; version: string | null; fallback_in_use: boolean } | null>(null);
+  let _kepubPollTimer: ReturnType<typeof setInterval> | null = null;
+
+  function _stopKepubPoll() {
+    if (_kepubPollTimer) { clearInterval(_kepubPollTimer); _kepubPollTimer = null; }
+  }
+
+  async function _pollKepubJob(jobId: string) {
+    try {
+      kepubJob = await api.getBulkKepubJob(jobId);
+      if (kepubJob.status === 'done' || kepubJob.status === 'cancelled') {
+        _stopKepubPoll();
+        const converted = kepubJob.done - kepubJob.failed;
+        kepubMsg = `Done — ${converted} converted, ${kepubJob.failed} failed`;
+        kepubMsgOk = true;
+      }
+    } catch { _stopKepubPoll(); }
+  }
+
+  async function startBulkKepub() {
+    kepubStarting = true;
+    kepubMsg = '';
+    kepubJob = null;
+    _stopKepubPoll();
+    try {
+      const r = await api.startBulkKepub();
+      kepubMsg = r.already_running
+        ? `Resumed running job — ${r.total} books`
+        : `Job started — ${r.total} EPUBs to convert`;
+      kepubMsgOk = true;
+      kepubJob = { job_id: r.job_id, status: 'queued', total: r.total, done: 0, failed: 0, current: '', started_at: '' };
+      _kepubPollTimer = setInterval(() => _pollKepubJob(r.job_id), 2000);
+    } catch (e) {
+      kepubMsg = e instanceof Error ? e.message : 'Failed to start';
+      kepubMsgOk = false;
+    } finally {
+      kepubStarting = false;
+    }
+  }
+
+  async function cancelBulkKepub() {
+    if (!kepubJob) return;
+    try {
+      await api.cancelBulkKepubJob(kepubJob.job_id);
+      kepubJob = { ...kepubJob, status: 'cancelled' };
+    } catch (e) {
+      kepubMsg = e instanceof Error ? e.message : 'Cancel failed';
+      kepubMsgOk = false;
+    }
+  }
+
   // ── Cover Upgrade ──────────────────────────────────────────────────────────
   let coverUpJob = $state<any>(null);
   let coverUpStarting = $state(false);
@@ -607,6 +697,33 @@
     }
   }
 
+  // ── Kobo Fonts (USB sideload bundle) ───────────────────────────────────────
+  let koboFonts = $state<import('$lib/api/client').KoboFontsListing | null>(null);
+  let koboFontsLoading = $state(false);
+  let koboFontsError = $state('');
+
+  async function loadKoboFonts() {
+    koboFontsLoading = true;
+    koboFontsError = '';
+    try {
+      koboFonts = await api.listKoboFonts();
+    } catch (e) {
+      koboFontsError = e instanceof Error ? e.message : 'Failed to load fonts';
+    } finally {
+      koboFontsLoading = false;
+    }
+  }
+
+  $effect(() => {
+    if (data.user?.is_admin && activeSection === 'integrations' && koboFonts === null && !koboFontsLoading) {
+      loadKoboFonts();
+    }
+  });
+
+  function formatMB(bytes: number): string {
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
   // ── AudiobookShelf ──────────────────────────────────────────────────────────
   let absStatus = $state<import('$lib/api/client').AbsStatus | null>(null);
   let absLibraries = $state<import('$lib/api/client').AbsLibrary[]>([]);
@@ -659,6 +776,18 @@
         _mdPollTimer = setInterval(() => _pollMdJob(job.job_id), 2000);
       }
     }).catch(() => {});
+    // Check for active KEPUB conversion job (auto-kicked at startup or manual)
+    api.getActiveBulkKepubJob().then((job) => {
+      if (job && (job.status === 'running' || job.status === 'queued')) {
+        kepubJob = job;
+        kepubMsg = `Reconnected — ${job.done}/${job.total} converted`;
+        kepubMsgOk = true;
+        _kepubPollTimer = setInterval(() => _pollKepubJob(job.job_id), 2000);
+      }
+    }).catch(() => {});
+    // Surface kepubify binary status so users know whether they're
+    // getting real KEPUB span wrapping or just renamed copies.
+    api.getKepubifyHealth().then((h) => { kepubHealth = h; }).catch(() => {});
   });
 
   async function loadAbsLibraries() {
@@ -735,13 +864,53 @@
   }
 </script>
 
-<div class="mx-auto max-w-2xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
+<div class="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
   <div>
     <h1 class="text-3xl font-bold tracking-tight">Settings</h1>
     <p class="mt-1 text-muted-foreground">Manage your Scriptorium instance</p>
   </div>
 
+  <div class="mt-6 flex flex-col gap-6 md:flex-row">
+    <!-- Sidebar nav -->
+    <nav class="md:sticky md:top-8 md:h-fit md:w-56 md:shrink-0">
+      <!-- Mobile: horizontal scroll tabs -->
+      <div class="-mx-4 flex gap-1 overflow-x-auto px-4 pb-2 md:hidden">
+        {#each SECTIONS as s (s.id)}
+          {#if !s.adminOnly || user?.is_admin}
+            <button
+              type="button"
+              onclick={() => selectSection(s.id)}
+              class="shrink-0 rounded-md px-3 py-1.5 text-sm font-medium {activeSection === s.id ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-muted'}"
+            >
+              {s.label}
+            </button>
+          {/if}
+        {/each}
+      </div>
+      <!-- Desktop: vertical list -->
+      <ul class="hidden space-y-1 md:block">
+        {#each SECTIONS as s (s.id)}
+          {#if !s.adminOnly || user?.is_admin}
+            <li>
+              <button
+                type="button"
+                onclick={() => selectSection(s.id)}
+                class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors {activeSection === s.id ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
+              >
+                <s.icon class="h-4 w-4 shrink-0" />
+                {s.label}
+              </button>
+            </li>
+          {/if}
+        {/each}
+      </ul>
+    </nav>
+
+    <!-- Section content -->
+    <div class="min-w-0 flex-1 space-y-6">
+
   <!-- Account -->
+  {#if activeSection === 'account'}
   <Card>
     <CardHeader>
       <CardTitle>Account</CardTitle>
@@ -779,8 +948,10 @@
       {/if}
     </CardContent>
   </Card>
+  {/if}
 
   <!-- API Keys -->
+  {#if activeSection === 'account'}
   <Card>
     <CardHeader>
       <CardTitle>API Keys</CardTitle>
@@ -832,8 +1003,10 @@
       </div>
     </CardContent>
   </Card>
+  {/if}
 
   <!-- Connected Devices -->
+  {#if activeSection === 'account'}
   <Card>
     <CardHeader>
       <CardTitle>Connected Devices</CardTitle>
@@ -860,8 +1033,10 @@
       {/if}
     </CardContent>
   </Card>
+  {/if}
 
-    <!-- Libraries -->
+  <!-- Libraries -->
+  {#if activeSection === 'library'}
   <Card>
     <CardHeader class="flex flex-row items-center justify-between">
       <div>
@@ -1026,9 +1201,10 @@
       {/if}
     </CardContent>
   </Card>
+  {/if}
 
   <!-- Auto-Ingest -->
-  {#if user?.is_admin}
+  {#if user?.is_admin && activeSection === 'library'}
     <Card>
       <CardHeader class="flex flex-row items-center justify-between">
         <div>
@@ -1116,7 +1292,7 @@
   {/if}
 
   <!-- Metadata Enrichment -->
-  {#if user?.is_admin && adminConfig}
+  {#if user?.is_admin && adminConfig && activeSection === 'metadata'}
     <Card>
       <CardHeader>
         <CardTitle>Metadata Enrichment</CardTitle>
@@ -1196,7 +1372,7 @@
   {/if}
 
   <!-- Bulk Metadata Enrichment -->
-  {#if user?.is_admin}
+  {#if user?.is_admin && activeSection === 'metadata'}
     <Card>
       <CardHeader>
         <CardTitle>Bulk Metadata Enrichment</CardTitle>
@@ -1315,7 +1491,7 @@
   {/if}
 
   <!-- Bulk Markdown Generation -->
-  {#if user?.is_admin}
+  {#if user?.is_admin && activeSection === 'files'}
     <Card>
       <CardHeader>
         <CardTitle>Markdown Conversion</CardTitle>
@@ -1371,8 +1547,82 @@
     </Card>
   {/if}
 
+  <!-- Bulk KEPUB Conversion (Kobo) -->
+  {#if user?.is_admin && activeSection === 'files'}
+    <Card>
+      <CardHeader>
+        <CardTitle>KEPUB Conversion (Kobo)</CardTitle>
+        <CardDescription>Pre-convert every EPUB so Kobo sync never has to convert on demand</CardDescription>
+      </CardHeader>
+      <CardContent class="space-y-4">
+        <p class="text-sm text-muted-foreground">
+          Generates a cached <code class="rounded bg-muted px-1 py-0.5 text-xs">.kepub.epub</code> alongside every EPUB.
+          Fixed-layout titles are skipped (Kobo Nickel renders those natively).
+          New imports auto-convert on the way in; this button backfills the existing library.
+        </p>
+
+        {#if kepubHealth && !kepubHealth.available}
+          <div class="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm dark:border-amber-800 dark:bg-amber-950/30">
+            <AlertCircle class="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+            <div>
+              <p class="font-medium">kepubify not found</p>
+              <p class="text-xs text-muted-foreground">
+                Conversion will fall back to a renamed copy — Kobo will still accept the file but reading-position spans
+                won't be added. Set <code class="rounded bg-muted px-1 py-0.5">KEPUBIFY_PATH</code> to the binary location.
+              </p>
+            </div>
+          </div>
+        {:else if kepubHealth?.version}
+          <p class="text-xs text-muted-foreground">kepubify {kepubHealth.version}</p>
+        {/if}
+
+        {#if kepubJob && (kepubJob.status === 'running' || kepubJob.status === 'queued')}
+          <div class="space-y-2 rounded-md border bg-muted/30 p-3">
+            <div class="flex items-center justify-between text-sm">
+              <span class="font-medium">
+                {kepubJob.status === 'queued' ? 'Queued…' : `Converting… ${kepubJob.done}/${kepubJob.total}`}
+              </span>
+              <Button variant="ghost" size="sm" onclick={cancelBulkKepub}>
+                <X class="mr-1 h-3 w-3" /> Cancel
+              </Button>
+            </div>
+            {#if kepubJob.total > 0}
+              <div class="h-2 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  class="h-full rounded-full bg-primary transition-all"
+                  style="width: {Math.round((kepubJob.done / kepubJob.total) * 100)}%"
+                ></div>
+              </div>
+            {/if}
+            {#if kepubJob.failed > 0}
+              <p class="text-xs text-amber-600 dark:text-amber-400">{kepubJob.failed} failed (will retry on next sync)</p>
+            {/if}
+          </div>
+        {:else if kepubJob && kepubJob.status === 'done'}
+          <div class="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm dark:border-green-800 dark:bg-green-950/30">
+            <CheckCircle class="h-4 w-4 shrink-0 text-green-500" />
+            <span>{kepubJob.done - kepubJob.failed} converted · {kepubJob.failed} failed</span>
+          </div>
+        {/if}
+
+        {#if kepubMsg}
+          <p class="text-sm {kepubMsgOk ? 'text-green-600 dark:text-green-400' : 'text-destructive'}">{kepubMsg}</p>
+        {/if}
+
+        <Button
+          onclick={startBulkKepub}
+          disabled={kepubStarting || kepubJob?.status === 'running' || kepubJob?.status === 'queued'}
+          class="w-full"
+        >
+          <FileCode class="mr-2 h-4 w-4" />
+          {kepubStarting ? 'Starting…' : 'Convert All EPUBs to KEPUB'}
+        </Button>
+      </CardContent>
+    </Card>
+  {/if}
+
   <!-- Identifier Extraction (ISBN / DOI) -->
-  {#if user?.is_admin}
+  {#if user?.is_admin && activeSection === 'metadata'}
     <Card>
       <CardHeader>
         <CardTitle>Identifier Extraction</CardTitle>
@@ -1427,7 +1677,7 @@
   {/if}
 
   <!-- Cover Quality Upgrade -->
-  {#if user?.is_admin}
+  {#if user?.is_admin && activeSection === 'files'}
     <Card>
       <CardHeader>
         <CardTitle>Cover Quality Upgrade</CardTitle>
@@ -1470,7 +1720,7 @@
   {/if}
 
   <!-- Fetch Missing Covers -->
-  {#if user?.is_admin}
+  {#if user?.is_admin && activeSection === 'files'}
     <Card>
       <CardHeader>
         <CardTitle>Fetch Missing Covers</CardTitle>
@@ -1513,7 +1763,7 @@
   {/if}
 
   <!-- Filename Metadata Extraction -->
-  {#if user?.is_admin}
+  {#if user?.is_admin && activeSection === 'metadata'}
     <Card>
       <CardHeader>
         <CardTitle>Filename Metadata Extraction</CardTitle>
@@ -1554,7 +1804,7 @@
   {/if}
 
   <!-- File Naming Pattern -->
-  {#if user?.is_admin && adminConfig}
+  {#if user?.is_admin && adminConfig && activeSection === 'library'}
     <Card>
       <CardHeader>
         <CardTitle>File Naming Pattern</CardTitle>
@@ -1640,7 +1890,7 @@
   {/if}
 
   <!-- AudiobookShelf -->
-  {#if user?.is_admin}
+  {#if user?.is_admin && activeSection === 'integrations'}
     <Card>
       <CardHeader>
         <CardTitle class="flex items-center gap-2">
@@ -1788,7 +2038,7 @@
   {/if}
 
   <!-- Loose Leaves -->
-  {#if user?.is_admin && adminConfig}
+  {#if user?.is_admin && adminConfig && activeSection === 'library'}
     <Card>
       <CardHeader>
         <CardTitle>Loose Leaves</CardTitle>
@@ -1812,7 +2062,7 @@
   {/if}
 
   <!-- System Config (admin) -->
-  {#if user?.is_admin && adminConfig}
+  {#if user?.is_admin && adminConfig && activeSection === 'system'}
     <Card>
       <CardHeader>
         <CardTitle>System Configuration</CardTitle>
@@ -1969,7 +2219,87 @@
     </Card>
   {/if}
 
+  <!-- Kobo Fonts (USB sideload) -->
+  {#if user?.is_admin && activeSection === 'integrations'}
+    <Card>
+      <CardHeader>
+        <CardTitle>Kobo Fonts</CardTitle>
+        <CardDescription>Curated TTF/OTF bundle for the device's <code class="rounded bg-muted px-1 py-0.5 text-xs">.fonts/</code> folder</CardDescription>
+      </CardHeader>
+      <CardContent class="space-y-4">
+        <p class="text-sm text-muted-foreground">
+          Stock Kobos don't accept fonts over the sync API. Plug your Kobo in via USB,
+          download the bundle, and unzip it into the device's <code class="rounded bg-muted px-1 py-0.5">.fonts/</code> folder
+          (create the folder if it doesn't exist). Eject and reboot — the new families appear in <em>Reading Settings → Font</em>.
+        </p>
+
+        {#if koboFontsLoading && !koboFonts}
+          <p class="text-sm text-muted-foreground">Scanning fonts directory…</p>
+        {:else if koboFonts && !koboFonts.available}
+          <div class="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm dark:border-amber-800 dark:bg-amber-950/30">
+            <AlertCircle class="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+            <div>
+              <p class="font-medium">Fonts directory not found</p>
+              <p class="text-xs text-muted-foreground">
+                Set <code class="rounded bg-muted px-1 py-0.5">KOBO_FONTS_PATH</code> to a folder of TTF/OTF files. Currently looking at:
+                <code class="break-all">{koboFonts.path}</code>
+              </p>
+            </div>
+          </div>
+        {:else if koboFonts}
+          <div class="grid gap-2 rounded-md border bg-muted/30 p-3 text-sm sm:grid-cols-3">
+            <div>
+              <p class="text-xs text-muted-foreground">Families</p>
+              <p class="font-medium">{koboFonts.families.length}</p>
+            </div>
+            <div>
+              <p class="text-xs text-muted-foreground">Files</p>
+              <p class="font-medium">{koboFonts.total_files}</p>
+            </div>
+            <div>
+              <p class="text-xs text-muted-foreground">Bundle size</p>
+              <p class="font-medium">{formatMB(koboFonts.total_bytes)}</p>
+            </div>
+          </div>
+
+          {#if koboFonts.families.length > 0}
+            <details class="rounded border">
+              <summary class="cursor-pointer px-3 py-2 text-sm font-medium hover:bg-muted/50">
+                View families ({koboFonts.families.length})
+              </summary>
+              <div class="border-t px-3 py-2">
+                <ul class="grid gap-1 text-xs sm:grid-cols-2">
+                  {#each koboFonts.families as fam}
+                    <li class="flex items-baseline justify-between gap-2">
+                      <span class="font-medium">{fam.family}</span>
+                      <span class="text-muted-foreground">{fam.styles.length} {fam.styles.length === 1 ? 'style' : 'styles'}</span>
+                    </li>
+                  {/each}
+                </ul>
+              </div>
+            </details>
+          {/if}
+        {/if}
+
+        {#if koboFontsError}
+          <p class="text-sm text-destructive">{koboFontsError}</p>
+        {/if}
+
+        <Button
+          href={api.koboFontsBundleUrl()}
+          download
+          class="w-full"
+          disabled={!koboFonts?.available || koboFonts.total_files === 0}
+        >
+          <Download class="mr-2 h-4 w-4" />
+          Download fonts bundle
+        </Button>
+      </CardContent>
+    </Card>
+  {/if}
+
   <!-- OPDS / Device Sync -->
+  {#if activeSection === 'integrations'}
   <Card>
     <CardHeader>
       <CardTitle>Device Sync</CardTitle>
@@ -2002,4 +2332,8 @@
       </div>
     </CardContent>
   </Card>
+  {/if}
+
+    </div><!-- /section content -->
+  </div><!-- /flex -->
 </div>

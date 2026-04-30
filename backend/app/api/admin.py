@@ -1911,6 +1911,135 @@ async def backfill_page_inventory(
     }
 
 
+class BulkKepubOptions(BaseModel):
+    library_id: Optional[int] = None
+
+
+@router.post("/kepub/bulk")
+async def start_bulk_kepub(
+    opts: BulkKepubOptions,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(_require_admin),
+):
+    """Pre-convert every EPUB in the library to KEPUB.
+
+    Targets EditionFiles where format='epub' AND kepub_path IS NULL,
+    skipping fixed-layout titles (Kobo Nickel renders those natively
+    and KEPUB conversion mangles pre-paginated content).
+    """
+    from sqlalchemy import select
+    from app.models.edition import Edition, EditionFile
+
+    existing = await get_active_job("bulk_kepub")
+    if existing:
+        job_id, job = existing
+        return {"job_id": job_id, **job, "already_running": True}
+
+    stmt = (
+        select(EditionFile.id)
+        .join(Edition, EditionFile.edition_id == Edition.id)
+        .where(EditionFile.format == "epub")
+        .where(EditionFile.kepub_path.is_(None))
+        .where(Edition.is_fixed_layout.is_(False))
+    )
+    if opts.library_id:
+        stmt = stmt.where(Edition.library_id == opts.library_id)
+
+    result = await db.execute(stmt)
+    edition_file_ids = [row[0] for row in result.all()]
+
+    job_id, _ = await create_job("bulk_kepub", len(edition_file_ids))
+    background_tasks.add_task(_run_bulk_kepub, job_id, edition_file_ids)
+
+    return {"job_id": job_id, "total": len(edition_file_ids)}
+
+
+@router.get("/kepub/bulk/active")
+async def get_active_kepub_job(
+    _admin: User = Depends(_require_admin),
+):
+    """Return the currently running/queued bulk KEPUB job, if any."""
+    result = await get_active_job("bulk_kepub")
+    if result:
+        job_id, job = result
+        return {"job_id": job_id, **job}
+    return None
+
+
+@router.get("/kepub/bulk/{job_id}")
+async def get_bulk_kepub_job(
+    job_id: str,
+    _admin: User = Depends(_require_admin),
+):
+    """Poll the status of a bulk KEPUB job."""
+    job = await get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"job_id": job_id, **job}
+
+
+@router.delete("/kepub/bulk/{job_id}", status_code=204)
+async def cancel_bulk_kepub_job(
+    job_id: str,
+    _admin: User = Depends(_require_admin),
+):
+    """Mark a bulk KEPUB job as cancelled (best-effort)."""
+    job = await get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job["status"] in ("running", "queued"):
+        await update_job(job_id, status="cancelled")
+
+
+async def _run_bulk_kepub(job_id: str, edition_file_ids: list[int]) -> None:
+    """Background task: convert each EPUB to KEPUB, update job state."""
+    from app.services.kepub import convert_edition_file
+    from app.database import _session_factory
+    from app.models.system import SystemSettings
+    from sqlalchemy import select
+
+    await update_job(job_id, status="running")
+    total = len(edition_file_ids)
+    done = 0
+    failed = 0
+
+    for ef_id in edition_file_ids:
+        if await get_job_status(job_id) == "cancelled":
+            break
+        try:
+            kepub_path = await convert_edition_file(ef_id)
+            if kepub_path is None:
+                failed += 1
+        except Exception as exc:
+            logger.warning("Bulk KEPUB failed for ef=%s: %s", ef_id, exc)
+            failed += 1
+        done += 1
+        await update_job(job_id, done=done, failed=failed, current=str(ef_id))
+        # Brief yield so we don't starve other tasks during long backfills
+        await asyncio.sleep(0.05)
+
+    cancelled = await get_job_status(job_id) == "cancelled"
+    final_status = "cancelled" if cancelled else "done"
+    await update_job(job_id, status=final_status, current="")
+
+    # Mark backfill done once the run completes successfully — even if
+    # some rows failed, we don't want the startup auto-kick to keep
+    # re-queueing the same broken files every restart.
+    if not cancelled:
+        try:
+            async with _session_factory() as db:
+                ss = await db.scalar(select(SystemSettings).where(SystemSettings.id == 1))
+                if ss is None:
+                    ss = SystemSettings(id=1, kepub_backfill_done=True)
+                    db.add(ss)
+                else:
+                    ss.kepub_backfill_done = True
+                await db.commit()
+        except Exception as exc:
+            logger.warning("Failed to mark kepub_backfill_done: %s", exc)
+
+
 @router.get("/kepubify/health")
 async def kepubify_health(current_user: User = Depends(get_current_user)):
     """Surface KEPUB conversion readiness so the admin UI can stop
@@ -1945,3 +2074,32 @@ async def kepubify_health(current_user: User = Depends(get_current_user)):
         # accurate reading-position sync.
         "fallback_in_use": path is None,
     }
+
+
+# ── Kobo Fonts (USB sideload bundle) ──────────────────────────────────────────
+
+@router.get("/kobo-fonts")
+async def list_kobo_fonts(_admin: User = Depends(_require_admin)):
+    """Return the curated Kobo font collection grouped by family."""
+    from app.services.kobo_fonts import list_fonts
+    return list_fonts()
+
+
+@router.get("/kobo-fonts/bundle")
+async def download_kobo_fonts_bundle(_admin: User = Depends(_require_admin)):
+    """Stream a zip of the curated TTF/OTF files for USB sideload.
+
+    Stock Kobos don't accept fonts over the sync API — the user
+    extracts this zip into the device's ``.fonts/`` folder while it's
+    plugged in via USB.
+    """
+    from app.services.kobo_fonts import build_bundle
+    try:
+        data = build_bundle()
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="kobo-fonts.zip"'},
+    )

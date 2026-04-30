@@ -23,3 +23,8 @@ class SystemSettings(Base):
     isbndb_api_key: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     amazon_cookie: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     librarything_api_key: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    # Set True after the one-shot KEPUB backfill finishes so the
+    # startup auto-kick doesn't re-queue every restart even when a few
+    # rows are still missing kepub_path (fixed-layout, conversion
+    # failures, etc.).
+    kepub_backfill_done: Mapped[bool] = mapped_column(Boolean, default=False)

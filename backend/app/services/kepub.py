@@ -162,6 +162,61 @@ def hash_file(path: str) -> str:
     return h.hexdigest()
 
 
+async def convert_edition_file(edition_file_id: int) -> Optional[str]:
+    """Run ``ensure_kepub`` for an EditionFile by id, in a fresh session.
+
+    Used by the post-import auto-conversion hook (scanner + ingest) and
+    the bulk backfill job. Both call sites want the conversion to happen
+    *after* the importing transaction has committed — once the file is
+    sitting at its final library path — so we open our own session here
+    rather than reuse the caller's.
+    """
+    from sqlalchemy import select
+    from app.database import get_session_factory
+    from app.models.edition import Edition, EditionFile
+
+    factory = get_session_factory()
+    async with factory() as db:
+        stmt = (
+            select(EditionFile, Edition.is_fixed_layout)
+            .join(Edition, EditionFile.edition_id == Edition.id)
+            .where(EditionFile.id == edition_file_id)
+        )
+        row = (await db.execute(stmt)).first()
+        if row is None:
+            return None
+        edition_file, is_fixed_layout = row[0], bool(row[1])
+        if edition_file.format.lower() != "epub":
+            return None
+        kepub_path = await ensure_kepub(
+            edition_file, is_fixed_layout=is_fixed_layout
+        )
+        if kepub_path:
+            await db.commit()
+        return kepub_path
+
+
+def schedule_kepub_conversion(edition_file_id: int) -> None:
+    """Fire-and-forget background conversion after import.
+
+    Uses ``asyncio.create_task`` so the importer commits and returns
+    immediately; conversion runs concurrently. Failures are swallowed
+    (logged) — the original EPUB is still served, and the bulk job /
+    next sync will retry.
+    """
+    async def _run():
+        try:
+            await convert_edition_file(edition_file_id)
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.warning("Auto KEPUB conversion failed for ef=%s: %s", edition_file_id, exc)
+
+    try:
+        asyncio.get_running_loop().create_task(_run())
+    except RuntimeError:
+        # No loop (shouldn't happen in our async-first stack); skip.
+        logger.debug("schedule_kepub_conversion: no running loop, skipping ef=%s", edition_file_id)
+
+
 async def ensure_kepub(edition_file, *, is_fixed_layout: bool = False) -> Optional[str]:
     """Ensure a KEPUB version exists for an EditionFile.
 

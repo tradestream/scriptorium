@@ -67,10 +67,16 @@ async def scan_library(library: Library, db: AsyncSession) -> ScanResult:
                 result.skipped += 1
                 continue
 
-            await _import_book(file_path, file_hash, library, db)
+            imported = await _import_book(file_path, file_hash, library, db)
             existing_hashes.add(file_hash)
             existing_paths.add(file_str)
             result.added += 1
+            # Pre-emptive KEPUB conversion (Kobo-first households). The
+            # file is already at its final library path here, so the
+            # cached kepub_path won't be invalidated by a later move.
+            if imported is not None:
+                _, edition, edition_file = imported
+                _schedule_kepub_for_edition_file(edition, edition_file)
         except Exception as exc:
             result.errors.append(f"{file_path.name}: {exc}")
 
@@ -82,13 +88,13 @@ async def scan_library(library: Library, db: AsyncSession) -> ScanResult:
 
 async def _import_book(
     file_path: Path, file_hash: str, library: Library, db: AsyncSession
-) -> "tuple[Work, Edition] | None":
+) -> "tuple[Work, Edition, EditionFile] | None":
     """Create Work + Edition + EditionFile records for a single file.
 
-    Also creates the legacy Book + BookFile rows for backward compatibility
-    during the transition period (until migration 0034 is run).
-
-    Returns (work, edition) on success, None if the file format is unrecognised.
+    Returns (work, edition, edition_file) on success, None if the file
+    format is unrecognised. The EditionFile is returned so callers can
+    chain follow-on work (KEPUB conversion, identifier extraction)
+    without re-fetching it.
     """
     fmt = metadata_service.detect_format(file_path)
     if fmt is None:
@@ -199,7 +205,7 @@ async def _import_book(
     except Exception:
         pass  # FTS indexing is non-critical; search will work without it
 
-    return work, edition
+    return work, edition, edition_file
 
 
 async def _get_or_create_entities(
@@ -231,6 +237,24 @@ async def _get_or_create_entities(
                     continue  # skip if still not found after rollback
         entities.append(entity)
     return entities
+
+
+def _schedule_kepub_for_edition_file(edition: "Edition", edition_file: "EditionFile") -> None:
+    """Schedule post-import KEPUB conversion if enabled and applicable.
+
+    Runs after the row is committed and the file is at its final
+    location. No-op for non-EPUB editions, fixed-layout EPUBs, or when
+    ``KEPUB_AUTO_CONVERT`` is disabled.
+    """
+    from app.config import get_settings as _gs
+    if not _gs().KEPUB_AUTO_CONVERT:
+        return
+    if (edition_file.format or "").lower() != "epub":
+        return
+    if edition.is_fixed_layout:
+        return
+    from app.services.kepub import schedule_kepub_conversion
+    schedule_kepub_conversion(edition_file.id)
 
 
 def _walk_books(root: Path):

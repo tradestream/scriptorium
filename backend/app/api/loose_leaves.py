@@ -193,19 +193,37 @@ async def import_book(
         return {"status": "duplicate", "message": "Book already exists in library"}
 
     try:
-        book = await _import_book(file_path, file_hash, library, db)
+        result = await _import_book(file_path, file_hash, library, db)
         await db.commit()
 
         # Move file to library directory
         dest = Path(library.path) / file_path.name
+        moved = False
         if not dest.exists():
             file_path.rename(dest)
+            moved = True
         else:
             file_path.unlink(missing_ok=True)
 
+        if result is not None:
+            _, edition, edition_file = result
+            # Re-point the row at the final library location *before*
+            # scheduling KEPUB conversion — the background task opens
+            # its own session and would otherwise try to convert the
+            # original (now-moved) Loose Leaves path.
+            if moved:
+                edition_file.file_path = str(dest)
+                edition_file.filename = dest.name
+                await db.commit()
+            if (edition_file.format or "").lower() == "epub" and not edition.is_fixed_layout:
+                from app.config import get_settings as _gs
+                if _gs().KEPUB_AUTO_CONVERT:
+                    from app.services.kepub import schedule_kepub_conversion
+                    schedule_kepub_conversion(edition_file.id)
+
         return {
             "status": "imported",
-            "book_id": book.id if book else None,
+            "book_id": result[1].id if result else None,
             "message": f"Imported into library '{library.name}'",
         }
     except Exception as exc:
@@ -261,15 +279,29 @@ async def bulk_import_books(
         try:
             result = await _import_book(file_path, file_hash, library, db)
             if result:
-                work, edition = result
+                work, edition, edition_file = result
                 await db.commit()
                 # Move file
                 dest = Path(library.path) / file_path.name
+                moved = False
                 if file_path.exists():
                     if dest.exists():
                         file_path.unlink(missing_ok=True)
                     else:
                         file_path.rename(dest)
+                        moved = True
+                # Re-point the row at the final library location before
+                # scheduling KEPUB conversion (background task opens its
+                # own session and would otherwise see the stale path).
+                if moved:
+                    edition_file.file_path = str(dest)
+                    edition_file.filename = dest.name
+                    await db.commit()
+                if (edition_file.format or "").lower() == "epub" and not edition.is_fixed_layout:
+                    from app.config import get_settings as _gs
+                    if _gs().KEPUB_AUTO_CONVERT:
+                        from app.services.kepub import schedule_kepub_conversion
+                        schedule_kepub_conversion(edition_file.id)
                 results.append({"filename": filename, "status": "imported", "book_id": edition.id, "library": library.name})
             else:
                 results.append({"filename": filename, "status": "unsupported_format"})

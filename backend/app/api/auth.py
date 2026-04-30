@@ -92,6 +92,7 @@ _QUERY_TOKEN_ALLOWED_PATHS = _re.compile(
     r"|books/\d+/files/\d+/pages(/\d+)?"
     r"|books/\d+/esoteric/export\.epub"
     r"|admin/backup"
+    r"|admin/kobo-fonts/bundle"
     r"|events/ws"
     r")/?$"
 )

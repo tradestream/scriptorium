@@ -1537,6 +1537,71 @@ export async function startBatchMarkdown(editionIds: number[], force = false): P
   });
 }
 
+// ── Bulk KEPUB Conversion ─────────────────────────────────────────────────────
+
+export interface BulkKepubJob {
+  job_id: string;
+  status: 'queued' | 'running' | 'done' | 'cancelled' | 'error';
+  total: number;
+  done: number;
+  failed: number;
+  current: string;
+  started_at: string;
+}
+
+export async function startBulkKepub(libraryId?: number): Promise<{ job_id: string; total: number; already_running?: boolean }> {
+  return fetchAPI('/admin/kepub/bulk', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ library_id: libraryId ?? null }),
+  });
+}
+
+export async function getBulkKepubJob(jobId: string): Promise<BulkKepubJob> {
+  return fetchAPI(`/admin/kepub/bulk/${jobId}`);
+}
+
+export async function getActiveBulkKepubJob(): Promise<BulkKepubJob | null> {
+  return fetchAPI('/admin/kepub/bulk/active');
+}
+
+export async function cancelBulkKepubJob(jobId: string): Promise<void> {
+  await fetchAPI(`/admin/kepub/bulk/${jobId}`, { method: 'DELETE' });
+}
+
+export async function getKepubifyHealth(): Promise<{ available: boolean; path: string | null; configured_path: string | null; version: string | null; fallback_in_use: boolean }> {
+  return fetchAPI('/admin/kepubify/health');
+}
+
+// ── Kobo Fonts (USB sideload bundle) ──────────────────────────────────────────
+
+export interface KoboFontStyle {
+  style: string;
+  filename: string;
+  size_bytes: number;
+}
+export interface KoboFontFamily {
+  family: string;
+  styles: KoboFontStyle[];
+}
+export interface KoboFontsListing {
+  available: boolean;
+  path: string;
+  families: KoboFontFamily[];
+  total_files: number;
+  total_bytes: number;
+}
+
+export async function listKoboFonts(): Promise<KoboFontsListing> {
+  return fetchAPI('/admin/kobo-fonts');
+}
+
+export function koboFontsBundleUrl(): string {
+  const token = getAuthToken();
+  const base = `${getApiBase()}/admin/kobo-fonts/bundle`;
+  return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+}
+
 export async function replaceEditionFile(editionId: number, fileId: number, file: File): Promise<{ file_id: number; edition_id: number; file_hash: string; file_size: number; status: string }> {
   const form = new FormData();
   form.append('file', file);

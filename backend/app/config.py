@@ -69,6 +69,18 @@ class Settings(BaseSettings):
     #   KEPUBIFY_PATH=/usr/local/bin/kepubify
     KEPUBIFY_PATH: str | None = None
 
+    # When True (the default — Kobo-first households), every imported
+    # EPUB is converted to KEPUB after the row is committed, so Kobo
+    # sync never has to convert on the hot path. Disable to keep the
+    # legacy lazy behaviour (convert on first sync).
+    KEPUB_AUTO_CONVERT: bool = True
+
+    # Directory containing user-curated TTF/OTF files served by the
+    # "Kobo Fonts" admin page as a downloadable bundle. Stock Kobos
+    # don't accept fonts over the sync API — users plug in via USB and
+    # extract the bundle into the device's ``.fonts/`` folder.
+    KOBO_FONTS_PATH: str = "personal/Kobo Fonts"
+
     # Public-facing base URL for client-facing links (OPDS, Kobo sync,
     # DiViNa manifests). When set, this is the canonical answer and
     # ``X-Forwarded-*`` headers are ignored — pin it in production

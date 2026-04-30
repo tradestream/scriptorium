@@ -177,7 +177,7 @@ class IngestService:
                     db.add(IngestLog(filename=file_path.name, status='error', error_message='Unsupported format'))
                     await db.commit()
                     return
-                work, edition = result
+                work, edition, edition_file = result
                 book = edition  # alias for downstream code
                 logger.info("Ingested %s into library '%s'", file_path.name, library.name)
                 db.add(IngestLog(filename=file_path.name, status='imported'))
@@ -312,6 +312,15 @@ class IngestService:
                             ef.file_path = _to_container(dest)
                             ef.filename = dest.name
                             await db.commit()
+
+                # Pre-emptive KEPUB conversion. Scheduled here (after
+                # the move + commit) so the cached kepub_path matches
+                # the file's final library location.
+                if edition_file is not None and edition is not None:
+                    if (edition_file.format or "").lower() == "epub" and not edition.is_fixed_layout:
+                        if settings.KEPUB_AUTO_CONVERT:
+                            from app.services.kepub import schedule_kepub_conversion
+                            schedule_kepub_conversion(edition_file.id)
         except Exception as exc:
             logger.error("Error processing %s: %s", file_path.name, exc)
             try:
