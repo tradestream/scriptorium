@@ -28,8 +28,9 @@ class CoverService:
         if not cover_bytes:
             return None, None, None
         try:
-            from PIL import Image
             import io
+
+            from PIL import Image
 
             img = Image.open(io.BytesIO(cover_bytes))
             img_format = (img.format or "JPEG").lower()

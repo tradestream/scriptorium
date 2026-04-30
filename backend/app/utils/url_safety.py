@@ -18,7 +18,6 @@ import socket
 from typing import Iterable
 from urllib.parse import urlparse
 
-
 _ALLOWED_SCHEMES: frozenset[str] = frozenset({"http", "https"})
 
 

@@ -48,15 +48,13 @@ Usage:
     edition.export_pdf("republic_study.pdf")
 """
 
-import os
-import re
-import uuid
 import html
+import re
 import textwrap
-from datetime import datetime
+import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Optional
-
 
 # ---------------------------------------------------------------------------
 # SMART TYPOGRAPHY (inspired by Crowbook)
@@ -106,7 +104,7 @@ def smart_typography(text: str, language: str = "en") -> str:
     # Opening single quote: after whitespace before word
     text = re.sub(r"(^|[\s(\[{])'(\S)", rf"\1{LSQ}\2", text)
     # Closing single quote
-    text = re.sub(rf"(\S)'([\s)\]}},.:;!?]|$)", rf"\1{RSQ}\2", text)
+    text = re.sub(r"(\S)'([\s)\]},.:;!?]|$)", rf"\1{RSQ}\2", text)
 
     # French typography: non-breaking space before : ; ? !
     if language.startswith("fr"):
@@ -1339,6 +1337,7 @@ def build_study_edition_from_analysis(
     """
     import sqlite3
     import tempfile
+
     from app.services.background_jobs import _get_sync_db_path
 
     db_path = _get_sync_db_path()

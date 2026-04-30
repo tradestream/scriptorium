@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.database import get_db
-from app.models.article import Article, ArticleHighlight, ArticleTag
+from app.models.article import Article, ArticleHighlight
 from app.models.user import User
 
 from .auth import get_current_user
@@ -82,8 +82,8 @@ async def link_instapaper(
     current_user: User = Depends(get_current_user),
 ):
     """Link Instapaper account. Validates via Simple API, upgrades to Full API if consumer keys configured."""
-    from app.services.instapaper import InstapaperSimpleClient
     from app.config import get_settings
+    from app.services.instapaper import InstapaperSimpleClient
 
     # Validate credentials via Simple API
     client = InstapaperSimpleClient(data.username, data.password)

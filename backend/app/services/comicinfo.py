@@ -147,8 +147,9 @@ async def apply_comicinfo(work, edition, comicinfo: dict, db) -> bool:
     Returns True if any field was changed.
     """
     from sqlalchemy import select
-    from app.models.comic import Publisher, Imprint, StoryArc, StoryArcEntry
+
     from app.models import Author
+    from app.models.comic import Imprint, Publisher, StoryArc, StoryArcEntry
 
     changed = False
 

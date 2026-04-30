@@ -7,9 +7,8 @@ Inspired by Calibre-Web's kobo_sync_status.py. Handles:
 """
 
 import logging
-from typing import Optional
 
-from sqlalchemy import and_, delete, select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -23,9 +22,9 @@ async def update_sync_shelves(user_id: int, db: AsyncSession) -> dict:
 
     Returns: {"removed": int, "archived": int}
     """
+    from app.models.edition import Edition
     from app.models.progress import KoboSyncedBook, KoboSyncToken
     from app.models.shelf import Shelf, ShelfBook
-    from app.models.edition import Edition
 
     removed = 0
     archived = 0
@@ -90,9 +89,9 @@ async def on_book_removed_from_shelf(
     Checks if the book is still on any other sync shelf; if not,
     removes it from KoboSyncedBooks so the device gets a removal event.
     """
-    from app.models.shelf import Shelf, ShelfBook
     from app.models.edition import Edition
     from app.models.progress import KoboSyncedBook, KoboSyncToken
+    from app.models.shelf import Shelf, ShelfBook
 
     # Check: is the book still on any other sync shelf?
     still_synced = await db.execute(

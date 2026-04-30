@@ -357,10 +357,11 @@ async def export_annotated_html(
 
 # ── Citation Export ──────────────────────────────────────────────────────────
 
+from fastapi.responses import PlainTextResponse
+
 from app.api.books import _edition_options
 from app.models.edition import Edition
 from app.models.work import Work
-from fastapi.responses import PlainTextResponse
 
 
 def _bibtex_entry(edition: Edition) -> str:

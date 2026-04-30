@@ -7,7 +7,6 @@ Flesch-Kincaid Grade Level formula:
 
 import logging
 import re
-from pathlib import Path
 
 logger = logging.getLogger("scriptorium.reading_level")
 
@@ -75,11 +74,10 @@ async def compute_reading_level(work_id: int) -> dict:
     """
     from sqlalchemy import select
     from sqlalchemy.orm import joinedload
+
     from app.database import get_session_factory
     from app.models.work import Work
-    from app.models.edition import Edition
     from app.services.markdown import has_cached_markdown, markdown_path_for
-    from app.config import get_settings
 
     factory = get_session_factory()
     async with factory() as db:

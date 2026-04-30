@@ -29,7 +29,6 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-
 # Heuristic chapter-text length used when translating between a koboSpan
 # index inside a chapter and a CFI char offset (and vice versa). Real
 # chapter lengths vary widely; a fixed 5000 is the same heuristic

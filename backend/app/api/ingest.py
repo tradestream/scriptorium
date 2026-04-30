@@ -30,8 +30,7 @@ async def get_ingest_status(
             detail="Only admins can view ingest status",
         )
 
-    status = await ingest_service.get_ingest_status()
-    return status
+    return await ingest_service.get_ingest_status()
 
 
 @router.post("/trigger")

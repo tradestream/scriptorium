@@ -15,7 +15,6 @@ import hmac
 import logging
 import time
 import urllib.parse
-from typing import Optional
 
 import httpx
 
@@ -257,11 +256,13 @@ async def sync_articles(user_id: int) -> dict:
     Imports new bookmarks, updates progress on existing ones, imports highlights.
     Returns counts of created/updated/highlights.
     """
-    from sqlalchemy import select
-    from app.database import get_session_factory
-    from app.models.user import User
-    from app.models.article import Article, ArticleHighlight
     from urllib.parse import urlparse
+
+    from sqlalchemy import select
+
+    from app.database import get_session_factory
+    from app.models.article import Article, ArticleHighlight
+    from app.models.user import User
 
     factory = get_session_factory()
     async with factory() as db:

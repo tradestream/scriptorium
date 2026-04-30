@@ -3,12 +3,21 @@
 from datetime import datetime
 from typing import Optional
 
-import sqlalchemy as sa
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Table, Text, func
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Table,
+    Text,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models import Base
-
 
 # ── Association tables ────────────────────────────────────────────────────────
 

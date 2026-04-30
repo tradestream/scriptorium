@@ -5,17 +5,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.database import get_db
 from app.models import Book, User
-from app.models.edition import Edition, EditionFile
-from app.models.work import Work
 from app.models.analysis import AnalysisTemplate, BookAnalysis
+from app.models.edition import Edition
+from app.models.work import Work
 from app.schemas.analysis import (
     AnalysisRequest,
     AnalysisTemplateCreate,
@@ -310,17 +310,18 @@ async def delete_template(
 
 # --- Computational (Esoteric) Analysis Endpoints ---
 
+import json
+
 from app.models.analysis import ComputationalAnalysis
-from app.services.text_extraction import extract_text_from_book
 from app.services.esoteric import (
     EsotericAnalysisConfig,
-    run_full_esoteric_analysis,
+    analyze_exoteric_esoteric_ratio,
     detect_loud_silences,
     hunt_contradictions,
     locate_centers,
-    analyze_exoteric_esoteric_ratio,
+    run_full_esoteric_analysis,
 )
-import json
+from app.services.text_extraction import extract_text_from_book
 
 
 class ComputationalAnalysisRequest(BaseModel):
@@ -476,7 +477,7 @@ async def run_computational_analysis(
             r = detect_hedging_language(text, config.delimiter_pattern, config.context_window)
             results = r.to_dict()
         elif request.analysis_type == "engine_v2":
-            from app.services.esoteric_engine import run_esoteric_analysis_v2, TextMetadata
+            from app.services.esoteric_engine import TextMetadata, run_esoteric_analysis_v2
             meta = TextMetadata()
             results = run_esoteric_analysis_v2(text, meta)
         elif request.analysis_type == "self_reference":
@@ -585,6 +586,7 @@ async def export_esoteric_epub(
 ):
     """Export all esoteric analyses for a book as a downloadable EPUB."""
     from fastapi.responses import Response
+
     from app.services.analysis_export import build_analysis_epub
 
     await assert_edition_access(db, current_user, book_id)
@@ -649,11 +651,12 @@ async def export_esoteric_to_library(
     Creates a new edition with the analysis EPUB and adds it to an
     "Esoteric Analyses" shelf (auto-created, Kobo-synced).
     """
-    from app.services.analysis_export import build_analysis_epub
+    import uuid as _uuid
+
+    from app.config import get_settings
     from app.models.edition import Edition, EditionFile
     from app.models.shelf import Shelf, ShelfBook
-    from app.config import get_settings
-    import uuid as _uuid
+    from app.services.analysis_export import build_analysis_epub
 
     if not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Admin only")
@@ -776,9 +779,10 @@ async def export_esoteric_to_library(
 
 # ── Per-book esoteric enablement ──────────────────────────────────────────────
 
-from pydantic import BaseModel as _BaseModel
-from typing import Optional as _Optional
 from datetime import datetime as _datetime
+from typing import Optional as _Optional
+
+from pydantic import BaseModel as _BaseModel
 
 
 class EsotericToggle(_BaseModel):
@@ -812,6 +816,7 @@ async def enable_esoteric_for_author(
     if not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
     from sqlalchemy.orm import joinedload as _jl
+
     from app.models.book import Author
     result = await db.execute(
         select(Author).options(_jl(Author.books)).where(Author.id == author_id)

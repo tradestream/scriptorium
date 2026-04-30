@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional
 from xml.etree import ElementTree as ET
 
-from app.utils.isbn import clean as isbn_clean, validate_isbn13_checksum, validate_isbn10_checksum, isbn10_to_isbn13
+from app.utils.isbn import isbn10_to_isbn13, validate_isbn10_checksum, validate_isbn13_checksum
 
 logger = logging.getLogger("scriptorium.opf")
 
@@ -108,7 +108,7 @@ def _fix_author_name(name: str) -> str:
     """Convert 'Last, First' to 'First Last'."""
     name = name.strip()
     parts = [p.strip() for p in name.split(",")]
-    if len(parts) == 2 and parts[1] and not " " in parts[0]:
+    if len(parts) == 2 and parts[1] and " " not in parts[0]:
         return f"{parts[1]} {parts[0]}"
     return name
 
@@ -212,12 +212,14 @@ async def extract_embedded_metadata_for_edition(edition_id: int) -> dict:
     Returns dict of fields that were found and applied.
     """
     import asyncio
+
     from sqlalchemy import select
     from sqlalchemy.orm import joinedload
+
     from app.database import get_session_factory
+    from app.models.book import Author
     from app.models.edition import Edition
     from app.models.work import Work
-    from app.models.book import Author
 
     factory = get_session_factory()
 
@@ -270,7 +272,7 @@ async def extract_embedded_metadata_for_edition(edition_id: int) -> dict:
                 timeout=10.0,
             )
         elif fmt in ("cbz", "cbr"):
-            from app.services.comicinfo import parse_comicinfo_from_cbz, parse_comicinfo_from_cbr
+            from app.services.comicinfo import parse_comicinfo_from_cbr, parse_comicinfo_from_cbz
             parser = parse_comicinfo_from_cbz if fmt == "cbz" else parse_comicinfo_from_cbr
             comicinfo = await asyncio.get_event_loop().run_in_executor(None, parser, str(fpath))
             if comicinfo:

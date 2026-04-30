@@ -1,14 +1,15 @@
-from typing import Optional
+# Forward reference — Work is defined in work.py and imported after Base is set up.
+# TYPE_CHECKING import avoids circular imports at runtime.
+from typing import TYPE_CHECKING, Optional
 
-import sqlalchemy as sa
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Table, Text, func
+from sqlalchemy import (
+    String,
+    Text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models import Base
 
-# Forward reference — Work is defined in work.py and imported after Base is set up.
-# TYPE_CHECKING import avoids circular imports at runtime.
-from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.models.work import Work
 
@@ -17,8 +18,8 @@ if TYPE_CHECKING:
 # These aliases let existing import sites continue to compile while the
 # individual API files are updated to use Edition/Work directly.
 # Remove these once all callers have been migrated.
-from app.models.edition import Edition as Book, EditionFile as BookFile, EditionContributor as BookContributor  # noqa: F401, E402
-from app.models.work import work_authors as book_authors, work_tags as book_tags, work_series as book_series  # noqa: F401, E402
+from app.models.edition import Edition as Book  # noqa: F401, E402
+from app.models.work import work_authors as book_authors  # noqa: F401, E402
 
 
 class Author(Base):

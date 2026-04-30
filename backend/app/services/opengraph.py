@@ -7,7 +7,6 @@ from publisher pages, Goodreads, Amazon, etc.
 
 import logging
 import re
-from typing import Optional
 
 import httpx
 

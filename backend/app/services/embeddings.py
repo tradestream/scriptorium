@@ -13,7 +13,7 @@ import logging
 import math
 from typing import Optional
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -82,8 +82,9 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
 
 async def index_work(db: AsyncSession, work_id: int) -> bool:
     """Generate and store embedding + search_text for a work."""
-    from app.models.work import Work
     from sqlalchemy.orm import joinedload
+
+    from app.models.work import Work
 
     result = await db.execute(
         select(Work).where(Work.id == work_id)

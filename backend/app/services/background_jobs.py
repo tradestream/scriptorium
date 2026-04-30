@@ -123,6 +123,7 @@ async def get_job_status(job_id: str) -> str | None:
 # ── Sync versions for background threads ─────────────────────────
 
 import sqlite3
+
 from app.config import get_settings
 
 

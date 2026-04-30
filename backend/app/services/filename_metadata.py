@@ -164,10 +164,11 @@ async def extract_and_apply(edition_id: int, min_confidence: str = "medium") -> 
 
     from sqlalchemy import select
     from sqlalchemy.orm import joinedload
+
     from app.database import get_session_factory
-    from app.models.edition import Edition, EditionFile
-    from app.models.work import Work
     from app.models.book import Author
+    from app.models.edition import Edition
+    from app.models.work import Work
 
     factory = get_session_factory()
     async with factory() as db:

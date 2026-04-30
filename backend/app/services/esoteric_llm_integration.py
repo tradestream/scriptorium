@@ -5,7 +5,6 @@ rather than generating analysis from scratch. This produces much more targeted
 and grounded esoteric readings.
 """
 
-import json
 import logging
 from typing import Optional
 
@@ -367,7 +366,7 @@ def _format_computational_findings(results: dict) -> str:
     # Lexical density
     lex = results.get("lexical_density", {})
     if isinstance(lex, dict) and lex.get("high_density_sections"):
-        parts.append(f"\n**High Lexical Density (most carefully written):**")
+        parts.append("\n**High Lexical Density (most carefully written):**")
         for d in lex["high_density_sections"][:3]:
             parts.append(f"- Section {d.get('section', '?')} (TTR: {_tag(d.get('type_token_ratio', 0), _RATIO_BANDS)}): {d.get('excerpt', '')[:60]}...")
 
@@ -391,7 +390,7 @@ def _format_computational_findings(results: dict) -> str:
         first = fl.get("overall_first_sentence", "")
         last = fl.get("overall_last_sentence", "")
         if first or last:
-            parts.append(f"\n**Opening/Closing:**")
+            parts.append("\n**Opening/Closing:**")
             if first:
                 parts.append(f"- First: {first[:100]}...")
             if last:

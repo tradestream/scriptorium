@@ -6,19 +6,29 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from fastapi.responses import FileResponse
 from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.database import get_db
-from app.models import Author, Edition, EditionFile, EditionContributor, Library, Shelf, ShelfBook, Tag, Series, User
-from app.models.work import Work, WorkContributor, work_series
-from app.models.work import work_authors, work_tags
+from app.models import (
+    Author,
+    Edition,
+    EditionContributor,
+    EditionFile,
+    Library,
+    Series,
+    Shelf,
+    ShelfBook,
+    Tag,
+    User,
+)
+from app.models.work import Work, WorkContributor, work_authors, work_series, work_tags
 from app.schemas.book import BookCreate, BookListResponse, BookRead, BookUpdate
 from app.schemas.shelf import ShelfRead
-from app.utils.files import calculate_file_hash, get_file_format, get_file_size, is_book_file
+from app.utils.files import calculate_file_hash, get_file_format, get_file_size
 
 from .auth import assert_library_access, get_accessible_library_ids, get_current_user
 
@@ -727,12 +737,13 @@ async def set_cover_from_url(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
 
     import httpx
+
     from app.utils.url_safety import (
-        assert_safe_url,
-        safe_redirect_chain,
-        fetch_capped,
         BodyTooLargeError,
         UnsafeURLError,
+        assert_safe_url,
+        fetch_capped,
+        safe_redirect_chain,
     )
     try:
         assert_safe_url(data.url)
@@ -845,6 +856,7 @@ async def enrich_book_metadata_stream(
 ):
     """Stream metadata enrichment results per-provider via Server-Sent Events."""
     import json as _json
+
     from starlette.responses import StreamingResponse
 
     if not current_user.is_admin:
@@ -966,8 +978,8 @@ async def enrich_book_from_url(
     if not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
 
-    from app.services.opengraph import extract_from_url
     from app.services.covers import cover_service
+    from app.services.opengraph import extract_from_url
 
     stmt = select(Edition).where(Edition.id == book_id).options(*_edition_options())
     result = await db.execute(stmt)
@@ -1010,7 +1022,8 @@ async def enrich_book_from_url(
     if meta.get("image_url") and not edition.cover_hash:
         try:
             import httpx
-            from app.utils.url_safety import assert_safe_url, safe_redirect_chain, fetch_capped
+
+            from app.utils.url_safety import assert_safe_url, fetch_capped, safe_redirect_chain
             assert_safe_url(meta["image_url"])
             async with httpx.AsyncClient(
                 timeout=15.0,
@@ -1267,9 +1280,9 @@ async def get_divina_manifest(
         raise HTTPException(status_code=404, detail="Book not found")
     await assert_library_access(db, current_user, edition.library_id)
 
+    from app.models.page_inventory import EditionFilePage
     from app.services.divina import generate_divina_manifest
     from app.utils.request_url import public_base_url
-    from app.models.page_inventory import EditionFilePage
     base_url = public_base_url(request)
 
     # Pull cached page filenames from the inventory; falls through to a
@@ -1371,6 +1384,7 @@ async def get_comic_page(
 
     import io
     import zipfile
+
     from fastapi.responses import StreamingResponse
 
     # Hardening against malicious comic archives:
@@ -1468,8 +1482,8 @@ async def convert_book_file(
     if not edition_file:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
-    from app.services.conversion import conversion_service
     from app.config import resolve_path as _rp
+    from app.services.conversion import conversion_service
     input_path = Path(_rp(edition_file.file_path))
     if not input_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on disk")
@@ -1759,8 +1773,9 @@ async def _apply_enrichment(
     if enriched.get("cover_url") and _want("cover", edition.cover_hash):
         try:
             import httpx as _httpx
+
             from app.services.covers import cover_service
-            from app.utils.url_safety import assert_safe_url, safe_redirect_chain, fetch_capped
+            from app.utils.url_safety import assert_safe_url, fetch_capped, safe_redirect_chain
             assert_safe_url(enriched["cover_url"])
             async with _httpx.AsyncClient(
                 timeout=15.0,

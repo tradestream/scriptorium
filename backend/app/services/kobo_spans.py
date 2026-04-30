@@ -40,7 +40,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.kobo_span import KoboSpanMap
 
-
 _OPF_NS = {
     "opf": "http://www.idpf.org/2007/opf",
     "dc": "http://purl.org/dc/elements/1.1/",

@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from app.config import get_settings
 from app.models.user import User
-from app.services.background_jobs import create_job, get_job, update_job, get_job_status
+from app.services.background_jobs import create_job, get_job, get_job_status, update_job
 
 from .auth import get_current_user
 
@@ -127,7 +127,8 @@ async def abs_sync_covers(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="AudiobookShelf not configured")
 
     # Count how many editions will be processed
-    from sqlalchemy import select, func
+    from sqlalchemy import func, select
+
     from app.database import get_session_factory
     from app.models.edition import Edition
 
@@ -158,10 +159,11 @@ async def get_cover_sync_job(
 async def _run_cover_sync(job_id: str, overwrite: bool) -> None:
     """Background task: fetch ABS covers one by one, updating job state."""
     from sqlalchemy import select
+
     from app.database import get_session_factory
     from app.models.edition import Edition
-    from app.services.audiobookshelf import _get_client, _fetch_abs_cover
     from app.services import covers as cover_service
+    from app.services.audiobookshelf import _fetch_abs_cover, _get_client
 
     await update_job(job_id, status="running")
 
@@ -216,12 +218,10 @@ async def abs_link_book(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
 
     from sqlalchemy import select
-    from app.database import get_db
-    from fastapi import Request
-    from app.models.book import Book
 
     # Use get_db via dependency manually
     from app.database import get_session_factory
+    from app.models.book import Book
     factory = get_session_factory()
     async with factory() as db:
         result = await db.execute(select(Book).where(Book.id == req.book_id))
@@ -243,6 +243,7 @@ async def abs_unlink_book(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
 
     from sqlalchemy import select
+
     from app.database import get_session_factory
     from app.models.book import Book
 

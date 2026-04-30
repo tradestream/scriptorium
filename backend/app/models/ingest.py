@@ -1,7 +1,9 @@
 from datetime import datetime
 from typing import Optional
+
 from sqlalchemy import DateTime, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
+
 from app.models import Base
 
 

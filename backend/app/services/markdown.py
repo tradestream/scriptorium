@@ -92,8 +92,9 @@ async def generate_markdown(edition_id: int) -> str | None:
     """
     from sqlalchemy import select
     from sqlalchemy.orm import joinedload
+
     from app.database import get_session_factory
-    from app.models.edition import Edition, EditionFile
+    from app.models.edition import Edition
     from app.models.work import Work
     from app.services.text_extraction import (
         _extract_epub_markdown,
@@ -188,12 +189,12 @@ async def generate_markdown(edition_id: int) -> str | None:
 def generate_markdown_sync(edition_id: int) -> str | None:
     """Sync version for background threads. Uses sqlite3 directly."""
     import sqlite3
+
+    from app.services.background_jobs import _get_sync_db_path
     from app.services.text_extraction import (
         _extract_epub_markdown_sync,
-        _extract_pdf_pdfplumber_sync,
         optimize_for_llm,
     )
-    from app.services.background_jobs import _get_sync_db_path
 
     db_path = _get_sync_db_path()
     conn = sqlite3.connect(db_path)
@@ -293,8 +294,9 @@ def generate_markdown_sync(edition_id: int) -> str | None:
 async def _extract_mobi_via_epub(path: Path) -> str | None:
     """Extract markdown from MOBI/AZW by converting to EPUB first."""
     try:
-        from app.services.conversion import _mobi_to_epub
         import tempfile
+
+        from app.services.conversion import _mobi_to_epub
 
         with tempfile.NamedTemporaryFile(suffix=".epub", delete=False) as tmp:
             tmp_path = Path(tmp.name)

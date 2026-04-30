@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -17,9 +16,15 @@ from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.models import Edition, EditionContributor, EditionFile, Loan, User, Work
 from app.schemas.edition import (
-    EditionCreate, EditionRead, EditionUpdate, EditionWithWorkRead,
-    LoanCreate, LoanRead, LoanUpdate,
-    UserEditionRead, UserEditionUpdate,
+    EditionCreate,
+    EditionRead,
+    EditionUpdate,
+    EditionWithWorkRead,
+    LoanCreate,
+    LoanRead,
+    LoanUpdate,
+    UserEditionRead,
+    UserEditionUpdate,
 )
 from app.schemas.work import WorkRead
 
@@ -462,7 +467,7 @@ async def upsert_user_edition(
     convert it to a pct.
     """
     from app.models.progress import Device
-    from app.models.reading import EditionPosition, ReadingState
+    from app.models.reading import EditionPosition
     from app.services.unified_progress import write_progress
 
     edition = await db.get(Edition, edition_id)

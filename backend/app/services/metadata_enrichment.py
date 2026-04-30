@@ -924,6 +924,7 @@ class StoryGraphProvider(Provider):
         try:
             import asyncio
             import json as _j
+
             from storygraph_api import Book as SGBook
             sg = SGBook()
             query = f"{title} {authors[0]}" if authors else title

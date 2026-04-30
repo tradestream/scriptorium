@@ -11,7 +11,12 @@ from app.database import get_db
 from app.models import Book, User
 from app.models.annotation import Annotation
 from app.models.work import Work
-from app.schemas.annotation import AnnotationCreate, AnnotationRead, AnnotationUpdate, AnnotationWithBook
+from app.schemas.annotation import (
+    AnnotationCreate,
+    AnnotationRead,
+    AnnotationUpdate,
+    AnnotationWithBook,
+)
 
 router = APIRouter(prefix="/annotations", tags=["annotations"])
 

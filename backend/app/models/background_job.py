@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from sqlalchemy import String, Integer, Text
+from sqlalchemy import Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models import Base

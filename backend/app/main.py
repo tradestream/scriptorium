@@ -81,10 +81,11 @@ async def lifespan(app: FastAPI):
 
     # Load DB-backed enrichment key overrides into memory
     try:
+        from sqlalchemy import select as _sel
+
         from app.database import get_session_factory
         from app.models.system import SystemSettings
         from app.services.metadata_enrichment import apply_enrichment_key_overrides
-        from sqlalchemy import select as _sel
         _factory = get_session_factory()
         async with _factory() as _db:
             _ss = await _db.scalar(_sel(SystemSettings).where(SystemSettings.id == 1))
@@ -106,7 +107,8 @@ async def lifespan(app: FastAPI):
     logger.info("Ingest service started")
     # Delay startup scan to avoid race with other workers; use a lock file
     async def _deferred_scan():
-        import tempfile, os
+        import os
+        import tempfile
         lock = Path(tempfile.gettempdir()) / "scriptorium_ingest_scan.lock"
         try:
             # Only one worker gets the lock
@@ -130,7 +132,9 @@ async def lifespan(app: FastAPI):
     # re-queue every restart. Gated on KEPUB_AUTO_CONVERT so households
     # that don't want pre-conversion can opt out.
     async def _deferred_kepub_backfill():
-        import tempfile, os
+        import os
+        import tempfile
+
         from app.config import get_settings as _gs
         if not _gs().KEPUB_AUTO_CONVERT:
             return
@@ -145,12 +149,13 @@ async def lifespan(app: FastAPI):
             # settle; backfill is opportunistic, not urgent.
             await asyncio.sleep(10)
 
-            from app.database import get_session_factory
-            from app.models.system import SystemSettings
-            from app.models.edition import Edition, EditionFile
-            from app.services.background_jobs import create_job, get_active_job
+            from sqlalchemy import select
+
             from app.api.admin import _run_bulk_kepub
-            from sqlalchemy import select, func
+            from app.database import get_session_factory
+            from app.models.edition import Edition, EditionFile
+            from app.models.system import SystemSettings
+            from app.services.background_jobs import create_job, get_active_job
 
             factory = get_session_factory()
             async with factory() as db:
@@ -292,6 +297,7 @@ def create_app() -> FastAPI:
         Lighter than WebSocket — no bidirectional channel needed.
         """
         import json as _json
+
         from starlette.responses import StreamingResponse
 
         async def event_generator():

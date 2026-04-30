@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -10,7 +10,6 @@ from app.models.annotation import Annotation
 from app.models.article import Article
 from app.models.edition import Edition
 from app.models.marginalium import Marginalium
-from app.models.work import Work
 from app.schemas.book import BookListResponse, BookRead
 from app.services.search import search_service
 
@@ -91,7 +90,6 @@ async def unified_search(
     ann_book_ids = list({a.edition_id for a in ann_rows})
     ann_books = {}
     if ann_book_ids:
-        from app.api.books import _edition_options
         bk_result = await db.execute(
             select(Edition).options(joinedload(Edition.work)).where(Edition.id.in_(ann_book_ids))
         )

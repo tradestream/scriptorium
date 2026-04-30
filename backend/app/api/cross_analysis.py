@@ -3,16 +3,16 @@
 import json
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.api.auth import get_current_user
 from app.database import get_db
 from app.models import Book, User
-from app.models.analysis import ComputationalAnalysis, BookAnalysis
+from app.models.analysis import BookAnalysis, ComputationalAnalysis
 from app.models.work import Work
 
 router = APIRouter(prefix="/cross-analysis", tags=["cross-analysis"])

@@ -7,7 +7,6 @@ Cover spec: 800x1224px (3:4 ratio) PNG, per kobolabs/epub-spec.
 import hashlib
 import logging
 from io import BytesIO
-from pathlib import Path
 from typing import Optional
 
 import httpx
@@ -24,7 +23,7 @@ COVER_HEIGHT = 1224
 def _build_cover_prompt(title: str, author: str, description: str = "", genre: str = "") -> str:
     """Build a prompt for AI cover generation."""
     parts = [
-        f"Generate a book cover image for:",
+        "Generate a book cover image for:",
         f"Title: {title}",
         f"Author: {author}",
     ]
@@ -250,6 +249,7 @@ async def generate_cover_for_edition(
     Returns PNG bytes.
     """
     import sqlite3
+
     from app.services.background_jobs import _get_sync_db_path
 
     db_path = _get_sync_db_path()

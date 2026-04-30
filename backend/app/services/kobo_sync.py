@@ -19,20 +19,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from sqlalchemy import and_, select, func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.config import get_settings
-from app.models import Book, BookFile, Edition, EditionFile, Library, User, Work
+from app.models import Book, BookFile, Edition, EditionFile, Library, Work
 from app.models.progress import (
     Device,
-    KoboShelfArchive,
     KoboSyncedBook,
     KoboSyncToken,
     KoboTokenShelf,
 )
-from app.models.shelf import Shelf, ShelfBook
+from app.models.shelf import ShelfBook
 
 logger = logging.getLogger(__name__)
 
@@ -405,7 +403,8 @@ async def get_sync_payload(
         editions = editions[:SYNC_PAGE_SIZE]
 
     # Batch-fetch unified progress rows for these editions (and their works).
-    from app.models.reading import EditionPosition as _EP, ReadingState as _RS
+    from app.models.reading import EditionPosition as _EP
+    from app.models.reading import ReadingState as _RS
 
     edition_ids = [e.id for e in editions]
     work_ids = [e.work_id for e in editions if e.work_id is not None]

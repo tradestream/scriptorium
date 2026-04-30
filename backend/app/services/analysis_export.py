@@ -9,15 +9,12 @@ Follows Kobo EPUB spec (https://github.com/kobolabs/epub-spec):
 - Passes EPUBCheck validation
 """
 
-import json
 import uuid
 import zipfile
 from datetime import datetime
 from html import escape
 from io import BytesIO
-from pathlib import Path
 from typing import Optional
-
 
 CONTAINER_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">

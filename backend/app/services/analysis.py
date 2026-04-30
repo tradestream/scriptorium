@@ -10,9 +10,9 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Book, BookFile
+from app.models import Book
 from app.models.analysis import AnalysisTemplate, BookAnalysis, BookPromptConfig
-from app.services.llm import LLMProvider, get_llm_provider
+from app.services.llm import get_llm_provider
 from app.services.text_extraction import extract_text_from_book
 
 logger = logging.getLogger(__name__)
@@ -323,6 +323,7 @@ async def run_analysis(
     """
     # Fetch the book (eagerly load rels needed by extract_text_from_book)
     from sqlalchemy.orm import joinedload
+
     from app.models.work import Work
     stmt = (
         select(Book)

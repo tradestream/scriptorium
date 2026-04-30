@@ -1,4 +1,3 @@
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -346,6 +345,7 @@ async def get_shelf_books(
 
     if shelf.is_smart and shelf.smart_filter:
         import json
+
         from app.schemas.book import BookRead
 
         try:

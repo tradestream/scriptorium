@@ -10,10 +10,9 @@ Inspired by Benardete's "argument of the action" — the meaning emerges
 through the sequence, not from a static overview.
 """
 
-import json
 import logging
 import re
-from collections import Counter, defaultdict
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Optional
 

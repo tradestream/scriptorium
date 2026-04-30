@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, File, status
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -497,8 +497,10 @@ async def export_cbl(
 ) -> Response:
     """Export a reading list as CBL XML for Kavita / Komga import."""
     from xml.sax.saxutils import escape
+
     from app.models.book import Series
-    from app.models.work import Work, work_series as work_series_table
+    from app.models.work import Work
+    from app.models.work import work_series as work_series_table
 
     rl = await _get_or_404(list_id, current_user.id, db)
 
@@ -617,8 +619,10 @@ async def import_cbl(
     miss count).
     """
     import xml.etree.ElementTree as ET
+
     from app.models.book import Series
-    from app.models.work import Work, work_series as work_series_table
+    from app.models.work import Work
+    from app.models.work import work_series as work_series_table
 
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename")

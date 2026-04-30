@@ -10,9 +10,14 @@ import logging
 import re
 import zipfile
 from pathlib import Path
-from typing import Optional
 
-from app.utils.isbn import clean as isbn_clean, is_isbn10, is_isbn13, validate_isbn10_checksum, validate_isbn13_checksum, isbn10_to_isbn13, isbn13_to_isbn10
+from app.utils.isbn import clean as isbn_clean
+from app.utils.isbn import (
+    isbn10_to_isbn13,
+    isbn13_to_isbn10,
+    validate_isbn10_checksum,
+    validate_isbn13_checksum,
+)
 
 logger = logging.getLogger("scriptorium.identifiers")
 
@@ -385,11 +390,12 @@ async def extract_identifiers_for_edition(edition_id: int) -> dict:
     Returns the extraction result dict.
     """
     import asyncio
+
     from sqlalchemy import select
     from sqlalchemy.orm import joinedload
+
     from app.database import get_session_factory
-    from app.models.edition import Edition, EditionFile
-    from app.models.work import Work
+    from app.models.edition import Edition
 
     factory = get_session_factory()
 

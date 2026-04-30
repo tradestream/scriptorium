@@ -42,7 +42,8 @@ class IngestService:
     async def _watch_loop(self):
         """Inner loop: use watchfiles to detect new/modified files."""
         try:
-            from watchfiles import awatch, Change
+            from watchfiles import Change, awatch
+
             from app.services.exclude_patterns import build_matcher, is_excluded
 
             # Ingest isn't tied to a library, so we apply only the
@@ -90,11 +91,12 @@ class IngestService:
         2. INGEST_DEFAULT_LIBRARY env var
         3. First active library
         """
+        from sqlalchemy import func, select
+
         from app.database import get_session_factory
         from app.models import Library
         from app.models.ingest import IngestLog
-        from app.services.scanner import _import_book, _hash_file
-        from sqlalchemy import select, func
+        from app.services.scanner import _hash_file, _import_book
 
         factory = get_session_factory()
         try:
@@ -142,8 +144,9 @@ class IngestService:
                     return
 
                 # Load system settings for naming priority resolution
-                from app.models.system import SystemSettings
                 from sqlalchemy import select as _sel
+
+                from app.models.system import SystemSettings
                 ss_result = await db.execute(_sel(SystemSettings).where(SystemSettings.id == 1))
                 sys_settings = ss_result.scalar_one_or_none()
 
@@ -194,7 +197,9 @@ class IngestService:
                 # Extract identifiers (ISBN/DOI) from file content
                 if book:
                     try:
-                        from app.services.identifier_extraction import extract_identifiers_for_edition
+                        from app.services.identifier_extraction import (
+                            extract_identifiers_for_edition,
+                        )
                         await extract_identifiers_for_edition(book.id)
                     except Exception:
                         pass  # identifier extraction is non-critical
@@ -202,11 +207,12 @@ class IngestService:
                 # Auto-enrich metadata from external providers (non-blocking)
                 if book:
                     try:
-                        from app.services.metadata_enrichment import enrichment_service
-                        from app.api.books import _apply_enrichment
                         from sqlalchemy.orm import joinedload as _jl
+
+                        from app.api.books import _apply_enrichment
                         from app.models.edition import Edition
                         from app.models.work import Work
+                        from app.services.metadata_enrichment import enrichment_service
 
                         ed_result = await db.execute(
                             select(Edition).where(Edition.id == book.id)
@@ -253,8 +259,8 @@ class IngestService:
                     return s
 
                 if naming_enabled and edition:
+
                     from app.services.naming import build_relative_path
-                    from datetime import datetime as _dt
                     pattern = effective_pattern
                     year = None
                     if edition.published_date:
@@ -284,8 +290,9 @@ class IngestService:
                                 dest = candidate
                                 break
                     # Update the stored file_path to the new location
-                    from app.models.edition import EditionFile
                     from sqlalchemy import select as _select
+
+                    from app.models.edition import EditionFile
                     if file_path.exists():
                         ef_result = await db.execute(
                             _select(EditionFile).where(EditionFile.file_hash == file_hash)
@@ -302,8 +309,9 @@ class IngestService:
                     if file_path.exists() and not dest.exists():
                         file_path.rename(dest)
                         # Reflect the new location on the row, in container shape.
-                        from app.models.edition import EditionFile
                         from sqlalchemy import select as _select
+
+                        from app.models.edition import EditionFile
                         ef_result = await db.execute(
                             _select(EditionFile).where(EditionFile.file_hash == file_hash)
                         )
@@ -372,9 +380,10 @@ class IngestService:
 
     async def get_history(self, skip: int = 0, limit: int = 50) -> dict:
         """Return paginated ingest log entries from the database."""
+        from sqlalchemy import func, select
+
         from app.database import get_session_factory
         from app.models.ingest import IngestLog
-        from sqlalchemy import select, func
 
         factory = get_session_factory()
         async with factory() as db:

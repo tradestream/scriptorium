@@ -9,7 +9,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Author, Book, BookFile, Edition, EditionFile, Library, Series, Tag, Work
+from app.models import Author, BookFile, Edition, EditionFile, Library, Work
 from app.services.covers import cover_service
 from app.services.metadata import metadata_service
 from app.services.search import search_service
@@ -177,7 +177,11 @@ async def _import_book(
     # ── ComicInfo.xml extraction for CBZ/CBR ──────────────────────────────────
     if fmt in ("cbz", "cbr"):
         try:
-            from app.services.comicinfo import parse_comicinfo_from_cbz, parse_comicinfo_from_cbr, apply_comicinfo
+            from app.services.comicinfo import (
+                apply_comicinfo,
+                parse_comicinfo_from_cbr,
+                parse_comicinfo_from_cbz,
+            )
             parser = parse_comicinfo_from_cbz if fmt == "cbz" else parse_comicinfo_from_cbr
             comicinfo = parser(str(file_path))
             if comicinfo:

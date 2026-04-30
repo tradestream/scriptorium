@@ -6,7 +6,6 @@ high-resolution replacements, and upgrades low-quality covers.
 
 import logging
 import re
-from typing import Optional
 
 import httpx
 
@@ -35,8 +34,9 @@ def analyze_cover(cover_bytes: bytes) -> dict:
     Returns dict with width, height, file_size, is_low_quality, reasons.
     """
     try:
-        from PIL import Image
         import io
+
+        from PIL import Image
 
         file_size = len(cover_bytes)
         img = Image.open(io.BytesIO(cover_bytes))
@@ -171,12 +171,14 @@ async def find_low_quality_covers(library_id: int | None = None) -> list[dict]:
 
     Returns list of dicts with edition_id, title, isbn, quality info.
     """
+    from pathlib import Path
+
     from sqlalchemy import select
     from sqlalchemy.orm import joinedload
+
     from app.database import get_session_factory
     from app.models.edition import Edition
     from app.models.work import Work
-    from pathlib import Path
 
     factory = get_session_factory()
     covers_path = Path(settings.COVERS_PATH)
@@ -222,9 +224,9 @@ async def upgrade_cover(edition_id: int) -> dict:
 
     Returns dict with status, itunes_title, etc.
     """
-    import asyncio
     from sqlalchemy import select
     from sqlalchemy.orm import joinedload
+
     from app.database import get_session_factory
     from app.models.edition import Edition
     from app.models.work import Work

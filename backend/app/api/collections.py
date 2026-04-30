@@ -3,15 +3,14 @@ import json as _json
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
 
 from app.api.auth import get_current_user
 from app.database import get_db
 from app.models import User
 from app.models.book import Author, Book, Series, Tag
+from app.models.collection import Collection, CollectionBook
 from app.models.edition import Edition, EditionFile
 from app.models.work import Work
-from app.models.collection import Collection, CollectionBook
 from app.schemas.book import BookRead
 from app.schemas.collection import (
     CollectionBookAdd,

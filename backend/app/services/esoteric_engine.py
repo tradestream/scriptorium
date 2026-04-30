@@ -14,9 +14,7 @@ Modules:
 All computational, no LLM calls. LLM templates are separate.
 """
 
-import json
 import logging
-import math
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
@@ -905,7 +903,7 @@ class MelzerTaxonomy:
                 score=weights.pedagogical_stratification * deliberateness,
                 section="Full text",
                 evidence=f"Elite markers: {elite_count}, Mass markers: {mass_count}",
-                explanation=f"Author explicitly addresses different audiences — strong signal of multilevel writing.",
+                explanation="Author explicitly addresses different audiences — strong signal of multilevel writing.",
                 deliberateness=deliberateness,
             ))
 

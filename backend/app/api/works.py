@@ -7,15 +7,21 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload, selectinload
+from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.models import (
-    Author, Edition, Library, Series, Tag, User, Work, WorkContributor,
-    work_authors, work_tags, work_series,
+    Author,
+    Edition,
+    Library,
+    Series,
+    Tag,
+    User,
+    Work,
+    WorkContributor,
 )
-from app.schemas.work import WorkCreate, WorkListResponse, WorkRead, WorkUpdate
 from app.schemas.edition import EditionRead
+from app.schemas.work import WorkCreate, WorkListResponse, WorkRead, WorkUpdate
 
 from .auth import get_accessible_library_ids, get_current_user
 

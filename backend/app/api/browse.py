@@ -1,8 +1,7 @@
 """Browse endpoints for authors, tags, series, and dynamic covers."""
 
-from typing import Optional
-
 from pathlib import Path
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
@@ -452,7 +451,6 @@ async def series_cover(
     db: AsyncSession = Depends(get_db),
 ):
     """Dynamic cover for a series — returns the first book's cover."""
-    from app.models import Series
     from app.models.work import work_series
     stmt = (
         select(Edition)

@@ -2,18 +2,24 @@ import asyncio
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
-from pydantic import BaseModel
 
 from app.api.auth import get_current_user
-from app.database import get_db, _session_factory
+from app.database import _session_factory, get_db
 from app.models import User
 from app.models.book import Book
 from app.models.work import Work
 from app.schemas.book import BookRead
-from app.services.background_jobs import create_job, get_job, get_active_job, update_job, get_job_status
+from app.services.background_jobs import (
+    create_job,
+    get_active_job,
+    get_job,
+    get_job_status,
+    update_job,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +74,6 @@ async def find_title_author_duplicates(
     _current_user: User = Depends(get_current_user),
 ):
     """Find books with the exact same normalised title that share an author."""
-    from sqlalchemy import and_
-    from app.models.book import book_authors
 
     # Find normalised titles appearing more than once
     dup_result = await db.execute(

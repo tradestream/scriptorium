@@ -5,7 +5,7 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.schemas.book import AuthorRead, TagRead, SeriesRead
+from app.schemas.book import AuthorRead, SeriesRead, TagRead
 
 
 class WorkContributorRead(BaseModel):

@@ -4,8 +4,6 @@ import asyncio
 import io
 import logging
 import tarfile
-import uuid as _uuid
-from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -15,12 +13,17 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.database import get_db, _session_factory
+from app.database import _session_factory, get_db
 from app.models.user import User
+from app.services.background_jobs import (
+    create_job,
+    get_active_job,
+    get_job,
+    get_job_status,
+    update_job,
+)
 
 from .auth import get_current_user
-
-from app.services.background_jobs import create_job, get_job, get_active_job, update_job, get_job_status
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +71,7 @@ def _require_admin(current_user: User = Depends(get_current_user)) -> User:
 async def _get_system_settings(db: AsyncSession):
     """Load the single-row SystemSettings record (or None if not yet created)."""
     from sqlalchemy import select
+
     from app.models.system import SystemSettings
     result = await db.execute(select(SystemSettings).where(SystemSettings.id == 1))
     return result.scalar_one_or_none()
@@ -158,6 +162,7 @@ async def update_naming_settings(
 ):
     """Save global naming settings to the database."""
     from sqlalchemy import select
+
     from app.models.system import SystemSettings
     result = await db.execute(select(SystemSettings).where(SystemSettings.id == 1))
     row = result.scalar_one_or_none()
@@ -179,6 +184,7 @@ async def update_enrichment_keys(
 ):
     """Save enrichment API keys to the database. Empty string = clear the key."""
     from sqlalchemy import select
+
     from app.models.system import SystemSettings
     from app.services.metadata_enrichment import apply_enrichment_key_overrides
 
@@ -258,9 +264,10 @@ async def start_bulk_enrich(
     Returns a job_id for polling via GET /admin/enrich/bulk/{job_id}.
     """
     from sqlalchemy import select
+    from sqlalchemy.orm import joinedload
+
     from app.models.edition import Edition
     from app.models.work import Work
-    from sqlalchemy.orm import joinedload
 
     # Build filtered edition list up front
     stmt = (
@@ -336,15 +343,14 @@ async def _run_bulk_enrich(
     provider: Optional[str],
 ) -> None:
     """Background task: enrich each edition, update job state."""
+    from sqlalchemy import select
+
     from app.api.books import _apply_enrichment, _edition_options
     from app.database import _session_factory
     from app.models.edition import Edition
-    from app.models.work import Work
+    from app.services.events import broadcaster
     from app.services.metadata_enrichment import enrichment_service
     from app.services.search import search_service
-    from app.services.events import broadcaster
-    from sqlalchemy import select
-    from sqlalchemy.orm import joinedload
 
     await update_job(job_id, status="running")
     total = len(edition_ids)
@@ -431,8 +437,9 @@ async def start_bulk_markdown(
     Returns a job_id for polling.
     """
     from sqlalchemy import select
-    from app.models.edition import Edition, EditionFile
-    from app.services.markdown import has_cached_markdown, _SKIP_FORMATS
+
+    from app.models.edition import Edition
+    from app.services.markdown import has_cached_markdown
 
     stmt = select(Edition).where(Edition.files.any())
     if library_id:
@@ -483,8 +490,9 @@ def _run_bulk_markdown(job_id: str, edition_ids: list[int]) -> None:
     Uses a thread pool for parallel processing (4 workers).
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from app.services.background_jobs import sync_get_job_status, sync_update_job
     from app.services.markdown import generate_markdown_sync
-    from app.services.background_jobs import sync_update_job, sync_get_job_status
 
     WORKERS = 4
 
@@ -549,8 +557,9 @@ async def generate_single_markdown(
     Set force=true to regenerate even if cached markdown already exists.
     """
     from sqlalchemy import select
+
     from app.models.edition import Edition
-    from app.services.markdown import has_cached_markdown, markdown_path_for, generate_markdown
+    from app.services.markdown import generate_markdown, has_cached_markdown, markdown_path_for
 
     stmt = select(Edition).where(Edition.id == edition_id)
     result = await db.execute(stmt)
@@ -578,9 +587,10 @@ async def start_batch_markdown(
     Set force=true to regenerate even if cached markdown already exists.
     Returns a job_id for polling via /markdown/bulk/{job_id}.
     """
-    from app.services.markdown import has_cached_markdown, markdown_path_for
     from sqlalchemy import select
+
     from app.models.edition import Edition
+    from app.services.markdown import markdown_path_for
 
     edition_ids = request.edition_ids
     if not edition_ids:
@@ -633,8 +643,8 @@ async def start_bulk_identifier_extraction(
 
     Returns a job_id for polling.
     """
-    from sqlalchemy import select, or_
-    from sqlalchemy.orm import joinedload
+    from sqlalchemy import or_, select
+
     from app.models.edition import Edition
     from app.models.work import Work
 
@@ -740,8 +750,8 @@ async def start_bulk_filename_extract(
     _admin: User = Depends(_require_admin),
 ):
     """Extract title/author from filenames for books with missing metadata."""
-    from sqlalchemy import select, or_
-    from sqlalchemy.orm import joinedload
+    from sqlalchemy import or_, select
+
     from app.models.edition import Edition
     from app.models.work import Work
 
@@ -837,10 +847,11 @@ async def start_bulk_esoteric_analysis(
 
     Books that already have a 'full' computational analysis are skipped.
     """
-    from sqlalchemy import select, and_
+    from sqlalchemy import select
+
+    from app.models.analysis import ComputationalAnalysis
     from app.models.edition import Edition
     from app.models.work import Work
-    from app.models.analysis import ComputationalAnalysis
 
     # Find esoteric-enabled editions with extractable files
     stmt = (
@@ -931,16 +942,17 @@ def _run_bulk_esoteric(
     """Background task (sync, runs in thread): esoteric analysis pipeline."""
     import json
     import sqlite3
-    from app.services.esoteric import run_full_esoteric_analysis, EsotericAnalysisConfig
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from pathlib import Path
+
+    from app.services.background_jobs import _get_sync_db_path, sync_get_job_status, sync_update_job
+    from app.services.esoteric import EsotericAnalysisConfig, run_full_esoteric_analysis
     from app.services.esoteric_engine import run_esoteric_analysis_v2
     from app.services.markdown import has_cached_markdown, markdown_path_for
     from app.services.text_extraction import (
-        _extract_epub_markdown_sync, _extract_pdf_marker, optimize_for_llm,
+        _extract_epub_markdown_sync,
+        _extract_pdf_marker,
     )
-    from app.services.background_jobs import sync_update_job, sync_get_job_status, _get_sync_db_path
-    from pathlib import Path
-
-    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     sync_update_job(job_id, status="running")
     done = 0
@@ -1071,7 +1083,8 @@ async def start_bulk_llm_metadata(
     Targets editions that have extractable files (EPUB/PDF) but are missing
     title, authors, or description after all other extraction methods have been tried.
     """
-    from sqlalchemy import select, or_
+    from sqlalchemy import or_, select
+
     from app.models.edition import Edition, EditionFile
     from app.models.work import Work
 
@@ -1198,9 +1211,9 @@ async def start_bulk_embedded_metadata(
     Fills in missing ISBN, publisher, language, description, authors, and
     published date from the metadata already inside book files.
     """
-    from sqlalchemy import select, or_
+    from sqlalchemy import or_, select
+
     from app.models.edition import Edition, EditionFile
-    from app.models.work import Work
 
     stmt = (
         select(Edition)
@@ -1397,8 +1410,8 @@ async def start_cover_fetch(
 ):
     """Find books with no cover and attempt to fetch from enrichment providers."""
     from sqlalchemy import select
+
     from app.models.edition import Edition
-    from app.models.work import Work
 
     stmt = (
         select(Edition.id)
@@ -1434,16 +1447,17 @@ async def _run_cover_fetch(job_id: str, edition_ids: list[int]) -> None:
     import httpx
     from sqlalchemy import select
     from sqlalchemy.orm import joinedload
+
     from app.models.edition import Edition
     from app.models.work import Work
     from app.services.covers import cover_service
     from app.services.metadata_enrichment import enrichment_service
     from app.utils.url_safety import (
-        assert_safe_url,
-        safe_redirect_chain,
-        fetch_capped,
-        UnsafeURLError,
         BodyTooLargeError,
+        UnsafeURLError,
+        assert_safe_url,
+        fetch_capped,
+        safe_redirect_chain,
     )
 
     await update_job(job_id, status="running")
@@ -1543,6 +1557,7 @@ async def get_audit_log(
 ):
     """Retrieve recent audit log entries."""
     from sqlalchemy import select
+
     from app.models.audit import AuditLog
 
     stmt = select(AuditLog).order_by(AuditLog.created_at.desc())
@@ -1611,6 +1626,7 @@ async def find_duplicate_pages_in_file(
 ):
     """Find duplicate pages within a single comic file."""
     from sqlalchemy import select
+
     from app.models.edition import EditionFile
     ef = (await db.execute(
         select(EditionFile).where(EditionFile.edition_id == edition_id, EditionFile.format == "cbz")
@@ -1652,9 +1668,11 @@ async def split_edition(
     import re
     import uuid as _uuid
     from datetime import datetime
+
     from sqlalchemy import select
     from sqlalchemy.orm import joinedload
-    from app.models.edition import Edition, EditionFile
+
+    from app.models.edition import Edition
     from app.models.work import Work
 
     result = await db.execute(
@@ -1744,7 +1762,8 @@ async def split_all_bloated_editions(
 
     Returns the list of edition IDs that will be processed.
     """
-    from sqlalchemy import select, func
+    from sqlalchemy import func, select
+
     from app.models.edition import Edition, EditionFile
 
     stmt = (
@@ -1766,8 +1785,10 @@ async def split_all_bloated_editions(
                     import re
                     import uuid as _uuid2
                     from datetime import datetime as _dt
+
                     from sqlalchemy.orm import joinedload as _jl
-                    from app.models.edition import Edition as _Ed, EditionFile as _EF
+
+                    from app.models.edition import Edition as _Ed
                     from app.models.work import Work as _Wk
 
                     res = await sdb.execute(
@@ -1863,6 +1884,7 @@ async def backfill_page_inventory(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
 
     from sqlalchemy import select as _select
+
     from app.config import resolve_path as _rp
     from app.models.edition import EditionFile
     from app.models.page_inventory import EditionFilePage
@@ -1929,6 +1951,7 @@ async def start_bulk_kepub(
     and KEPUB conversion mangles pre-paginated content).
     """
     from sqlalchemy import select
+
     from app.models.edition import Edition, EditionFile
 
     existing = await get_active_job("bulk_kepub")
@@ -1994,10 +2017,11 @@ async def cancel_bulk_kepub_job(
 
 async def _run_bulk_kepub(job_id: str, edition_file_ids: list[int]) -> None:
     """Background task: convert each EPUB to KEPUB, update job state."""
-    from app.services.kepub import convert_edition_file
+    from sqlalchemy import select
+
     from app.database import _session_factory
     from app.models.system import SystemSettings
-    from sqlalchemy import select
+    from app.services.kepub import convert_edition_file
 
     await update_job(job_id, status="running")
     total = len(edition_file_ids)

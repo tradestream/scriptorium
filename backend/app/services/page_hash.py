@@ -11,7 +11,6 @@ import hashlib
 import logging
 import zipfile
 from pathlib import Path
-from typing import Optional
 
 from app.config import resolve_path
 
@@ -83,6 +82,7 @@ async def find_cross_file_duplicates(
     Returns list of {"hash": str, "occurrences": [{"edition_id": int, "page": int, "file": str}]}
     """
     from sqlalchemy import select
+
     from app.models.edition import EditionFile
 
     global_hashes: dict[str, list[dict]] = {}

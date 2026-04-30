@@ -273,8 +273,8 @@ async def _extract_epub_markdown(path: Path) -> str:
     Produces properly structured markdown with headings, lists, etc.
     """
     try:
-        from ebooklib import epub
         from bs4 import BeautifulSoup, Comment
+        from ebooklib import epub
     except ImportError:
         raise RuntimeError(
             "ebooklib and beautifulsoup4 are required. "
@@ -386,8 +386,8 @@ async def _extract_epub_poetry(path: Path) -> str:
     - Strips line numbers (5, 10, 15, etc.)
     """
     try:
-        from ebooklib import epub
         from bs4 import BeautifulSoup, Comment
+        from ebooklib import epub
     except ImportError:
         raise RuntimeError("ebooklib and beautifulsoup4 required")
 
@@ -646,8 +646,9 @@ async def _extract_epub_poetry(path: Path) -> str:
 async def _extract_epub_plain(path: Path) -> str:
     """Fallback: extract plain text from EPUB using basic HTML parsing."""
     try:
-        from ebooklib import epub
         from html.parser import HTMLParser
+
+        from ebooklib import epub
     except ImportError:
         raise RuntimeError("ebooklib not installed. Run: pip install ebooklib")
 
@@ -766,9 +767,9 @@ def _extract_pdf_marker(path: Path) -> str:
 
     Uses subprocess to avoid threading issues with torch on some platforms.
     """
+    import shutil
     import subprocess
     import sys
-    import shutil
 
     # Check if marker CLI is available
     marker_bin = shutil.which("marker")
@@ -828,8 +829,9 @@ async def _extract_pdf_pdfplumber(path: Path) -> str:
 
 def _extract_pdf_pdfplumber_sync(path: Path) -> str:
     """Synchronous pdfplumber extraction with page-level optimization."""
-    import pdfplumber
     from collections import Counter
+
+    import pdfplumber
 
     def _process_page(page):
         """Extract lines from a single page."""
@@ -1050,7 +1052,11 @@ async def extract_text_from_book(
     # Check for cached markdown first
     if output_format == "markdown" and llm_optimize:
         try:
-            from app.services.markdown import has_cached_markdown, markdown_path_for, strip_yaml_frontmatter
+            from app.services.markdown import (
+                has_cached_markdown,
+                markdown_path_for,
+                strip_yaml_frontmatter,
+            )
             if hasattr(book, 'uuid') and has_cached_markdown(book.uuid):
                 text = strip_yaml_frontmatter(markdown_path_for(book.uuid).read_text(encoding="utf-8"))
                 return truncate_text(text, max_chars)

@@ -172,6 +172,7 @@ async def convert_edition_file(edition_file_id: int) -> Optional[str]:
     rather than reuse the caller's.
     """
     from sqlalchemy import select
+
     from app.database import get_session_factory
     from app.models.edition import Edition, EditionFile
 
@@ -251,6 +252,7 @@ async def ensure_kepub(edition_file, *, is_fixed_layout: bool = False) -> Option
         # just falls back to spine-level resolution.
         try:
             from sqlalchemy.ext.asyncio import async_object_session
+
             from app.services.kobo_spans import extract_span_maps, store_span_maps
 
             async_session = async_object_session(edition_file)

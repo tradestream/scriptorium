@@ -212,6 +212,7 @@ async def sync_covers(overwrite: bool = False) -> dict:
         return {"error": "AudiobookShelf not configured"}
 
     from sqlalchemy import select
+
     from app.database import get_session_factory
     from app.models.book import Book
     from app.models.edition import Edition
@@ -274,6 +275,7 @@ async def sync_progress(db_user_id: int) -> dict:
         return {"error": "AudiobookShelf not configured"}
 
     from sqlalchemy import select
+
     from app.database import get_session_factory
     from app.models.edition import Edition
     from app.models.progress import Device
@@ -378,14 +380,19 @@ async def import_library_items(
     if not client:
         return {"error": "AudiobookShelf not configured"}
 
-    from sqlalchemy import select, func as sqlfunc
+    import uuid as _uuid
+
+    from sqlalchemy import func as sqlfunc
+    from sqlalchemy import select
+
     from app.database import get_session_factory
     from app.models import Library
     from app.models.book import Author, Book, Series
-    from app.models.book import book_authors as ba_table, book_series as bs_table
+    from app.models.book import book_authors as ba_table
+    from app.models.book import book_series as bs_table
     from app.models.edition import Edition
-    from app.models.work import Work, work_series as ws_table
-    import uuid as _uuid
+    from app.models.work import Work
+    from app.models.work import work_series as ws_table
 
     try:
         items = await client.get_library_items(library_id, limit=limit)

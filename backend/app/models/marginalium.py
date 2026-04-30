@@ -6,7 +6,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models import Base
 
-
 MARGINALIUM_KINDS = (
     "observation",  # default — general note
     "insight",      # interpretive insight

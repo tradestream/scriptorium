@@ -9,7 +9,6 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger("scriptorium.llm_metadata")
 
@@ -161,17 +160,19 @@ async def extract_llm_metadata_for_edition(edition_id: int) -> dict:
     Only fills in fields that are currently empty.
     Returns dict of fields that were found and applied.
     """
-    import asyncio
     from sqlalchemy import select
     from sqlalchemy.orm import joinedload
-    from app.database import get_session_factory
-    from app.models.edition import Edition, EditionFile
-    from app.models.work import Work
-    from app.models.book import Author
-    from app.services.text_extraction import (
-        _extract_epub_plain, _extract_pdf_text, optimize_for_llm,
-    )
+
     from app.config import resolve_path
+    from app.database import get_session_factory
+    from app.models.book import Author
+    from app.models.edition import Edition
+    from app.models.work import Work
+    from app.services.text_extraction import (
+        _extract_epub_plain,
+        _extract_pdf_text,
+        optimize_for_llm,
+    )
 
     factory = get_session_factory()
 

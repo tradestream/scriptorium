@@ -38,7 +38,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models import Base
 
-
 # Status constants used by ReadingState. Mirrors what the legacy
 # UserEdition.status field used; left as bare strings here (rather than
 # an Enum column) for SQLite friendliness and to make backfill from the

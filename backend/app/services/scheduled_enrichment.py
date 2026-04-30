@@ -2,10 +2,10 @@
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import joinedload
 
 logger = logging.getLogger(__name__)
@@ -22,11 +22,11 @@ _scheduler_config = {
 
 async def _run_enrichment_cycle():
     """One cycle: find books with gaps and enrich them."""
+    from app.api.books import _apply_enrichment
     from app.database import get_session_factory
     from app.models.edition import Edition
     from app.models.work import Work
     from app.services.metadata_enrichment import enrichment_service
-    from app.api.books import _apply_enrichment
 
     factory = get_session_factory()
     enriched_count = 0

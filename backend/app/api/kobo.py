@@ -22,7 +22,6 @@ Management (under /api/v1, JWT-authed):
 """
 
 import logging
-from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -81,6 +80,7 @@ async def _resolve_book_for_token(
     leaking the existence of books in libraries the token's user can't see.
     """
     from sqlalchemy.orm import selectinload
+
     from app.api.auth import get_accessible_library_ids
     from app.models import Book, Work
     from app.models.user import User as _User
@@ -305,7 +305,8 @@ async def kobo_book_metadata(
     base_url = _get_base_url(request)
     # Pull live progress so the metadata response carries the same
     # ReadingState/Bookmark the device would see via the sync feed.
-    from app.models.reading import EditionPosition as _EP, ReadingState as _RS
+    from app.models.reading import EditionPosition as _EP
+    from app.models.reading import ReadingState as _RS
     ep = (
         await db.execute(
             select(_EP).where(_EP.user_id == sync_token.user_id, _EP.edition_id == book.id)
@@ -490,7 +491,9 @@ async def kobo_delete_book(
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     from datetime import datetime as _dt
+
     from sqlalchemy import update as _update
+
     from app.models.progress import KoboSyncedBook
 
     # Stamp archived_at on the existing synced row, if any. We don't
@@ -562,6 +565,7 @@ async def kobo_get_tags(
 
     from sqlalchemy import select
     from sqlalchemy.orm import selectinload
+
     from app.models.shelf import Shelf
 
     stmt = (
@@ -614,9 +618,10 @@ async def kobo_create_tag(
         return JSONResponse({"error": "No tag name"}, status_code=400)
 
     from sqlalchemy import select
-    from app.models.shelf import Shelf
+
     from app.models.collection import Collection
     from app.models.progress import KoboShelfArchive
+    from app.models.shelf import Shelf
 
     # Check if we already have this tag mapped
     existing_archive = await db.execute(
@@ -693,8 +698,9 @@ async def kobo_delete_tag(
     """
     sync_token = await _get_sync_token(auth_token, db)
 
-    from app.models.progress import KoboShelfArchive
     from sqlalchemy import select
+
+    from app.models.progress import KoboShelfArchive
 
     result = await db.execute(
         select(KoboShelfArchive).where(
@@ -723,9 +729,9 @@ async def kobo_add_items_to_tag(
     body = await request.json()
     items = body.get("Items", [])
 
+    from app.models.collection import Collection, CollectionBook
     from app.models.progress import KoboShelfArchive
     from app.models.shelf import ShelfBook
-    from app.models.collection import Collection, CollectionBook
 
     result = await db.execute(
         select(KoboShelfArchive).where(
@@ -785,8 +791,8 @@ async def _remove_item_from_tag(
     pass a stale UUID after a metadata refresh; better to swallow than
     refuse the whole batch).
     """
-    from app.models.shelf import ShelfBook
     from app.models.collection import Collection, CollectionBook
+    from app.models.shelf import ShelfBook
     from app.services.kobo_sync import _find_edition_by_any_id
 
     edition = await _find_edition_by_any_id(item_id, db)
@@ -994,11 +1000,11 @@ async def _sync_content_progress(
     EditionPosition cumulative time_spent_seconds takes the role
     KoboBookState.time_spent_reading used to play.
     """
+    from app.models.edition import Edition
+    from app.models.reading import EditionPosition
     from app.services.kobo_annotations import resolve_volume_id
     from app.services.kobo_sync import _get_or_create_kobo_device
     from app.services.unified_progress import write_progress
-    from app.models.edition import Edition
-    from app.models.reading import EditionPosition
 
     updated = 0
     skipped = 0
@@ -1100,7 +1106,8 @@ async def kobo_library_item(
         raise HTTPException(status_code=404, detail="No compatible file")
 
     base_url = _get_base_url(request)
-    from app.models.reading import EditionPosition as _EP, ReadingState as _RS
+    from app.models.reading import EditionPosition as _EP
+    from app.models.reading import ReadingState as _RS
     ep = (
         await db.execute(
             select(_EP).where(_EP.user_id == sync_token.user_id, _EP.edition_id == book.id)
@@ -1177,10 +1184,11 @@ async def kobo_catch_all(
 # ---------------------------------------------------------------------------
 # Management router (JWT-authed, under /api/v1)
 # ---------------------------------------------------------------------------
+from sqlalchemy import select as sa_select
+
 from app.api.auth import get_current_user
 from app.models.progress import KoboTokenShelf
 from app.models.shelf import Shelf
-from sqlalchemy import select as sa_select
 
 kobo_management_router = APIRouter(prefix="/kobo", tags=["kobo"])
 

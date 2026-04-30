@@ -37,15 +37,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.edition import Edition
 from app.models.reading import (
-    DevicePosition,
-    EditionPosition,
-    ReadingState,
     STATUS_ABANDONED,
     STATUS_COMPLETED,
     STATUS_READING,
     STATUS_WANT_TO_READ,
+    DevicePosition,
+    EditionPosition,
+    ReadingState,
 )
-
 
 COMPLETION_THRESHOLD = 0.97          # pct ≥ this on write → auto-complete
 REREAD_REOPEN_THRESHOLD = 0.10       # completed + open at this pct → re-read

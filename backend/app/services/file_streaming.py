@@ -23,7 +23,6 @@ from typing import Optional
 from fastapi import HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, StreamingResponse
 
-
 CHUNK_SIZE = 64 * 1024  # 64 KiB — balanced for SMB-mounted NAS reads
 
 

@@ -7,10 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.api.auth import get_current_user
+from app.api.browse import AuthorDetail, SeriesDetail, TagDetail
 from app.database import get_db
 from app.models import User
 from app.models.book import Author, Series, Tag
-from app.api.browse import AuthorDetail, TagDetail, SeriesDetail
 
 router = APIRouter(prefix="/metadata", tags=["metadata"])
 

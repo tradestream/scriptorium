@@ -8,7 +8,6 @@ These are computational aids, not decoders — they highlight anomalies
 and patterns for human interpretation.
 """
 
-import json
 import logging
 import re
 from collections import Counter, defaultdict

@@ -92,6 +92,7 @@ class SearchService:
         authors_str = " ".join(author_names)
         # Collect ISBNs from editions for searchability
         from sqlalchemy import select as _sel
+
         from app.models import Edition
         isbn_rows = await db.execute(
             _sel(Edition.isbn, Edition.isbn_10).where(Edition.work_id == work.id, Edition.isbn.isnot(None))
@@ -169,6 +170,7 @@ class SearchService:
         """
         from sqlalchemy import select
         from sqlalchemy.orm import joinedload
+
         from app.models.edition import Edition
         from app.models.work import Work
 
@@ -192,6 +194,7 @@ class SearchService:
 
         # Fetch Edition records for matching works, preserving FTS rank order
         from sqlalchemy import case
+
         from app.models.library import Library
 
         visible_lib_ids = select(Library.id).where(Library.is_hidden == False)
@@ -234,7 +237,7 @@ class SearchService:
         """Rebuild the entire FTS index from the works table."""
         from sqlalchemy import select as _sel
         from sqlalchemy.orm import joinedload
-        from app.models.edition import Edition
+
         from app.models.work import Work
 
         # Standalone FTS5 table supports regular DELETE

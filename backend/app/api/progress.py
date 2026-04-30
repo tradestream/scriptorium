@@ -13,9 +13,9 @@ from app.database import get_db
 from app.models import Book
 from app.models.library import Library
 from app.models.progress import Device
-from app.models.work import Work
 from app.models.read_session import ReadSession
 from app.models.user import User
+from app.models.work import Work
 
 from .auth import assert_edition_access, get_current_user
 
@@ -134,8 +134,8 @@ async def get_book_progress(
         # the web reader opens at the same chapter (paragraph-accurate
         # would require chapter-XHTML walking; chapter-accurate is what
         # the span map alone supports).
-        from app.services.kobo_spans import span_to_cfi
         from app.models.edition import EditionFile
+        from app.services.kobo_spans import span_to_cfi
 
         chapter, _, span_id = ep.current_value.partition("#")
         if chapter and span_id and not span_id.startswith("spine#"):
@@ -168,8 +168,8 @@ async def get_book_progress(
     elif ep and ep.furthest_format == "page" and ep.furthest_value:
         furthest_cfi = f"page:{ep.furthest_value}"
     elif ep and ep.furthest_format == "kobo_span" and ep.furthest_value:
-        from app.services.kobo_spans import span_to_cfi
         from app.models.edition import EditionFile
+        from app.services.kobo_spans import span_to_cfi
 
         chapter, _, span_id = ep.furthest_value.partition("#")
         if chapter and span_id and not span_id.startswith("spine#"):
@@ -299,8 +299,8 @@ async def patch_book_status(
     transition, bumping times_completed on ``completed``). Rating updates
     apply to ReadingState; an explicit ``None`` clears the rating.
     """
-    from app.services.unified_progress import write_progress
     from app.models.reading import EditionPosition, ReadingState
+    from app.services.unified_progress import write_progress
 
     edition = await assert_edition_access(db, current_user, book_id)
 

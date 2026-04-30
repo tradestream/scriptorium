@@ -78,16 +78,14 @@ Usage:
   prompt = analyzer.generate_llm_prompt()
 """
 
-import re
 import math
-import string
-from collections import Counter, defaultdict
-from dataclasses import dataclass, field
+import re
+from collections import Counter
 from typing import Optional
 
 import nltk
-from nltk.tokenize import word_tokenize, sent_tokenize
 from nltk import pos_tag
+from nltk.tokenize import sent_tokenize, word_tokenize
 
 # Ensure required NLTK data is available
 for _res in ['punkt_tab', 'averaged_perceptron_tagger_eng', 'cmudict']:
