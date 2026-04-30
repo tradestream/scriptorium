@@ -138,6 +138,23 @@ class MetadataService:
                                 result["is_fixed_layout"] = True
                                 break
 
+                # Kobo's legacy fixed-layout signal: a sibling of
+                # ``container.xml`` named ``com.kobobooks.display-options.xml``
+                # that carries ``<option name="fixed-layout">true</option>``.
+                # Older Kobo-targeted EPUBs declare FXL only here, with no
+                # rendition:layout in the OPF — the spec calls it out
+                # explicitly so the device picker doesn't try to reflow them.
+                if not result["is_fixed_layout"]:
+                    try:
+                        opts_xml = zf.read("META-INF/com.kobobooks.display-options.xml")
+                        opts_root = ET.fromstring(opts_xml)
+                        for option in opts_root.iter("option"):
+                            if option.get("name") == "fixed-layout" and (option.text or "").strip().lower() == "true":
+                                result["is_fixed_layout"] = True
+                                break
+                    except (KeyError, ET.ParseError):
+                        pass  # display-options.xml is optional + non-fatal
+
                 # Cover image — find cover in manifest
                 manifest = opf_root.find("opf:manifest", ns_opf) or opf_root.find("manifest")
                 if manifest is not None:

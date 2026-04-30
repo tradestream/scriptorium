@@ -428,6 +428,26 @@ async def get_sync_payload(
         ).scalars().all():
             rs_map[rs.work_id] = rs
 
+    # Pull the per-work series position from the ``work_series`` association
+    # so the Series block we emit carries a real number. Without this Kobo
+    # gets ``"Number": "0"`` for every book and can't sort series collections
+    # correctly. One book per series is the common case, so we just take the
+    # first row per work.
+    series_position_map: dict[int, float] = {}
+    if work_ids:
+        from app.models.work import work_series as _ws
+
+        for row in (
+            await db.execute(
+                select(_ws.c.work_id, _ws.c.position)
+                .where(_ws.c.work_id.in_(work_ids))
+                .where(_ws.c.position.is_not(None))
+            )
+        ).all():
+            # First-write wins — work_series can have multiple entries per
+            # work (rare; arc/sub-series). Kobo only supports one series.
+            series_position_map.setdefault(row.work_id, float(row.position))
+
     items = []
     # Per-edition is_new is driven by books_last_created, NOT by whether
     # the sync itself is incremental. A book added in the interval between
@@ -463,6 +483,7 @@ async def get_sync_payload(
             is_new=edition_is_new,
             span_chapter_href=span_chapter_href,
             span_id=span_id,
+            series_position=series_position_map.get(edition.work_id) if edition.work_id else None,
         )
         items.append(entry)
 
@@ -811,6 +832,7 @@ def _build_edition_entry(
     is_new: bool = True,
     span_chapter_href: Optional[str] = None,
     span_id: Optional[str] = None,
+    series_position: Optional[float] = None,
 ) -> dict:
     """Build a single Kobo library sync entry for an Edition.
 
@@ -828,7 +850,7 @@ def _build_edition_entry(
         author_list = [a.name for a in work.authors]
 
     series_name = None
-    series_number = None
+    series_number = series_position
     if work and work.series:
         series_name = work.series[0].name
 
@@ -888,10 +910,20 @@ def _build_edition_entry(
     }
 
     if series_name:
+        # Kobo's metadata-style guide expects ``Number`` as a clean
+        # numeric string. Format whole numbers without a trailing
+        # ``.0`` so collection sort keys read "3" not "3.0", but keep
+        # fractional positions ("3.5") intact for in-between volumes.
+        if series_number is None:
+            number_str = "0"
+            number_float = 0.0
+        else:
+            number_float = float(series_number)
+            number_str = str(int(number_float)) if number_float.is_integer() else f"{number_float:g}"
         entry[envelope_key]["BookMetadata"]["Series"] = {
             "Name": series_name,
-            "Number": str(series_number) if series_number else "0",
-            "NumberFloat": float(series_number) if series_number else 0.0,
+            "Number": number_str,
+            "NumberFloat": number_float,
             "Id": series_name,
         }
 
@@ -1385,21 +1417,35 @@ async def get_download_path(
     if edition_file:
         from app.config import resolve_path
 
-        # Auto-convert EPUB to KEPUB for better Kobo experience (skipped
-        # for fixed-layout titles, which Nickel renders natively).
-        if file_format.lower() in ("epub", "kepub") and edition_file.format.lower() == "epub":
-            try:
-                from app.services.kepub import ensure_kepub
-                kepub_path = await ensure_kepub(
-                    edition_file, is_fixed_layout=is_fixed_layout
-                )
-                if kepub_path:
-                    resolved = Path(resolve_path(kepub_path))
-                    if resolved.exists():
-                        await db.commit()  # persist kepub_path/hash on edition_file
-                        return resolved
-            except Exception:
-                pass  # Fall through to original file
+        # Auto-convert EPUB to KEPUB for better Kobo experience.
+        #
+        # Two gates here:
+        #   1. The device must have asked for KEPUB. If it asked for raw
+        #      EPUB/EPUB3 we honour that — running the conversion path
+        #      anyway would serve a ``.kepub.epub``-named file in
+        #      response to an EPUB request, which is inconsistent with
+        #      the format we advertised in ``_build_download_urls``.
+        #   2. ``kepubify`` must actually be installed. The fallback in
+        #      ``convert_to_kepub`` produces a byte-identical copy of
+        #      the source EPUB with a ``.kepub.epub`` name and no Kobo
+        #      span wrapping — that's worse than serving the raw EPUB
+        #      because the device thinks it's a real KEPUB.
+        # Fixed-layout titles always skip conversion; Nickel renders
+        # them natively under the EPUB3FL format.
+        if file_format.lower() == "kepub" and edition_file.format.lower() == "epub":
+            from app.services.kepub import _find_kepubify, ensure_kepub
+            if _find_kepubify() is not None:
+                try:
+                    kepub_path = await ensure_kepub(
+                        edition_file, is_fixed_layout=is_fixed_layout
+                    )
+                    if kepub_path:
+                        resolved = Path(resolve_path(kepub_path))
+                        if resolved.exists():
+                            await db.commit()  # persist kepub_path/hash on edition_file
+                            return resolved
+                except Exception:
+                    pass  # Fall through to original file
 
         path = Path(resolve_path(edition_file.file_path))
         return path if path.exists() else None

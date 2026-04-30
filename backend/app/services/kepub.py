@@ -127,30 +127,30 @@ async def convert_to_kepub(epub_path: str) -> Optional[str]:
         return str(kepub_path)
 
     kepubify = _find_kepubify()
-    if kepubify:
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                kepubify, str(source), "-o", str(output_dir),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await proc.communicate()
-            if proc.returncode == 0 and kepub_path.exists():
-                logger.info("Converted to KEPUB: %s", kepub_name)
-                return str(kepub_path)
-            else:
-                logger.warning("kepubify failed (rc=%d): %s", proc.returncode, stderr.decode()[:200])
-        except Exception as exc:
-            logger.warning("kepubify error: %s", exc)
-
-    # Fallback: copy with .kepub.epub extension (Kobo accepts it, just no span wrapping)
-    try:
-        shutil.copy2(str(source), str(kepub_path))
-        logger.info("Copied EPUB as KEPUB (no kepubify): %s", kepub_name)
-        return str(kepub_path)
-    except Exception as exc:
-        logger.warning("KEPUB copy failed: %s", exc)
+    if not kepubify:
+        # No fallback: ``shutil.copy2`` would produce a byte-identical
+        # ``.kepub.epub`` with no koboSpan wrapping, then we'd cache
+        # ``kepub_path`` and serve it as a real KEPUB — making the
+        # whole library look converted while losing reading-position
+        # accuracy. Better to return None and let the sync path serve
+        # the raw EPUB (which it does correctly when no kepub_path is
+        # cached and kepubify isn't installed).
+        logger.info("kepubify not installed; skipping KEPUB conversion for %s", source.name)
         return None
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            kepubify, str(source), "-o", str(output_dir),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode == 0 and kepub_path.exists():
+            logger.info("Converted to KEPUB: %s", kepub_name)
+            return str(kepub_path)
+        logger.warning("kepubify failed (rc=%d): %s", proc.returncode, stderr.decode()[:200])
+    except Exception as exc:
+        logger.warning("kepubify error: %s", exc)
+    return None
 
 
 def hash_file(path: str) -> str:
