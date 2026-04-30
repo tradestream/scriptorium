@@ -1573,6 +1573,34 @@ export async function getKepubifyHealth(): Promise<{ available: boolean; path: s
   return fetchAPI('/admin/kepubify/health');
 }
 
+// ── Kobo compatibility health ────────────────────────────────────────────────
+
+export interface KoboHealth {
+  kepubify: {
+    available: boolean;
+    path: string | null;
+    configured_path: string | null;
+    version: string | null;
+  };
+  epubcheck: {
+    available: boolean;
+    path: string | null;
+  };
+  library: {
+    total_epubs: number;
+    fixed_layout_count: number;
+    kepub_cached_count: number;
+    kepub_eligible_count: number;
+    coverage_percent: number;
+  };
+  auto_convert_enabled: boolean;
+  backfill_done: boolean;
+}
+
+export async function getKoboHealth(): Promise<KoboHealth> {
+  return fetchAPI('/admin/kobo/health');
+}
+
 // ── Kobo Fonts (USB sideload bundle) ──────────────────────────────────────────
 
 export interface KoboFontStyle {

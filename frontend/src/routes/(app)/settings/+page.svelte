@@ -697,6 +697,29 @@
     }
   }
 
+  // ── Kobo compatibility health ──────────────────────────────────────────────
+  let koboHealth = $state<import('$lib/api/client').KoboHealth | null>(null);
+  let koboHealthLoading = $state(false);
+  let koboHealthError = $state('');
+
+  async function loadKoboHealth() {
+    koboHealthLoading = true;
+    koboHealthError = '';
+    try {
+      koboHealth = await api.getKoboHealth();
+    } catch (e) {
+      koboHealthError = e instanceof Error ? e.message : 'Failed to load Kobo health';
+    } finally {
+      koboHealthLoading = false;
+    }
+  }
+
+  $effect(() => {
+    if (data.user?.is_admin && activeSection === 'integrations' && koboHealth === null && !koboHealthLoading) {
+      loadKoboHealth();
+    }
+  });
+
   // ── Kobo Fonts (USB sideload bundle) ───────────────────────────────────────
   let koboFonts = $state<import('$lib/api/client').KoboFontsListing | null>(null);
   let koboFontsLoading = $state(false);
@@ -2215,6 +2238,98 @@
         <Button class="mt-4" href={api.adminBackupUrl()} download>
           <Download class="mr-2 h-4 w-4" /> Download Backup
         </Button>
+      </CardContent>
+    </Card>
+  {/if}
+
+  <!-- Kobo Compatibility Health -->
+  {#if user?.is_admin && activeSection === 'integrations'}
+    <Card>
+      <CardHeader>
+        <CardTitle>Kobo Compatibility</CardTitle>
+        <CardDescription>kepubify, EPUBCheck, fixed-layout count, and KEPUB cache coverage</CardDescription>
+      </CardHeader>
+      <CardContent class="space-y-4">
+        {#if koboHealthLoading && !koboHealth}
+          <p class="text-sm text-muted-foreground">Checking…</p>
+        {:else if koboHealthError}
+          <p class="text-sm text-destructive">{koboHealthError}</p>
+        {:else if koboHealth}
+          <!-- kepubify status -->
+          <div class="flex items-start gap-3 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+            {#if koboHealth.kepubify.available}
+              <CheckCircle class="mt-0.5 h-4 w-4 shrink-0 text-green-500" />
+              <div class="min-w-0 flex-1">
+                <p class="font-medium">kepubify {koboHealth.kepubify.version ?? 'installed'}</p>
+                <p class="break-all text-xs text-muted-foreground">{koboHealth.kepubify.path}</p>
+              </div>
+            {:else}
+              <AlertCircle class="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+              <div class="min-w-0 flex-1">
+                <p class="font-medium">kepubify not installed</p>
+                <p class="text-xs text-muted-foreground">
+                  Sync serves the raw EPUB. Install kepubify or set <code class="rounded bg-muted px-1 py-0.5">KEPUBIFY_PATH</code>
+                  to enable real KEPUB conversion + reading-position spans.
+                </p>
+              </div>
+            {/if}
+          </div>
+
+          <!-- EPUBCheck status (informational only) -->
+          <div class="flex items-start gap-3 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+            {#if koboHealth.epubcheck.available}
+              <CheckCircle class="mt-0.5 h-4 w-4 shrink-0 text-green-500" />
+              <div class="min-w-0 flex-1">
+                <p class="font-medium">EPUBCheck available</p>
+                <p class="break-all text-xs text-muted-foreground">{koboHealth.epubcheck.path}</p>
+              </div>
+            {:else}
+              <AlertCircle class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+              <div class="min-w-0 flex-1">
+                <p class="font-medium">EPUBCheck not on PATH</p>
+                <p class="text-xs text-muted-foreground">
+                  Optional. Install if you want to validate generated EPUBs (analysis exports, study editions, comic conversions) against IDPF spec.
+                </p>
+              </div>
+            {/if}
+          </div>
+
+          <!-- Library coverage -->
+          <div class="grid gap-3 rounded-md border bg-muted/30 p-3 text-sm sm:grid-cols-4">
+            <div>
+              <p class="text-xs text-muted-foreground">EPUBs total</p>
+              <p class="font-medium">{koboHealth.library.total_epubs}</p>
+            </div>
+            <div>
+              <p class="text-xs text-muted-foreground">Fixed-layout</p>
+              <p class="font-medium">{koboHealth.library.fixed_layout_count}</p>
+            </div>
+            <div>
+              <p class="text-xs text-muted-foreground">KEPUB cached</p>
+              <p class="font-medium">{koboHealth.library.kepub_cached_count} / {koboHealth.library.kepub_eligible_count}</p>
+            </div>
+            <div>
+              <p class="text-xs text-muted-foreground">Coverage</p>
+              <p class="font-medium {koboHealth.library.coverage_percent >= 95 ? 'text-green-600 dark:text-green-400' : koboHealth.library.coverage_percent >= 50 ? 'text-amber-600 dark:text-amber-400' : 'text-destructive'}">
+                {koboHealth.library.coverage_percent}%
+              </p>
+            </div>
+          </div>
+
+          <!-- Auto-convert + backfill flags -->
+          <div class="flex flex-wrap gap-2 text-xs">
+            <Badge variant={koboHealth.auto_convert_enabled ? 'secondary' : 'outline'}>
+              Auto-convert on import: {koboHealth.auto_convert_enabled ? 'on' : 'off'}
+            </Badge>
+            <Badge variant={koboHealth.backfill_done ? 'secondary' : 'outline'}>
+              Initial backfill: {koboHealth.backfill_done ? 'done' : 'pending'}
+            </Badge>
+          </div>
+
+          <Button variant="outline" size="sm" onclick={loadKoboHealth} disabled={koboHealthLoading}>
+            <RefreshCw class="mr-2 h-3.5 w-3.5" /> Recheck
+          </Button>
+        {/if}
       </CardContent>
     </Card>
   {/if}

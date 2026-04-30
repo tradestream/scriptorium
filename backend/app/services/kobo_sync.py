@@ -904,6 +904,13 @@ def _build_edition_entry(
                 "Publisher": {"Imprint": "", "Name": edition.publisher or ""},
                 "RevisionId": edition.uuid,
                 "Title": work.title if work else edition.uuid,
+                # Kobo's metadata-style guide: subtitles belong in their
+                # own field, not appended to ``Title``. Newer Nickel
+                # firmware shows the subtitle as a secondary line on the
+                # library tile. Older firmware ignores the field — the
+                # JSON parser drops unknown keys silently — so emitting
+                # this is safe everywhere.
+                "Subtitle": (work.subtitle if work and work.subtitle else None),
                 "WorkId": edition.uuid,
             },
         }

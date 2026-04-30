@@ -2092,11 +2092,103 @@ async def kepubify_health(current_user: User = Depends(get_current_user)):
         "path": path,
         "configured_path": s.KEPUBIFY_PATH,
         "version": version,
-        # When ``available`` is False, downloads still succeed —
-        # ``convert_to_kepub`` falls back to a renamed copy. That's
-        # functional but loses the Kobo span wrapping that drives
-        # accurate reading-position sync.
+        # When ``available`` is False, KEPUB conversion is skipped
+        # entirely (we used to fall back to a renamed copy, which lost
+        # span wrapping while looking like a real KEPUB — see v3.1.2).
+        # The sync path serves the raw EPUB instead.
         "fallback_in_use": path is None,
+    }
+
+
+# ── Kobo compatibility health ─────────────────────────────────────────────────
+
+@router.get("/kobo/health")
+async def kobo_health(
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(_require_admin),
+):
+    """Aggregate health signals for the Kobo sync path.
+
+    Surfaces:
+      * ``kepubify`` — binary discoverability + version
+      * ``epubcheck`` — whether the EPUB validator is on PATH (only
+        used by the manual conversion-output spot-check we recommend
+        in lieu of a full CI step today)
+      * ``library`` — total EPUBs, fixed-layout count, cached KEPUB
+        count, and the resulting conversion coverage so the admin can
+        confirm the bulk backfill actually finished
+      * ``auto_convert_enabled`` / ``backfill_done`` — config + state
+        flags driving the import-time auto-conversion + first-run
+        bulk job
+    """
+    import shutil as _shutil
+
+    from sqlalchemy import func, select
+
+    from app.config import get_settings as _gs
+    from app.models.edition import Edition, EditionFile
+    from app.models.system import SystemSettings
+    from app.services.kepub import _find_kepubify, get_kepubify_version, reset_cached_path
+
+    s = _gs()
+    reset_cached_path()
+    kepubify_path = _find_kepubify()
+    kepubify_version = await get_kepubify_version(kepubify_path) if kepubify_path else None
+    epubcheck_path = _shutil.which("epubcheck")
+
+    # Library counters in a single round-trip per metric.
+    total_epubs = (
+        await db.scalar(
+            select(func.count())
+            .select_from(EditionFile)
+            .where(func.lower(EditionFile.format) == "epub")
+        )
+    ) or 0
+    fixed_layout_count = (
+        await db.scalar(
+            select(func.count())
+            .select_from(Edition)
+            .where(func.lower(Edition.format) == "epub")
+            .where(Edition.is_fixed_layout.is_(True))
+        )
+    ) or 0
+    kepub_cached_count = (
+        await db.scalar(
+            select(func.count())
+            .select_from(EditionFile)
+            .where(func.lower(EditionFile.format) == "epub")
+            .where(EditionFile.kepub_path.is_not(None))
+        )
+    ) or 0
+
+    # KEPUB-eligible = total EPUBs minus fixed-layout titles (which we
+    # deliberately serve as raw EPUB3FL).
+    eligible = max(total_epubs - fixed_layout_count, 0)
+    coverage_pct = (kepub_cached_count / eligible * 100) if eligible else 0.0
+
+    ss = await db.scalar(select(SystemSettings).where(SystemSettings.id == 1))
+    backfill_done = bool(ss.kepub_backfill_done) if ss is not None else False
+
+    return {
+        "kepubify": {
+            "available": kepubify_path is not None,
+            "path": kepubify_path,
+            "configured_path": s.KEPUBIFY_PATH,
+            "version": kepubify_version,
+        },
+        "epubcheck": {
+            "available": epubcheck_path is not None,
+            "path": epubcheck_path,
+        },
+        "library": {
+            "total_epubs": total_epubs,
+            "fixed_layout_count": fixed_layout_count,
+            "kepub_cached_count": kepub_cached_count,
+            "kepub_eligible_count": eligible,
+            "coverage_percent": round(coverage_pct, 1),
+        },
+        "auto_convert_enabled": s.KEPUB_AUTO_CONVERT,
+        "backfill_done": backfill_done,
     }
 
 
