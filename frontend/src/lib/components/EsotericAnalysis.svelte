@@ -32,6 +32,8 @@
   import * as api from "$lib/api/client";
   import type { ComputationalAnalysis, ComputationalAnalysisRequest } from "$lib/api/client";
 
+  type ComputationalAnalysisType = ComputationalAnalysisRequest['analysis_type'];
+
   interface Props {
     bookId: string;
   }
@@ -47,9 +49,9 @@
   // Config state
   let keywordsInput = $state("justice, truth, god, gods, fate, piety, wisdom, nature, law, virtue");
   let entitiesInput = $state("");
-  let selectedType = $state<string>("full");
+  let selectedType = $state<ComputationalAnalysisType>("full");
 
-  type AnalysisTypeEntry = { value: string; label: string; icon: typeof Eye; description: string };
+  type AnalysisTypeEntry = { value: ComputationalAnalysisType; label: string; icon: typeof Eye; description: string };
   type AnalysisGroup = { label: string; types: AnalysisTypeEntry[] };
 
   const analysisGroups: AnalysisGroup[] = [
@@ -259,7 +261,7 @@
           <div class="space-y-4 p-4">
             <!-- Loud Silences -->
             {#if analysis.results.loud_silences}
-              {@const ls = analysis.results.loud_silences}
+              {@const ls = analysis.results.loud_silences as any}
               <div>
                 <h4 class="mb-2 flex items-center gap-2 text-sm font-semibold">
                   <EyeOff class="h-4 w-4" /> Loud Silences
@@ -321,7 +323,7 @@
 
             <!-- Contradictions -->
             {#if analysis.results.contradictions}
-              {@const ct = analysis.results.contradictions}
+              {@const ct = analysis.results.contradictions as any}
               <div>
                 <h4 class="mb-2 flex items-center gap-2 text-sm font-semibold">
                   <AlertTriangle class="h-4 w-4" /> Sentiment Dissonances
@@ -348,7 +350,7 @@
 
             <!-- Centers -->
             {#if analysis.results.centers}
-              {@const cn = analysis.results.centers}
+              {@const cn = analysis.results.centers as any}
               <div>
                 <h4 class="mb-2 flex items-center gap-2 text-sm font-semibold">
                   <Crosshair class="h-4 w-4" /> Structural Center
@@ -369,7 +371,7 @@
 
             <!-- Exoteric / Esoteric Ratio -->
             {#if analysis.results.exoteric_esoteric_ratio}
-              {@const eer = analysis.results.exoteric_esoteric_ratio}
+              {@const eer = analysis.results.exoteric_esoteric_ratio as any}
               <div>
                 <h4 class="mb-2 flex items-center gap-2 text-sm font-semibold">
                   <Scale class="h-4 w-4" /> Exoteric / Esoteric Ratio

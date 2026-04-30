@@ -15,13 +15,23 @@
   import type { SeriesNav } from "$lib/api/client";
   import type { EnrichmentProvider, BookRecommendation, EnrichStreamEvent } from "$lib/api/client";
   import { enrichBookStream } from "$lib/api/client";
-  import type { Book, Shelf, Collection, Annotation, ReadSession, User, ReadingList } from "$lib/types/index";
+  import type { Book, Shelf, Collection, Annotation, ReadSession, User, ReadingList, ReadProgress } from "$lib/types/index";
   import type { PageData } from './$types';
   import { sanitizeHtml } from "$lib/utils/sanitizeHtml";
 
+  // UI-only progress shape: keeps the fields the template reads, but
+  // lets us patch status/rating optimistically without inventing
+  // backend-only fields (id, user_id, book_id, device_id) we don't
+  // know yet. The next refresh from the server will replace this with
+  // a fully-populated ReadProgress.
+  type ProgressState =
+    & Partial<ReadProgress>
+    & Pick<ReadProgress, 'current_page' | 'percentage' | 'status' | 'last_opened'>
+    & { total_pages?: number | null; rating?: number | null };
+
   let { data }: { data: PageData } = $props();
   let book = $state<Book | null>(data.book ?? null);
-  let progress = $state(data.progress ?? null);
+  let progress = $state<ProgressState | null>((data.progress as ProgressState | null | undefined) ?? null);
   let currentUser = $state<User | null>(data.user ?? null);
   let isAdmin = $derived(currentUser?.is_admin ?? false);
   let editing = $state(false);

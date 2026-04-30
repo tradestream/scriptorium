@@ -5,6 +5,14 @@
   import { DragDropProvider } from '@dnd-kit-svelte/svelte';
   import { move } from '@dnd-kit/helpers';
   import * as api from '$lib/api/client';
+
+  // ``@dnd-kit/helpers`` and ``@dnd-kit-svelte/svelte`` resolve
+  // ``@dnd-kit/abstract`` at different versions, producing two
+  // nominally-distinct ``Position`` types. Cast through ``never`` once
+  // here so the call sites stay readable.
+  function reorderIds<T extends string | number>(ids: T[], event: unknown): T[] {
+    return move(ids as any, event as never) as T[];
+  }
   import SortableReadingListEntry from '$lib/components/SortableReadingListEntry.svelte';
   import { Button } from '$lib/components/ui/button';
   import { Input } from '$lib/components/ui/input';
@@ -141,7 +149,7 @@
         <DragDropProvider
           onDragOver={(event) => {
             const ids = entries.map((e) => e.id);
-            const reordered = move(ids, event) as number[];
+            const reordered = reorderIds(ids, event);
             const byId = new Map(entries.map((e) => [e.id, e]));
             const next = reordered
               .map((id) => byId.get(id))

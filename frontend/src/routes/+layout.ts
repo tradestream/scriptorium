@@ -1,6 +1,7 @@
 import { redirect } from '@sveltejs/kit';
 import * as api from '$lib/api/client';
 import type { LayoutLoad } from './$types';
+import type { User, Library, Shelf, Collection } from '$lib/types/index';
 
 export const ssr = false;
 
@@ -25,10 +26,10 @@ export const load: LayoutLoad = async ({ url }) => {
     redirect(302, '/');
   }
 
-  let user = null;
-  let libraries = [];
-  let shelves = [];
-  let pinnedCollections = [];
+  let user: User | null = null;
+  let libraries: Library[] = [];
+  let shelves: Shelf[] = [];
+  let pinnedCollections: Collection[] = [];
 
   let absUrl: string | null = null;
 

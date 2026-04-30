@@ -171,10 +171,11 @@
               <!-- Full analysis with sub-analyses -->
               <div class="space-y-2">
                 {#if analysis.results.text_statistics}
+                  {@const textStats = analysis.results.text_statistics as any}
                   <div class="flex gap-4 text-xs text-muted-foreground">
-                    <span>{analysis.results.text_statistics.total_words?.toLocaleString()} words</span>
-                    <span>{analysis.results.text_statistics.total_lines?.toLocaleString()} lines</span>
-                    <span>{analysis.results.text_statistics.total_stanzas} stanzas</span>
+                    <span>{textStats.total_words?.toLocaleString()} words</span>
+                    <span>{textStats.total_lines?.toLocaleString()} lines</span>
+                    <span>{textStats.total_stanzas} stanzas</span>
                     <span>Mode: {analysis.results.mode}</span>
                   </div>
                 {/if}

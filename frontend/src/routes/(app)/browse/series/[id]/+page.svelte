@@ -2,6 +2,15 @@
   import { BookOpen, Check, Layers, Pencil, X, Save } from 'lucide-svelte';
   import { DragDropProvider } from '@dnd-kit-svelte/svelte';
   import { move } from '@dnd-kit/helpers';
+
+  // ``@dnd-kit/helpers`` and ``@dnd-kit-svelte/svelte`` both pull in
+  // ``@dnd-kit/abstract`` but at different versions, leaving us with
+  // two structurally-identical-but-nominally-different ``Position``
+  // types that fail to unify. Cast the event through ``never`` here so
+  // we don't paper this over at every call site.
+  function reorderIds<T extends string | number>(ids: T[], event: unknown): T[] {
+    return move(ids as any, event as never) as T[];
+  }
   import SortableSeriesEntry from '$lib/components/SortableSeriesEntry.svelte';
   import * as api from '$lib/api/client';
   import { invalidateAll } from '$app/navigation';
@@ -153,7 +162,7 @@
           // not ``EditEntry[]`` — driving sort with the _key array and
           // remapping back to entries keeps the typed contract intact.
           const keys = editEntries.map((e) => e._key);
-          const reordered = move(keys, event) as number[];
+          const reordered = reorderIds(keys, event);
           const byKey = new Map(editEntries.map((e) => [e._key, e]));
           editEntries = reordered
             .map((k) => byKey.get(k))
