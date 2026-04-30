@@ -18,8 +18,16 @@ if TYPE_CHECKING:
 # These aliases let existing import sites continue to compile while the
 # individual API files are updated to use Edition/Work directly.
 # Remove these once all callers have been migrated.
-from app.models.edition import Edition as Book  # noqa: F401, E402
-from app.models.work import work_authors as book_authors  # noqa: F401, E402
+from app.models.edition import (  # noqa: F401, E402, I001
+    Edition as Book,
+    EditionContributor as BookContributor,
+    EditionFile as BookFile,
+)
+from app.models.work import (  # noqa: F401, E402, I001
+    work_authors as book_authors,
+    work_series as book_series,
+    work_tags as book_tags,
+)
 
 
 class Author(Base):

@@ -86,6 +86,13 @@ extend-ignore = [
 # the symbols aren't used inside the file itself.
 "app/models/__init__.py" = ["F401"]
 "app/__init__.py" = ["F401"]
+# ``app/models/book.py`` aliases Edition/EditionFile/EditionContributor
+# back to the legacy Book/BookFile/BookContributor names so older
+# callers keep working until they migrate to Edition. ``ruff --fix``
+# will silently strip the unused alias from a compound import even
+# with a line ``# noqa: F401`` — pin the rule off here so a future
+# auto-fix run can't break the runtime imports again.
+"app/models/book.py" = ["F401", "I001"]
 
 [tool.mypy]
 python_version = "3.11"
